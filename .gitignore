@@ -1,10 +1,9 @@
-# Ralph working files (generated during runs)
+# Ralph working files (generated during runs in this repo)
 prd.json
 progress.txt
-.last-branch
 
-# Archive is optional to commit
-# archive/
+# Ralph runtime directory (logs, archive, branch tracking)
+.ralph/
 
 # OS files
 .DS_Store
