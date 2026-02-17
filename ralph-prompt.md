@@ -6,15 +6,16 @@ You are an autonomous coding agent working on a software project.
 
 1. Read the PRD at `prd.json` (in the current working directory)
 2. Read the progress log at `progress.txt` (check Codebase Patterns section first)
-3. Use `jj` (Jujutsu) for version control instead of git. Load the `jj-guide` skill for reference. Check you're on the correct branch from PRD `branchName`. If not, check it out or create from main.
+3. Use `jj` (Jujutsu) for version control instead of git. Load the `jj-guide` skill for reference. Work from a new revision branched from the current revision with `jj new`
 4. Check progress.txt for any `[CONTEXT EXHAUSTED]` entry — if found, **continue that story first** before starting anything new
 5. Otherwise, pick the **highest priority** user story where `passes: false`
 6. Implement that single user story
 7. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 8. Update CLAUDE.md files if you discover reusable patterns (see below)
-9. If checks pass, commit ALL changes with message: `[Story ID] - [Story Title]`
+9. If checks pass, commit ALL changes with a simple descriptive message
 10. Update the PRD to set `passes: true` for the completed story
 11. Append your progress to `progress.txt`
+12. Do not commit `prd.json` or `progress.txt`
 
 ## Progress Report Format
 
@@ -78,15 +79,16 @@ Only update CLAUDE.md if you have **genuinely reusable knowledge** that would he
 - Keep changes focused and minimal
 - Follow existing code patterns
 
-## Browser Testing (If Available)
+## Browser Testing (Required for Frontend Stories)
 
-For any story that changes UI, verify it works in the browser if you have browser testing tools configured (e.g., via MCP):
+For any story that changes UI, you MUST verify it works in the browser:
 
-1. Navigate to the relevant page
-2. Verify the UI changes work as expected
-3. Take a screenshot if helpful for the progress log
+1. Load the `rodney` skill
+2. Navigate to the relevant page
+3. Verify the UI changes work as expected
+4. Take a screenshot if helpful for the progress log
 
-If no browser tools are available, note in your progress report that manual browser verification is needed.
+A frontend story is NOT complete until browser verification passes.
 
 ## Context Exhausted
 
