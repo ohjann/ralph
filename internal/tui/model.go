@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -107,6 +108,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+		// Recompute viewport dimensions so SetContent wraps at the correct width
+		available := m.height - 4 // header(3) + footer(1)
+		if available < 10 {
+			available = 10
+		}
+		topHeight := available * 35 / 100
+		if topHeight < 5 {
+			topHeight = 5
+		}
+		claudeHeight := available - topHeight
+
+		progressWidth := m.width * 60 / 100
+		worktreeWidth := m.width - progressWidth
+
+		m.progressVP.Width = progressWidth - 4 // border(2) + padding(2)
+		m.progressVP.Height = topHeight - 3    // border(2) + title(1)
+		m.worktreeVP.Width = worktreeWidth - 4
+		m.worktreeVP.Height = topHeight - 3
+		m.claudeVP.Width = m.width - 4
+		m.claudeVP.Height = claudeHeight - 3
+
 		return m, nil
 
 	case tea.KeyMsg:
@@ -253,7 +276,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() != nil {
 				return m, tea.Quit
 			}
-			// Claude error — continue to next iteration
+			// Show Claude error in activity panel
+			m.claudeContent += fmt.Sprintf("\n── Claude Error ──\n%s\n", msg.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
 		}
 
 		if msg.CompleteSignal {
@@ -277,6 +304,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
 
 	case judgeDoneMsg:
+		// Show judge result in the activity panel
+		m.claudeContent += judge.FormatResult(m.currentStoryID, msg.Result)
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+
+		// Persist judge result to progress.txt
+		judge.AppendJudgeResult(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
+
 		if msg.Result.Passed {
 			judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
 		} else {
@@ -307,10 +343,16 @@ func (m *Model) handleJudgeCheck() tea.Cmd {
 		// Auto-pass
 		judge.AppendAutoPass(m.cfg.ProgressFile, m.currentStoryID, rejections)
 		judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+		m.claudeContent += fmt.Sprintf("\n── Judge: %s ── AUTO-PASS after %d rejections [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, rejections)
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
 		return nil
 	}
 
 	m.phase = phaseJudgeRun
+	m.claudeContent += "\n── Judge reviewing " + m.currentStoryID + "... ──\n"
+	m.claudeVP.SetContent(m.claudeContent)
+	m.claudeVP.GotoBottom()
 	return runJudgeCmd(m.ctx, m.cfg, m.currentStoryID, m.preRev)
 }
 
@@ -382,6 +424,18 @@ func (m *Model) View() string {
 	lines := strings.Split(output, "\n")
 	if len(lines) > m.height {
 		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clampLines truncates or pads a string to exactly n lines.
+func clampLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	for len(lines) < n {
+		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
 }

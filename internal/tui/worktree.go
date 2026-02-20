@@ -18,20 +18,17 @@ func renderWorktreePanel(vp viewport.Model, content string, active bool, width, 
 		style = stylePanelBorderActive
 	}
 
-	innerWidth := width - 4
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
-	innerHeight := height - 3
-	if innerHeight < 0 {
-		innerHeight = 0
-	}
+	contentW := max(width-4, 0)
+	vpH := max(height-3, 0)
 
-	vp.Width = innerWidth
-	vp.Height = innerHeight
+	vp.Width = contentW
+	vp.Height = vpH
 	vp.SetContent(content)
 
 	body := title + "\n" + vp.View()
 
-	return style.Width(innerWidth).Height(innerHeight + 1).Render(body)
+	// Hard-enforce exact line count to prevent any overflow
+	body = clampLines(body, height-2)
+
+	return style.MaxHeight(height).Render(body)
 }

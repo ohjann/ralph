@@ -50,6 +50,7 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string) erro
 		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 	)
 	cmd.Dir = projectDir
 	cmd.Stdin = strings.NewReader(prompt)
@@ -152,12 +153,26 @@ type streamProcessor struct {
 	currentBlock string // "thinking", "tool_use", "text"
 	currentTool  string
 	inputBuf     strings.Builder // accumulates tool input JSON
+	syncCount    int             // counter for periodic syncing
 }
 
 func (sp *streamProcessor) processLine(line string) {
-	var event map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return
+	}
+
+	// The stream-json format wraps API events in a "stream_event" envelope:
+	//   {"type":"stream_event","event":{"type":"content_block_delta",...}}
+	// Unwrap the inner event if present; also handle bare events for compatibility.
+	event := raw
+	topType, _ := raw["type"].(string)
+	if topType == "stream_event" {
+		inner, ok := raw["event"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		event = inner
 	}
 
 	eventType, _ := event["type"].(string)
@@ -253,8 +268,10 @@ func (sp *streamProcessor) writeLine(line string) {
 
 func (sp *streamProcessor) writeRaw(text string) {
 	fmt.Fprint(sp.activityFile, text)
-	// Sync periodically on newlines for real-time display
-	if strings.Contains(text, "\n") {
+	sp.syncCount++
+	// Sync every 5 writes or on newlines for real-time display
+	if sp.syncCount >= 5 || strings.Contains(text, "\n") {
 		sp.activityFile.Sync()
+		sp.syncCount = 0
 	}
 }

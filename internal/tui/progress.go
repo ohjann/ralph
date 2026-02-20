@@ -18,20 +18,17 @@ func renderProgressPanel(vp viewport.Model, active bool, width, height int) stri
 		style = stylePanelBorderActive
 	}
 
-	// Account for border and padding in sizing
-	innerWidth := width - 4 // 2 for border + 2 for padding
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
-	innerHeight := height - 3 // 2 for border + 1 for title
-	if innerHeight < 0 {
-		innerHeight = 0
-	}
+	// Content area: inside border (2) + padding (2 horizontal, 0 vertical)
+	contentW := max(width-4, 0)
+	vpH := max(height-3, 0) // border (2) + title (1)
 
-	vp.Width = innerWidth
-	vp.Height = innerHeight
+	vp.Width = contentW
+	vp.Height = vpH
 
-	content := title + "\n" + vp.View()
+	body := title + "\n" + vp.View()
 
-	return style.Width(innerWidth).Height(innerHeight + 1).Render(content)
+	// Hard-enforce exact line count to prevent any overflow
+	body = clampLines(body, height-2) // content area inside border
+
+	return style.MaxHeight(height).Render(body)
 }

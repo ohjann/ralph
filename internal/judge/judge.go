@@ -22,9 +22,12 @@ type Verdict struct {
 }
 
 type Result struct {
-	Passed  bool
-	Reason  string
-	Warning string // non-empty if we fell through to PASS due to error
+	Passed         bool
+	Reason         string
+	Warning        string // non-empty if we fell through to PASS due to error
+	CriteriaMet    []string
+	CriteriaFailed []string
+	Suggestion     string
 }
 
 // RunJudge performs the full judge flow for a story.
@@ -81,7 +84,12 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID, preR
 	}
 
 	if verdict.Verdict == "PASS" {
-		return Result{Passed: true, Reason: verdict.Reason}
+		return Result{
+			Passed:      true,
+			Reason:      verdict.Reason,
+			CriteriaMet: verdict.CriteriaMet,
+			Suggestion:  verdict.Suggestion,
+		}
 	}
 
 	if verdict.Verdict == "FAIL" {
@@ -93,8 +101,11 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID, preR
 		_ = prd.Save(prdFile, p)
 
 		return Result{
-			Passed: false,
-			Reason: verdict.Reason,
+			Passed:         false,
+			Reason:         verdict.Reason,
+			CriteriaMet:    verdict.CriteriaMet,
+			CriteriaFailed: verdict.CriteriaFailed,
+			Suggestion:     verdict.Suggestion,
 		}
 	}
 
@@ -135,6 +146,17 @@ func AppendAutoPass(progressFile, storyID string, rejectionCount int) {
 	fmt.Fprintf(f, "\n## [Judge] %s auto-passed after %d rejections [HUMAN REVIEW NEEDED]\n---\n", storyID, rejectionCount)
 }
 
+// AppendJudgeResult writes the judge result to progress.txt for persistence.
+func AppendJudgeResult(progressFile, storyID string, r Result) {
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprint(f, FormatResult(storyID, r))
+	fmt.Fprintln(f, "---")
+}
+
 func getDiff(ctx context.Context, dir, preRev string) string {
 	if preRev != "" {
 		if diff, err := rexec.JJDiff(ctx, dir, preRev); err == nil && diff != "" {
@@ -168,6 +190,47 @@ func parseVerdict(output string) *Verdict {
 		return nil
 	}
 	return &v
+}
+
+// FormatResult returns a human-readable summary of a judge result.
+func FormatResult(storyID string, r Result) string {
+	var sb strings.Builder
+
+	if r.Warning != "" {
+		sb.WriteString(fmt.Sprintf("── Judge: %s ── AUTO-PASS ──\n", storyID))
+		sb.WriteString(fmt.Sprintf("  Warning: %s\n", r.Warning))
+		return sb.String()
+	}
+
+	verdict := "PASS"
+	if !r.Passed {
+		verdict = "FAIL"
+	}
+	sb.WriteString(fmt.Sprintf("── Judge: %s ── %s ──\n", storyID, verdict))
+
+	if r.Reason != "" {
+		sb.WriteString(fmt.Sprintf("  Reason: %s\n", r.Reason))
+	}
+
+	if len(r.CriteriaMet) > 0 {
+		sb.WriteString("  Criteria met:\n")
+		for _, c := range r.CriteriaMet {
+			sb.WriteString(fmt.Sprintf("    + %s\n", c))
+		}
+	}
+
+	if len(r.CriteriaFailed) > 0 {
+		sb.WriteString("  Criteria failed:\n")
+		for _, c := range r.CriteriaFailed {
+			sb.WriteString(fmt.Sprintf("    - %s\n", c))
+		}
+	}
+
+	if r.Suggestion != "" && !r.Passed {
+		sb.WriteString(fmt.Sprintf("  Suggestion: %s\n", r.Suggestion))
+	}
+
+	return sb.String()
 }
 
 func writeFeedback(projectDir, storyID string, v *Verdict) {
