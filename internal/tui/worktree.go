@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newWorktreeViewport(width, height int) viewport.Model {
@@ -11,11 +14,12 @@ func newWorktreeViewport(width, height int) viewport.Model {
 }
 
 func renderWorktreePanel(vp viewport.Model, content string, active bool, width, height int) string {
-	title := stylePanelTitle.Render("Working Tree (jj st)")
+	icon := lipgloss.NewStyle().Foreground(colorSecondary).Render("⌥")
+	title := fmt.Sprintf("%s %s", icon, stylePanelTitle.Render("Working Tree"))
 
-	style := stylePanelBorder
+	style := styleSoftBorder
 	if active {
-		style = stylePanelBorderActive
+		style = styleSoftBorderActive
 	}
 
 	contentW := max(width-4, 0)

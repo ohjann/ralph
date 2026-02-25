@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/viewport"
 )
 
@@ -11,11 +13,12 @@ func newProgressViewport(width, height int) viewport.Model {
 }
 
 func renderProgressPanel(vp viewport.Model, active bool, width, height int) string {
-	title := stylePanelTitle.Render("Progress")
+	icon := styleSuccess.Render("◈")
+	title := fmt.Sprintf("%s %s", icon, stylePanelTitle.Render("Progress"))
 
-	style := stylePanelBorder
+	style := styleSoftBorder
 	if active {
-		style = stylePanelBorderActive
+		style = styleSoftBorderActive
 	}
 
 	// Content area: inside border (2) + padding (2 horizontal, 0 vertical)

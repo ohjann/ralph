@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/judge"
@@ -67,22 +68,28 @@ type Model struct {
 	prevProgressLen int
 	prevClaudeLen   int
 	prevJudgeLen    int
+
+	// Spring-animated progress bar
+	progressSpring harmonica.Spring
+	animatedFill   float64 // current animated fill ratio (0.0–1.0)
+	fillVelocity   float64 // spring velocity
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Model{
-		cfg:        cfg,
-		version:    version,
-		ctx:        ctx,
-		cancel:     cancel,
-		phase:      phaseInit,
-		startTime:  time.Now(),
-		spinner:    newSpinner(),
-		progressVP: newProgressViewport(40, 10),
-		worktreeVP: newWorktreeViewport(30, 10),
-		judgeVP:    newJudgeViewport(30, 10),
-		claudeVP:   newClaudeViewport(80, 20),
+		cfg:            cfg,
+		version:        version,
+		ctx:            ctx,
+		cancel:         cancel,
+		phase:          phaseInit,
+		startTime:      time.Now(),
+		spinner:        newSpinner(),
+		progressVP:     newProgressViewport(40, 10),
+		worktreeVP:     newWorktreeViewport(30, 10),
+		judgeVP:        newJudgeViewport(30, 10),
+		claudeVP:       newClaudeViewport(80, 20),
+		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
 	}
 }
 
@@ -218,6 +225,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fastTickMsg:
 		cmds = append(cmds, fastTickCmd())
 		cmds = append(cmds, pollProgressCmd(m.cfg.ProgressFile))
+
+		// Update spring-animated progress bar
+		target := 0.0
+		if m.totalStories > 0 {
+			target = float64(m.completedStories) / float64(m.totalStories)
+		}
+		m.animatedFill, m.fillVelocity = m.progressSpring.Update(
+			m.animatedFill, m.fillVelocity, target,
+		)
 		if m.phase == phaseClaudeRun || m.phase == phaseJudgeRun {
 			activityPath := runner.ActivityFilePath(m.cfg.LogDir, m.iteration)
 			cmds = append(cmds, pollActivityCmd(activityPath))

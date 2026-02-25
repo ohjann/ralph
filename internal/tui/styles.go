@@ -11,6 +11,7 @@ var (
 	colorDanger       = lipgloss.Color("#F38BA8") // Red
 	colorBorder       = lipgloss.Color("#585B70") // Surface2
 	colorActiveBorder = lipgloss.Color("#CBA6F7") // Mauve
+	colorClaude       = lipgloss.Color("#F9845C") // Claude orange
 
 	// Header
 	styleTitle = lipgloss.NewStyle().
@@ -27,7 +28,7 @@ var (
 	styleJudgeOff = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
-	// Panels
+	// Panels — standard rounded border
 	stylePanelBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorBorder).
@@ -38,15 +39,36 @@ var (
 				BorderForeground(colorActiveBorder).
 				Padding(0, 1)
 
+	// Soft border — lighter dashed verticals for top panels
+	softBorderDef = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "┊",
+		Right:       "┊",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "╰",
+		BottomRight: "╯",
+	}
+
+	styleSoftBorder = lipgloss.NewStyle().
+			Border(softBorderDef).
+			BorderForeground(colorBorder).
+			Padding(0, 1)
+
+	styleSoftBorderActive = lipgloss.NewStyle().
+				Border(softBorderDef).
+				BorderForeground(colorActiveBorder).
+				Padding(0, 1)
+
 	stylePanelTitle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorSecondary)
 
-	// Bottom panel
-	styleLogPanel = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBorder).
-			Padding(0, 1)
+	// Claude sparkle
+	styleClaudeSparkle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorClaude)
 
 	// Footer
 	styleFooter = lipgloss.NewStyle().
