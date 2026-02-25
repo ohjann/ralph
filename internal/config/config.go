@@ -25,7 +25,7 @@ type Config struct {
 
 func Parse(args []string) (*Config, error) {
 	cfg := &Config{
-		MaxIterations:      10,
+		MaxIterations:      0, // 0 = auto (use number of stories in PRD)
 		JudgeMaxRejections: 2,
 	}
 
@@ -183,10 +183,10 @@ Options:
   --help, -h                      Show this help message
 
 Arguments:
-  max_iterations                  Maximum loop iterations (default: 10)
+  max_iterations                  Maximum loop iterations (default: number of stories in PRD)
 
 Examples:
-  ralph                           Run with 10 iterations, prd.json in current dir
+  ralph                           Run with iterations matching story count
   ralph 5                         Run with 5 iterations
   ralph --dir ~/myapp             Run against prd.json in ~/myapp
   ralph --idle                    Launch TUI without executing the loop

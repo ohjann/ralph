@@ -6,8 +6,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/tui"
 )
+
+var Version = "dev"
 
 func main() {
 	cfg, err := config.Parse(os.Args[1:])
@@ -26,7 +29,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	model := tui.NewModel(cfg)
+	// Default max iterations to 1.5x the number of stories (headroom for retries)
+	if cfg.MaxIterations == 0 && !cfg.IdleMode {
+		if p, err := prd.Load(cfg.PRDFile); err == nil {
+			n := p.TotalCount()
+			cfg.MaxIterations = n + n/2
+		}
+	}
+
+	model := tui.NewModel(cfg, Version)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()

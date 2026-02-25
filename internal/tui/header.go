@@ -29,8 +29,9 @@ func renderHeader(m *Model, width int) string {
 		}
 	}
 
-	line1 := fmt.Sprintf("  %s  %s  │  %s",
+	line1 := fmt.Sprintf("  %s %s  %s  │  %s",
 		styleTitle.Render("RALPH"),
+		styleMuted.Render(m.version),
 		iterStr,
 		storyStr,
 	)

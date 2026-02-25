@@ -19,14 +19,16 @@ import (
 const (
 	panelProgress = iota
 	panelWorktree
+	panelJudge
 	panelClaude
 	panelCount
 )
 
 type Model struct {
-	cfg    *config.Config
-	ctx    context.Context
-	cancel context.CancelFunc
+	cfg     *config.Config
+	version string
+	ctx     context.Context
+	cancel  context.CancelFunc
 
 	// State
 	phase            phase
@@ -45,6 +47,7 @@ type Model struct {
 	progressContent string
 	worktreeContent string
 	claudeContent   string
+	judgeContent    string
 
 	// Active panel for scrolling
 	activePanel int
@@ -52,6 +55,7 @@ type Model struct {
 	// Components
 	progressVP  viewport.Model
 	worktreeVP  viewport.Model
+	judgeVP     viewport.Model
 	claudeVP    viewport.Model
 	spinner     spinner.Model
 
@@ -62,12 +66,14 @@ type Model struct {
 	// Track if we should auto-scroll
 	prevProgressLen int
 	prevClaudeLen   int
+	prevJudgeLen    int
 }
 
-func NewModel(cfg *config.Config) *Model {
+func NewModel(cfg *config.Config, version string) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Model{
 		cfg:        cfg,
+		version:    version,
 		ctx:        ctx,
 		cancel:     cancel,
 		phase:      phaseInit,
@@ -75,6 +81,7 @@ func NewModel(cfg *config.Config) *Model {
 		spinner:    newSpinner(),
 		progressVP: newProgressViewport(40, 10),
 		worktreeVP: newWorktreeViewport(30, 10),
+		judgeVP:    newJudgeViewport(30, 10),
 		claudeVP:   newClaudeViewport(80, 20),
 	}
 }
@@ -120,13 +127,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		claudeHeight := available - topHeight
 
-		progressWidth := m.width * 60 / 100
-		worktreeWidth := m.width - progressWidth
+		progressWidth := m.width * 40 / 100
+		worktreeWidth := m.width * 30 / 100
+		judgeWidth := m.width - progressWidth - worktreeWidth
 
 		m.progressVP.Width = progressWidth - 4 // border(2) + padding(2)
 		m.progressVP.Height = topHeight - 3    // border(2) + title(1)
 		m.worktreeVP.Width = worktreeWidth - 4
 		m.worktreeVP.Height = topHeight - 3
+		m.judgeVP.Width = judgeWidth - 4
+		m.judgeVP.Height = topHeight - 3
 		m.claudeVP.Width = m.width - 4
 		m.claudeVP.Height = claudeHeight - 3
 
@@ -153,6 +163,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressVP.LineDown(1)
 			case panelWorktree:
 				m.worktreeVP.LineDown(1)
+			case panelJudge:
+				m.judgeVP.LineDown(1)
 			case panelClaude:
 				m.claudeVP.LineDown(1)
 			}
@@ -163,6 +175,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressVP.LineUp(1)
 			case panelWorktree:
 				m.worktreeVP.LineUp(1)
+			case panelJudge:
+				m.judgeVP.LineUp(1)
 			case panelClaude:
 				m.claudeVP.LineUp(1)
 			}
@@ -173,6 +187,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressVP.ViewDown()
 			case panelWorktree:
 				m.worktreeVP.ViewDown()
+			case panelJudge:
+				m.judgeVP.ViewDown()
 			case panelClaude:
 				m.claudeVP.ViewDown()
 			}
@@ -183,6 +199,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressVP.ViewUp()
 			case panelWorktree:
 				m.worktreeVP.ViewUp()
+			case panelJudge:
+				m.judgeVP.ViewUp()
 			case panelClaude:
 				m.claudeVP.ViewUp()
 			}
@@ -304,11 +322,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
 
 	case judgeDoneMsg:
-		// Show judge result in the activity panel
-		m.claudeContent += judge.FormatResult(m.currentStoryID, msg.Result)
-		m.claudeVP.SetContent(m.claudeContent)
-		m.claudeVP.GotoBottom()
-		m.prevClaudeLen = len(m.claudeContent)
+		// Show judge result in the judge panel
+		m.judgeContent += judge.FormatResult(m.currentStoryID, msg.Result)
+		newJudgeLen := len(m.judgeContent)
+		m.judgeVP.SetContent(m.judgeContent)
+		if newJudgeLen > m.prevJudgeLen {
+			m.judgeVP.GotoBottom()
+		}
+		m.prevJudgeLen = newJudgeLen
 
 		// Persist judge result to progress.txt
 		judge.AppendJudgeResult(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
@@ -343,16 +364,18 @@ func (m *Model) handleJudgeCheck() tea.Cmd {
 		// Auto-pass
 		judge.AppendAutoPass(m.cfg.ProgressFile, m.currentStoryID, rejections)
 		judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
-		m.claudeContent += fmt.Sprintf("\n── Judge: %s ── AUTO-PASS after %d rejections [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, rejections)
-		m.claudeVP.SetContent(m.claudeContent)
-		m.claudeVP.GotoBottom()
+		m.judgeContent += fmt.Sprintf("\n── Judge: %s ── AUTO-PASS after %d rejections [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, rejections)
+		m.judgeVP.SetContent(m.judgeContent)
+		m.judgeVP.GotoBottom()
+		m.prevJudgeLen = len(m.judgeContent)
 		return nil
 	}
 
 	m.phase = phaseJudgeRun
-	m.claudeContent += "\n── Judge reviewing " + m.currentStoryID + "... ──\n"
-	m.claudeVP.SetContent(m.claudeContent)
-	m.claudeVP.GotoBottom()
+	m.judgeContent += "\n── Judge reviewing " + m.currentStoryID + "... ──\n"
+	m.judgeVP.SetContent(m.judgeContent)
+	m.judgeVP.GotoBottom()
+	m.prevJudgeLen = len(m.judgeContent)
 	return runJudgeCmd(m.ctx, m.cfg, m.currentStoryID, m.preRev)
 }
 
@@ -377,8 +400,9 @@ func (m *Model) View() string {
 	}
 	claudeHeight := available - topHeight
 
-	progressWidth := m.width * 60 / 100
-	worktreeWidth := m.width - progressWidth
+	progressWidth := m.width * 40 / 100
+	worktreeWidth := m.width * 30 / 100
+	judgeWidth := m.width - progressWidth - worktreeWidth
 
 	// Render sections
 	header := renderHeader(m, m.width)
@@ -398,7 +422,15 @@ func (m *Model) View() string {
 		topHeight,
 	)
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, progressPanel, worktreePanel)
+	judgePanel := renderJudgePanel(
+		m.judgeVP,
+		m.judgeContent,
+		m.activePanel == panelJudge,
+		judgeWidth,
+		topHeight,
+	)
+
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, progressPanel, worktreePanel, judgePanel)
 
 	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun
 	claudePanel := renderClaudePanel(
