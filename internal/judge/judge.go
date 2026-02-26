@@ -31,7 +31,7 @@ type Result struct {
 }
 
 // RunJudge performs the full judge flow for a story.
-func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID, preRev string) Result {
+func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID string, preRevs map[string]string) Result {
 	p, err := prd.Load(prdFile)
 	if err != nil {
 		return Result{Passed: true, Warning: fmt.Sprintf("could not load prd.json: %v", err)}
@@ -52,8 +52,8 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID, preR
 		criteriaStr = "No acceptance criteria specified"
 	}
 
-	// Get diff
-	diff := getDiff(ctx, projectDir, preRev)
+	// Get diffs from all repos
+	diff := getDiffs(ctx, preRevs)
 	if diff == "" {
 		return Result{Passed: true, Warning: "no diff available"}
 	}
@@ -157,16 +157,29 @@ func AppendJudgeResult(progressFile, storyID string, r Result) {
 	fmt.Fprintln(f, "---")
 }
 
-func getDiff(ctx context.Context, dir, preRev string) string {
-	if preRev != "" {
-		if diff, err := rexec.JJDiff(ctx, dir, preRev); err == nil && diff != "" {
-			return diff
+func getDiffs(ctx context.Context, preRevs map[string]string) string {
+	var parts []string
+	for dir, rev := range preRevs {
+		var diff string
+		if rev != "" {
+			if d, err := rexec.JJDiff(ctx, dir, rev); err == nil && d != "" {
+				diff = d
+			}
+		}
+		if diff == "" {
+			if d, err := rexec.GitDiff(ctx, dir); err == nil && d != "" {
+				diff = d
+			}
+		}
+		if diff != "" {
+			if len(preRevs) > 1 {
+				parts = append(parts, fmt.Sprintf("## Repo: %s\n%s", dir, diff))
+			} else {
+				parts = append(parts, diff)
+			}
 		}
 	}
-	if diff, err := rexec.GitDiff(ctx, dir); err == nil && diff != "" {
-		return diff
-	}
-	return ""
+	return strings.Join(parts, "\n\n")
 }
 
 func parseVerdict(output string) *Verdict {

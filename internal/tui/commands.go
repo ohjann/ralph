@@ -114,14 +114,20 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 	}
 }
 
-func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID, preRev string) tea.Cmd {
+func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID string, preRevs map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		result := judge.RunJudge(ctx, cfg.RalphHome, cfg.ProjectDir, cfg.PRDFile, storyID, preRev)
+		result := judge.RunJudge(ctx, cfg.RalphHome, cfg.ProjectDir, cfg.PRDFile, storyID, preRevs)
 		return judgeDoneMsg{Result: result}
 	}
 }
 
-func captureRevCmd(ctx context.Context, dir string) string {
-	rev, _ := rexec.JJCurrentRev(ctx, dir)
-	return rev
+func captureRevsCmd(ctx context.Context, dirs []string) map[string]string {
+	revs := make(map[string]string)
+	for _, dir := range dirs {
+		rev, err := rexec.JJCurrentRev(ctx, dir)
+		if err == nil && rev != "" {
+			revs[dir] = rev
+		}
+	}
+	return revs
 }

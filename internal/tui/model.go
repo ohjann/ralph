@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ type Model struct {
 	iteration        int
 	currentStoryID   string
 	currentStoryTitle string
-	preRev           string
+	preRevs          map[string]string
 	completedStories int
 	totalStories     int
 	allComplete      bool
@@ -299,7 +300,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Capture revision for judge diff baseline
 		if m.cfg.JudgeEnabled {
-			m.preRev = captureRevCmd(m.ctx, m.cfg.ProjectDir)
+			dirs := []string{m.cfg.ProjectDir}
+			if p, err := prd.Load(m.cfg.PRDFile); err == nil {
+				for _, r := range p.Repos {
+					if filepath.IsAbs(r) {
+						dirs = append(dirs, r)
+					} else {
+						dirs = append(dirs, filepath.Join(m.cfg.ProjectDir, r))
+					}
+				}
+			}
+			m.preRevs = captureRevsCmd(m.ctx, dirs)
 		}
 
 		cmds = append(cmds, runClaudeCmd(m.ctx, m.cfg, msg.StoryID, m.iteration))
@@ -392,7 +403,7 @@ func (m *Model) handleJudgeCheck() tea.Cmd {
 	m.judgeVP.SetContent(m.judgeContent)
 	m.judgeVP.GotoBottom()
 	m.prevJudgeLen = len(m.judgeContent)
-	return runJudgeCmd(m.ctx, m.cfg, m.currentStoryID, m.preRev)
+	return runJudgeCmd(m.ctx, m.cfg, m.currentStoryID, m.preRevs)
 }
 
 func (m *Model) View() string {

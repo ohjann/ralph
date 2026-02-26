@@ -21,6 +21,7 @@ type PRD struct {
 	Project     string      `json:"project"`
 	BranchName  string      `json:"branchName"`
 	Description string      `json:"description"`
+	Repos       []string    `json:"repos,omitempty"`
 	UserStories []UserStory `json:"userStories"`
 }
 

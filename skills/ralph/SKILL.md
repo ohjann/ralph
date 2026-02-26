@@ -23,9 +23,10 @@ Take a PRD (markdown file or text) and convert it to `prd.json` in your ralph di
   "project": "[Project Name]",
   "branchName": "ralph/[feature-name-kebab-case]",
   "description": "[Feature description from PRD title/intro]",
+  "repos": ["../other-repo"],
   "userStories": [
     {
-      "id": "US-001",
+      "id": "AB-001",
       "title": "[Story title]",
       "description": "As a [user], I want [feature] so that [benefit]",
       "acceptanceCriteria": [
@@ -119,11 +120,12 @@ Frontend stories are NOT complete until visually verified. Ralph will use the ro
 ## Conversion Rules
 
 1. **Each user story becomes one JSON entry**
-2. **IDs**: Sequential (US-001, US-002, etc.)
+2. **IDs**: Sequential (AB-001, AB-002, etc.)
 3. **Priority**: Based on dependency order, then document order
 4. **All stories**: `passes: false` and empty `notes`
 5. **branchName**: Derive from feature name, kebab-case, prefixed with `ralph/`
 6. **Always add**: "Typecheck passes" to every story's acceptance criteria
+7. **Cross-repo work**: If the PRD mentions changes in multiple repositories, add a `repos` array with relative paths to the additional repos (the primary project dir is always included implicitly)
 
 ---
 
@@ -135,12 +137,12 @@ If a PRD has big features, split them:
 > "Add user notification system"
 
 **Split into:**
-1. US-001: Add notifications table to database
-2. US-002: Create notification service for sending notifications
-3. US-003: Add notification bell icon to header
-4. US-004: Create notification dropdown panel
-5. US-005: Add mark-as-read functionality
-6. US-006: Add notification preferences page
+1. AB-001: Add notifications table to database
+2. AB-002: Create notification service for sending notifications
+3. AB-003: Add notification bell icon to header
+4. AB-004: Create notification dropdown panel
+5. AB-005: Add mark-as-read functionality
+6. AB-006: Add notification preferences page
 
 Each is one focused change that can be completed and verified independently.
 
@@ -169,7 +171,7 @@ Add ability to mark tasks with different statuses.
   "description": "Task Status Feature - Track task progress with status indicators",
   "userStories": [
     {
-      "id": "US-001",
+      "id": "AB-001",
       "title": "Add status field to tasks table",
       "description": "As a developer, I need to store task status in the database.",
       "acceptanceCriteria": [
@@ -182,7 +184,7 @@ Add ability to mark tasks with different statuses.
       "notes": ""
     },
     {
-      "id": "US-002",
+      "id": "AB-002",
       "title": "Display status badge on task cards",
       "description": "As a user, I want to see task status at a glance.",
       "acceptanceCriteria": [
@@ -196,7 +198,7 @@ Add ability to mark tasks with different statuses.
       "notes": ""
     },
     {
-      "id": "US-003",
+      "id": "AB-003",
       "title": "Add status toggle to task list rows",
       "description": "As a user, I want to change task status directly from the list.",
       "acceptanceCriteria": [
@@ -211,7 +213,7 @@ Add ability to mark tasks with different statuses.
       "notes": ""
     },
     {
-      "id": "US-004",
+      "id": "AB-004",
       "title": "Filter tasks by status",
       "description": "As a user, I want to filter the list to see only certain statuses.",
       "acceptanceCriteria": [

@@ -14,6 +14,8 @@ You are an independent code reviewer. Your job is to evaluate whether a code cha
 
 ## Code Diff
 
+The diff below may contain changes from multiple repositories. When multiple repos are involved, each section is prefixed with a `## Repo:` header indicating the repository path.
+
 ```diff
 {{DIFF}}
 ```
