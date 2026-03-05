@@ -18,6 +18,9 @@ func renderHeader(m *Model, width int) string {
 		if m.currentStoryTitle != "" {
 			storyStr += ": " + m.currentStoryTitle
 		}
+		if strings.HasPrefix(m.currentStoryID, "FIX-") {
+			storyStr += " " + styleDanger.Render("[AUTO-FIX]")
+		}
 	}
 	if m.phase == phaseIdle {
 		storyStr = "Idle mode"

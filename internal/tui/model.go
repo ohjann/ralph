@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/events"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/runner"
@@ -37,7 +39,7 @@ type Model struct {
 	iteration        int
 	currentStoryID   string
 	currentStoryTitle string
-	preRevs          map[string]string
+	preRevs          []judge.DirRev
 	completedStories int
 	totalStories     int
 	allComplete      bool
@@ -239,6 +241,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activityPath := runner.ActivityFilePath(m.cfg.LogDir, m.iteration)
 			cmds = append(cmds, pollActivityCmd(activityPath))
 		}
+		if m.phase == phaseClaudeRun {
+			cmds = append(cmds, pollStuckCmd(m.cfg.ProjectDir, m.iteration))
+		}
 
 	// --- Slow tick: poll worktree + prd ---
 	case tickMsg:
@@ -329,6 +334,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.CompleteSignal {
+			_ = events.Append(m.cfg.ProjectDir, events.Event{
+				Type:    events.EventStoryComplete,
+				StoryID: m.currentStoryID,
+				Summary: "All stories complete (COMPLETE signal received)",
+			})
 			m.phase = phaseDone
 			m.allComplete = true
 			m.exitCode = 0
@@ -348,6 +358,67 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseIterating
 		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
 
+	case stuckDetectedMsg:
+		// Cancel Claude — it's stuck
+		m.cancel()
+		// Recreate context for future operations
+		m.ctx, m.cancel = context.WithCancel(context.Background())
+
+		_ = events.Append(m.cfg.ProjectDir, events.Event{
+			Type:    events.EventStuck,
+			StoryID: msg.Info.StoryID,
+			Summary: fmt.Sprintf("Stuck: %s (%dx)", msg.Info.Pattern, msg.Info.Count),
+			Errors:  msg.Info.Commands,
+			Meta:    map[string]string{"iteration": fmt.Sprintf("%d", msg.Info.Iteration)},
+		})
+
+		// Append [STUCK] to progress
+		if f, err := os.OpenFile(m.cfg.ProgressFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
+			fmt.Fprintf(f, "\n## [%s] %s [STUCK]\n- Pattern: %s (%dx)\n- Commands: %s\n---\n",
+				time.Now().Format("2006-01-02 15:04"), msg.Info.StoryID, msg.Info.Pattern, msg.Info.Count,
+				strings.Join(msg.Info.Commands, ", "))
+			f.Close()
+		}
+
+		m.claudeContent += fmt.Sprintf("\n── STUCK DETECTED: %s (%dx) ──\n", msg.Info.Pattern, msg.Info.Count)
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+
+		// If this is a FIX- story, mark as failed and move on
+		if strings.HasPrefix(m.currentStoryID, "FIX-") {
+			if p, err := prd.Load(m.cfg.PRDFile); err == nil {
+				p.SetPasses(m.currentStoryID, false)
+				_ = prd.Save(m.cfg.PRDFile, p)
+			}
+			m.phase = phaseIterating
+			cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+		} else {
+			// Generate fix story if one doesn't already exist
+			fixID := "FIX-" + m.currentStoryID
+			if p, err := prd.Load(m.cfg.PRDFile); err == nil && !p.HasStory(fixID) {
+				cmds = append(cmds, generateFixStoryCmd(m.ctx, m.cfg, msg.Info))
+			} else {
+				m.phase = phaseIterating
+				cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+			}
+		}
+
+	case fixStoryGeneratedMsg:
+		if msg.Err != nil {
+			m.claudeContent += fmt.Sprintf("\n── Fix story generation failed: %s ──\n", msg.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		} else if msg.StoryID != "" {
+			m.claudeContent += fmt.Sprintf("\n── Fix story generated: %s ──\n", msg.StoryID)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		}
+		m.phase = phaseIterating
+		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+
 	case judgeDoneMsg:
 		// Show judge result in the judge panel
 		m.judgeContent += judge.FormatResult(m.currentStoryID, msg.Result)
@@ -363,8 +434,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.Result.Passed {
 			judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			_ = events.Append(m.cfg.ProjectDir, events.Event{
+				Type:    events.EventJudgeResult,
+				StoryID: m.currentStoryID,
+				Summary: "Judge passed: " + msg.Result.Reason,
+				Meta:    map[string]string{"verdict": "pass"},
+			})
 		} else {
 			judge.IncrementRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			_ = events.Append(m.cfg.ProjectDir, events.Event{
+				Type:    events.EventJudgeResult,
+				StoryID: m.currentStoryID,
+				Summary: "Judge failed: " + msg.Result.Reason,
+				Errors:  msg.Result.CriteriaFailed,
+				Meta:    map[string]string{"verdict": "fail"},
+			})
 		}
 		// Either way, move to next iteration
 		m.phase = phaseIterating
@@ -375,6 +459,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleJudgeCheck() tea.Cmd {
+	// Skip judge if no pre-revisions were captured
+	if len(m.preRevs) == 0 {
+		return nil
+	}
+
 	// Reload PRD to check if story passes
 	p, err := prd.Load(m.cfg.PRDFile)
 	if err != nil {

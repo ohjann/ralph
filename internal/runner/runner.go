@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/eoghanhynes/ralph/internal/events"
 )
 
-// BuildPrompt reads ralph-prompt.md and appends the iteration constraint.
-func BuildPrompt(ralphHome, storyID string) (string, error) {
+// BuildPrompt reads ralph-prompt.md, appends iteration constraint, and injects judge feedback if present.
+func BuildPrompt(ralphHome, projectDir, storyID string) (string, error) {
 	base, err := os.ReadFile(filepath.Join(ralphHome, "ralph-prompt.md"))
 	if err != nil {
 		return "", fmt.Errorf("reading ralph-prompt.md: %w", err)
@@ -25,13 +27,32 @@ func BuildPrompt(ralphHome, storyID string) (string, error) {
 You MUST only work on story **%s**. Do NOT implement any other story. After completing %s, stop immediately.
 If progress.txt contains a [CONTEXT EXHAUSTED] entry for %s, continue from where it left off.`, storyID, storyID, storyID)
 
+	// Inject judge feedback if present
+	feedbackPath := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-feedback-%s.md", storyID))
+	if feedback, err := os.ReadFile(feedbackPath); err == nil && len(feedback) > 0 {
+		prompt += "\n\n---\n## JUDGE FEEDBACK (MUST ADDRESS)\n" + string(feedback)
+	}
+
+	// Inject context from event log
+	if evts, err := events.Load(projectDir); err == nil && len(evts) > 0 {
+		if section := events.FormatContextSection(evts, storyID); section != "" {
+			prompt += "\n\n---\n" + section
+		}
+	}
+
 	return prompt, nil
+}
+
+// RunClaudeOpts contains optional parameters for RunClaude.
+type RunClaudeOpts struct {
+	Iteration int
+	StoryID   string
 }
 
 // RunClaude executes claude with streaming JSON output, parsing events into
 // a human-readable activity file for the TUI to display. Raw JSON is written
 // to the log file for debugging.
-func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string) error {
+func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) error {
 	logFile, err := os.Create(logFilePath)
 	if err != nil {
 		return fmt.Errorf("creating log file: %w", err)
@@ -65,7 +86,12 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string) erro
 		return fmt.Errorf("starting claude: %w", err)
 	}
 
-	proc := &streamProcessor{activityFile: activityFile}
+	proc := &streamProcessor{activityFile: activityFile, projectDir: projectDir}
+	if len(opts) > 0 {
+		proc.iteration = opts[0].Iteration
+		proc.storyID = opts[0].StoryID
+		proc.isFixStory = strings.HasPrefix(opts[0].StoryID, "FIX-")
+	}
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // up to 10MB lines
@@ -146,6 +172,45 @@ func activityPathFromLog(logPath string) string {
 	return strings.TrimSuffix(logPath, ".log") + "-activity.log"
 }
 
+// ToolRecord tracks a tool invocation for stuck detection.
+type ToolRecord struct {
+	Tool     string
+	Command  string
+	FilePath string
+}
+
+// StuckInfo describes a detected stuck pattern.
+type StuckInfo struct {
+	Pattern   string   `json:"pattern"`
+	Commands  []string `json:"repeated_commands"`
+	Count     int      `json:"count"`
+	Iteration int      `json:"iteration"`
+	StoryID   string   `json:"story_id"`
+}
+
+// ReadStuckInfo reads a stuck info file for a given iteration.
+func ReadStuckInfo(projectDir string, iteration int) *StuckInfo {
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("stuck-%d.json", iteration))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var info StuckInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil
+	}
+	return &info
+}
+
+func writeStuckInfo(projectDir string, info StuckInfo) {
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("stuck-%d.json", info.Iteration))
+	_ = os.WriteFile(path, data, 0o644)
+}
+
 // streamProcessor parses streaming JSON events from Claude and writes
 // human-readable activity to a file.
 type streamProcessor struct {
@@ -154,6 +219,13 @@ type streamProcessor struct {
 	currentTool  string
 	inputBuf     strings.Builder // accumulates tool input JSON
 	syncCount    int             // counter for periodic syncing
+
+	// Stuck detection
+	recentTools []ToolRecord // ring buffer, cap 10
+	projectDir  string
+	iteration   int
+	storyID     string
+	isFixStory  bool
 }
 
 func (sp *streamProcessor) processLine(line string) {
@@ -221,10 +293,99 @@ func (sp *streamProcessor) processLine(line string) {
 
 	case "content_block_stop":
 		if sp.currentBlock == "tool_use" {
-			sp.writeToolSummary(sp.inputBuf.String())
+			inputJSON := sp.inputBuf.String()
+			sp.writeToolSummary(inputJSON)
+			sp.recordTool(inputJSON)
 			sp.inputBuf.Reset()
 		}
 		sp.currentBlock = ""
+	}
+}
+
+func (sp *streamProcessor) recordTool(inputJSON string) {
+	if inputJSON == "" || sp.projectDir == "" {
+		return
+	}
+	var input map[string]interface{}
+	if err := json.Unmarshal([]byte(inputJSON), &input); err != nil {
+		return
+	}
+
+	rec := ToolRecord{Tool: sp.currentTool}
+	if cmd, ok := input["command"].(string); ok {
+		rec.Command = cmd
+	}
+	if fp, ok := input["file_path"].(string); ok {
+		rec.FilePath = fp
+	}
+
+	// Ring buffer of 10
+	if len(sp.recentTools) >= 10 {
+		sp.recentTools = sp.recentTools[1:]
+	}
+	sp.recentTools = append(sp.recentTools, rec)
+
+	sp.checkStuck()
+}
+
+func (sp *streamProcessor) checkStuck() {
+	if len(sp.recentTools) < 3 {
+		return
+	}
+
+	// Thresholds depend on story type
+	bashThreshold := 3
+	editThreshold := 4
+	if sp.isFixStory {
+		bashThreshold = 5
+		editThreshold = 6
+	}
+
+	// Check for repeated bash commands
+	cmdCounts := make(map[string]int)
+	for _, r := range sp.recentTools {
+		if r.Tool == "Bash" && r.Command != "" {
+			// Normalize: trim to first 100 chars for comparison
+			key := r.Command
+			if len(key) > 100 {
+				key = key[:100]
+			}
+			cmdCounts[key]++
+		}
+	}
+	for cmd, count := range cmdCounts {
+		if count >= bashThreshold {
+			info := StuckInfo{
+				Pattern:   "repeated_bash_command",
+				Commands:  []string{cmd},
+				Count:     count,
+				Iteration: sp.iteration,
+				StoryID:   sp.storyID,
+			}
+			writeStuckInfo(sp.projectDir, info)
+			return
+		}
+	}
+
+	// Check for repeated file edits
+	fileCounts := make(map[string]int)
+	for _, r := range sp.recentTools {
+		if (r.Tool == "Edit" || r.Tool == "Write") && r.FilePath != "" {
+			fileCounts[r.FilePath]++
+		}
+	}
+	for fp, count := range fileCounts {
+		if count >= editThreshold {
+			info := StuckInfo{
+				Pattern:   "repeated_file_edit",
+				Commands:  []string{fp},
+				Count:     count,
+				Iteration: sp.iteration,
+				StoryID:   sp.storyID,
+			}
+			writeStuckInfo(sp.projectDir, info)
+			return
+		}
 	}
 }
 

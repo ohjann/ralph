@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/eoghanhynes/ralph/internal/judge"
+import (
+	"github.com/eoghanhynes/ralph/internal/judge"
+	"github.com/eoghanhynes/ralph/internal/runner"
+)
 
 // Phase transitions
 type phase int
@@ -42,6 +45,13 @@ type claudeDoneMsg struct {
 }
 type judgeDoneMsg struct {
 	Result judge.Result
+}
+type stuckDetectedMsg struct {
+	Info runner.StuckInfo
+}
+type fixStoryGeneratedMsg struct {
+	StoryID string
+	Err     error
 }
 
 // Terminal size

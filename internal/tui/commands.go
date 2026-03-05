@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eoghanhynes/ralph/internal/archive"
+	"github.com/eoghanhynes/ralph/internal/autofix"
 	"github.com/eoghanhynes/ralph/internal/config"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
 	"github.com/eoghanhynes/ralph/internal/judge"
@@ -100,13 +102,16 @@ func findNextStoryCmd(prdPath string) tea.Cmd {
 
 func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, iteration int) tea.Cmd {
 	return func() tea.Msg {
-		prompt, err := runner.BuildPrompt(cfg.RalphHome, storyID)
+		prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID)
 		if err != nil {
 			return claudeDoneMsg{Err: err}
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
-		err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
+			Iteration: iteration,
+			StoryID:   storyID,
+		})
 
 		completeSignal := runner.LogContainsComplete(logPath)
 
@@ -114,20 +119,55 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 	}
 }
 
-func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID string, preRevs map[string]string) tea.Cmd {
+func generateFixStoryCmd(ctx context.Context, cfg *config.Config, info runner.StuckInfo) tea.Cmd {
+	return func() tea.Msg {
+		p, err := prd.Load(cfg.PRDFile)
+		if err != nil {
+			return fixStoryGeneratedMsg{Err: err}
+		}
+		original := p.FindStory(info.StoryID)
+		if original == nil {
+			return fixStoryGeneratedMsg{Err: fmt.Errorf("story %s not found", info.StoryID)}
+		}
+
+		activityPath := runner.ActivityFilePath(cfg.LogDir, info.Iteration)
+		activityTail := runner.ReadLogTail(activityPath, 50)
+
+		fix, err := autofix.GenerateFixStory(ctx, info, *original, activityTail)
+		if err != nil {
+			return fixStoryGeneratedMsg{Err: err}
+		}
+
+		if err := autofix.InsertFixStory(cfg.PRDFile, fix, info.StoryID); err != nil {
+			return fixStoryGeneratedMsg{Err: err}
+		}
+
+		return fixStoryGeneratedMsg{StoryID: fix.ID}
+	}
+}
+
+func pollStuckCmd(projectDir string, iteration int) tea.Cmd {
+	return func() tea.Msg {
+		info := runner.ReadStuckInfo(projectDir, iteration)
+		if info != nil {
+			return stuckDetectedMsg{Info: *info}
+		}
+		return nil
+	}
+}
+
+func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID string, preRevs []judge.DirRev) tea.Cmd {
 	return func() tea.Msg {
 		result := judge.RunJudge(ctx, cfg.RalphHome, cfg.ProjectDir, cfg.PRDFile, storyID, preRevs)
 		return judgeDoneMsg{Result: result}
 	}
 }
 
-func captureRevsCmd(ctx context.Context, dirs []string) map[string]string {
-	revs := make(map[string]string)
+func captureRevsCmd(ctx context.Context, dirs []string) []judge.DirRev {
+	var revs []judge.DirRev
 	for _, dir := range dirs {
-		rev, err := rexec.JJCurrentRev(ctx, dir)
-		if err == nil && rev != "" {
-			revs[dir] = rev
-		}
+		rev, _ := rexec.JJCurrentRev(ctx, dir)
+		revs = append(revs, judge.DirRev{Dir: dir, Rev: rev})
 	}
 	return revs
 }

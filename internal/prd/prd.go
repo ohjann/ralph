@@ -108,3 +108,46 @@ func (p *PRD) SetPasses(id string, passes bool) {
 		}
 	}
 }
+
+// HasStory returns true if a story with the given ID exists.
+func (p *PRD) HasStory(id string) bool {
+	return p.FindStory(id) != nil
+}
+
+// InsertBefore inserts a new story before the story with the given ID,
+// shifting priorities of all stories at or above the target priority.
+func (p *PRD) InsertBefore(beforeID string, newStory UserStory) {
+	targetPriority := -1
+	for _, s := range p.UserStories {
+		if s.ID == beforeID {
+			targetPriority = s.Priority
+			break
+		}
+	}
+	if targetPriority < 0 {
+		// Fallback: insert at lowest priority
+		maxP := 0
+		for _, s := range p.UserStories {
+			if s.Priority > maxP {
+				maxP = s.Priority
+			}
+		}
+		newStory.Priority = maxP + 1
+		p.UserStories = append(p.UserStories, newStory)
+		return
+	}
+
+	// Shift priorities
+	for i := range p.UserStories {
+		if p.UserStories[i].Priority >= targetPriority {
+			p.UserStories[i].Priority++
+		}
+	}
+	newStory.Priority = targetPriority
+	p.UserStories = append(p.UserStories, newStory)
+
+	// Sort by priority
+	sort.Slice(p.UserStories, func(i, j int) bool {
+		return p.UserStories[i].Priority < p.UserStories[j].Priority
+	})
+}

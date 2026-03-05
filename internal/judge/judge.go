@@ -13,6 +13,12 @@ import (
 	"github.com/eoghanhynes/ralph/internal/prd"
 )
 
+// DirRev associates a directory with its pre-run revision for deterministic diff ordering.
+type DirRev struct {
+	Dir string
+	Rev string
+}
+
 type Verdict struct {
 	Verdict        string   `json:"verdict"`
 	CriteriaMet    []string `json:"criteria_met"`
@@ -31,7 +37,7 @@ type Result struct {
 }
 
 // RunJudge performs the full judge flow for a story.
-func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID string, preRevs map[string]string) Result {
+func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID string, preRevs []DirRev) Result {
 	p, err := prd.Load(prdFile)
 	if err != nil {
 		return Result{Passed: true, Warning: fmt.Sprintf("could not load prd.json: %v", err)}
@@ -157,23 +163,23 @@ func AppendJudgeResult(progressFile, storyID string, r Result) {
 	fmt.Fprintln(f, "---")
 }
 
-func getDiffs(ctx context.Context, preRevs map[string]string) string {
+func getDiffs(ctx context.Context, preRevs []DirRev) string {
 	var parts []string
-	for dir, rev := range preRevs {
+	for _, dr := range preRevs {
 		var diff string
-		if rev != "" {
-			if d, err := rexec.JJDiff(ctx, dir, rev); err == nil && d != "" {
+		if dr.Rev != "" {
+			if d, err := rexec.JJDiff(ctx, dr.Dir, dr.Rev); err == nil && d != "" {
 				diff = d
 			}
 		}
 		if diff == "" {
-			if d, err := rexec.GitDiff(ctx, dir); err == nil && d != "" {
+			if d, err := rexec.GitDiff(ctx, dr.Dir); err == nil && d != "" {
 				diff = d
 			}
 		}
 		if diff != "" {
 			if len(preRevs) > 1 {
-				parts = append(parts, fmt.Sprintf("## Repo: %s\n%s", dir, diff))
+				parts = append(parts, fmt.Sprintf("## Repo: %s\n%s", dr.Dir, diff))
 			} else {
 				parts = append(parts, diff)
 			}

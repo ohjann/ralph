@@ -16,7 +16,7 @@ You are an autonomous coding agent working on a software project.
 10. If checks pass, commit ALL changes with a simple descriptive message
 11. Update the PRD to set `passes: true` for the completed story
 12. Append your progress to `progress.txt`
-13. Do not commit `prd.json` or `progress.txt`
+13. Note: `prd.json`, `progress.txt`, and `.ralph/` are gitignored and will not be committed
 
 ## Progress Report Format
 
@@ -79,6 +79,13 @@ Only update CLAUDE.md if you have **genuinely reusable knowledge** that would he
 - Do NOT commit broken code
 - Keep changes focused and minimal
 - Follow existing code patterns
+
+## Verification Rules
+If a quality check (typecheck, lint, test, browser verification) fails:
+1. Analyze the error and attempt a fix (up to 3 attempts per check type)
+2. If the SAME check fails 3 times, STOP — note the issue in progress.txt and move on
+3. Do NOT debug the verification tooling itself (e.g., don't fix rodney, don't fix tsc config)
+4. Focus on implementation; commit what you have and let the judge/human review handle the rest
 
 ## Browser Testing (Required for Frontend Stories)
 

@@ -103,4 +103,8 @@ var (
 
 	styleMuted = lipgloss.NewStyle().
 			Foreground(colorMuted)
+
+	styleDanger = lipgloss.NewStyle().
+			Foreground(colorDanger).
+			Bold(true)
 )
