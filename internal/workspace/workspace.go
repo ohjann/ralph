@@ -40,13 +40,24 @@ func Destroy(ctx context.Context, projectDir, wsName, wsDir string) error {
 	return os.RemoveAll(wsDir)
 }
 
-// MergeBack rebases the workspace's committed change onto main's current @.
+// MergeBack rebases the workspace's committed change onto main's current @-
+// (the parent of the working copy), then advances @ on top so subsequent
+// merges form a linear chain without empty intermediate commits.
 func MergeBack(ctx context.Context, mainDir, changeID string) error {
-	cmd := exec.CommandContext(ctx, "jj", "rebase", "-s", changeID, "-d", "@")
+	cmd := exec.CommandContext(ctx, "jj", "rebase", "-s", changeID, "-d", "@-")
 	cmd.Dir = mainDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("jj rebase: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Advance @ to sit on top of the rebased change so the next merge
+	// builds a linear history.
+	cmd = exec.CommandContext(ctx, "jj", "new", changeID)
+	cmd.Dir = mainDir
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("jj new after rebase: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
