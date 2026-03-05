@@ -1,0 +1,170 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// contextMode determines what the context panel shows.
+type contextMode int
+
+const (
+	contextProgress contextMode = iota // default: progress.txt
+	contextWorktree                    // jj status
+	contextJudge                       // judge results
+	contextQuality                     // quality review assessment
+)
+
+func newContextViewport(width, height int) viewport.Model {
+	vp := viewport.New(width, height)
+	vp.SetContent("")
+	return vp
+}
+
+type contextPanelData struct {
+	Mode            contextMode
+	ProgressContent string
+	WorktreeContent string
+	JudgeContent    string
+	QualityContent  string
+	Phase           phase
+}
+
+func renderContextPanel(vp viewport.Model, data contextPanelData, active bool, width, height int) string {
+	style := styleSoftBorder
+	if active {
+		style = styleSoftBorderActive
+	}
+
+	contentW := max(width-4, 0)
+	vpH := max(height-4, 0) // border(2) + title(1) + tabs(1)
+
+	vp.Width = contentW
+	vp.Height = vpH
+
+	// Build tab bar
+	tabs := renderContextTabs(data)
+
+	// Build content based on mode
+	var content string
+	switch data.Mode {
+	case contextProgress:
+		content = data.ProgressContent
+		if content == "" {
+			content = styleMuted.Render("  Waiting for progress updates...")
+		}
+	case contextJudge:
+		content = data.JudgeContent
+		if content == "" {
+			content = styleMuted.Render("  No judge results yet")
+		}
+	case contextQuality:
+		content = data.QualityContent
+		if content == "" {
+			content = styleMuted.Render("  No quality results yet")
+		}
+	case contextWorktree:
+		if data.WorktreeContent != "" {
+			content = renderWorktreeCompact(data.WorktreeContent)
+		} else {
+			content = styleMuted.Render("  No changes")
+		}
+	}
+
+	vp.SetContent(content)
+
+	body := tabs + "\n" + vp.View()
+	body = clampLines(body, height-2)
+
+	return style.MaxHeight(height).Render(body)
+}
+
+// renderContextTabs shows the tab bar with the active tab highlighted.
+func renderContextTabs(data contextPanelData) string {
+	type tab struct {
+		mode  contextMode
+		icon  string
+		label string
+		show  bool
+	}
+
+	tabs := []tab{
+		{contextProgress, "◈", "Progress", true},
+		{contextWorktree, "⌥", "Tree", true},
+		{contextJudge, "⚖", "Judge", true},
+		{contextQuality, "◇", "Quality", true},
+	}
+
+	var parts []string
+	for _, t := range tabs {
+		if !t.show {
+			continue
+		}
+		label := fmt.Sprintf(" %s %s ", t.icon, t.label)
+		if t.mode == data.Mode {
+			parts = append(parts, styleTagActive.Render(label))
+		} else {
+			parts = append(parts, styleTagInactive.Render(label))
+		}
+	}
+
+	return strings.Join(parts, "")
+}
+
+func hasJudgeContent(data contextPanelData) bool {
+	return data.JudgeContent != "" || data.Phase == phaseJudgeRun
+}
+
+func hasQualityContent(data contextPanelData) bool {
+	return data.QualityContent != "" || data.Phase == phaseQualityReview || data.Phase == phaseQualityFix || data.Phase == phaseQualityPrompt
+}
+
+// renderWorktreeCompact formats jj status output more compactly.
+func renderWorktreeCompact(content string) string {
+	lines := strings.Split(content, "\n")
+	var sb strings.Builder
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// Color-code based on status
+		switch {
+		case strings.HasPrefix(trimmed, "A ") || strings.HasPrefix(trimmed, "Added"):
+			sb.WriteString(styleSuccess.Render("  + " + trimmed[2:]))
+		case strings.HasPrefix(trimmed, "M ") || strings.HasPrefix(trimmed, "Modified"):
+			sb.WriteString(lipgloss.NewStyle().Foreground(colorPeach).Render("  ~ " + trimmed[2:]))
+		case strings.HasPrefix(trimmed, "D ") || strings.HasPrefix(trimmed, "Removed"):
+			sb.WriteString(styleDanger.Render("  - " + trimmed[2:]))
+		default:
+			sb.WriteString("  " + trimmed)
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// autoSelectContextMode picks the best tab based on the current phase.
+func autoSelectContextMode(p phase, judgeContent, qualityContent string) contextMode {
+	switch p {
+	case phaseJudgeRun:
+		return contextJudge
+	case phaseQualityReview, phaseQualityFix, phaseQualityPrompt:
+		return contextQuality
+	default:
+		// If we have quality content and just finished, stay on quality
+		if qualityContent != "" {
+			return contextQuality
+		}
+		// If we have judge content, show it
+		if judgeContent != "" {
+			return contextJudge
+		}
+		return contextProgress
+	}
+}

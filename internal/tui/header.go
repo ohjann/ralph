@@ -9,68 +9,12 @@ import (
 )
 
 func renderHeader(m *Model, width int) string {
-	// Line 1: ❖ RALPH  Iter X/Y  |  AB-XXX: Title
-	iterStr := fmt.Sprintf("Iter %d/%d", m.iteration, m.cfg.MaxIterations)
-
-	storyStr := "Waiting..."
-	if m.phase == phaseParallel && m.coord != nil {
-		active := m.coord.ActiveStoryIDs()
-		if len(active) > 0 {
-			storyStr = strings.Join(active, ", ")
-		} else {
-			storyStr = "Scheduling..."
-		}
-	} else if m.phase == phasePlanning {
-		storyStr = "Generating prd.json from plan..."
-	} else if m.phase == phaseReview {
-		storyStr = "Review prd.json — press Enter to execute"
-	} else if m.phase == phaseQualityReview {
-		storyStr = fmt.Sprintf("Quality review (iteration %d)...", m.qualityIteration)
-	} else if m.phase == phaseQualityFix {
-		storyStr = fmt.Sprintf("Fixing quality issues (iteration %d)...", m.qualityIteration)
-	} else if m.phase == phaseQualityPrompt {
-		storyStr = "Issues remain — press Enter to continue, q to finish"
-	} else if m.phase == phaseDagAnalysis {
-		storyStr = "Analyzing dependencies..."
-	} else if m.currentStoryID != "" {
-		storyStr = m.currentStoryID
-		if m.currentStoryTitle != "" {
-			storyStr += ": " + m.currentStoryTitle
-		}
-		if strings.HasPrefix(m.currentStoryID, "FIX-") {
-			storyStr += " " + styleDanger.Render("[AUTO-FIX]")
-		}
-	}
-	if m.phase == phaseIdle {
-		storyStr = "Idle mode"
-	} else if m.phase == phaseDone {
-		if m.allComplete {
-			storyStr = "All stories complete!"
-		} else {
-			storyStr = "Max iterations reached"
-		}
-	}
-
-	titleIcon := styleTitle.Render("❖")
-	line1 := fmt.Sprintf("  %s %s %s  %s  │  %s",
-		titleIcon,
+	// Line 1: ❖ RALPH v0.1  ┃  ⚡ Claude running  ┃  AB-XXX: Title
+	titleBlock := fmt.Sprintf("  %s %s %s",
+		styleClaudeSparkle.Render("❖"),
 		styleTitle.Render("RALPH"),
 		styleMuted.Render(m.version),
-		iterStr,
-		storyStr,
 	)
-
-	// Line 2: Stories: ██░░ N/M  |  Elapsed: Xm Ys  |  Judge: ON/OFF  |  Phase
-	bar := renderProgressBar(m.animatedFill, 10)
-	storiesStr := fmt.Sprintf("Stories: %s %d/%d", bar, m.completedStories, m.totalStories)
-
-	elapsed := time.Since(m.startTime).Truncate(time.Second)
-	elapsedStr := fmt.Sprintf("Elapsed: %s", formatDuration(elapsed))
-
-	judgeStr := styleJudgeOff.Render("Judge: OFF")
-	if m.cfg.JudgeEnabled {
-		judgeStr = styleJudgeOn.Render("Judge: ON")
-	}
 
 	phaseStr := renderPhase(m.phase)
 	if m.phase == phaseParallel && m.coord != nil {
@@ -78,11 +22,93 @@ func renderHeader(m *Model, width int) string {
 		phaseStr = stylePhaseActive.Render(fmt.Sprintf("⚡ %d/%d workers", activeCount, m.cfg.Workers))
 	}
 
-	line2 := fmt.Sprintf("  %s  │  %s  │  %s  │  %s", storiesStr, elapsedStr, judgeStr, phaseStr)
+	storyStr := renderCurrentTask(m)
 
-	// Decorative separator: ┄┄┄┄┄┄┄┄ ✦ ┄┄┄┄┄┄┄┄
+	line1 := fmt.Sprintf("%s  %s  %s  │  %s",
+		titleBlock,
+		styleMuted.Render("┃"),
+		phaseStr,
+		storyStr,
+	)
+
+	// Line 2: ██████░░░░ 3/5  │  ⏱ 2m 34s  │  Judge: ON  │  Workers: 3
+	bar := renderProgressBar(m.animatedFill, 16)
+	storiesLabel := fmt.Sprintf("%d/%d", m.completedStories, m.totalStories)
+	progressBlock := fmt.Sprintf("  %s %s", bar, styleMuted.Render(storiesLabel))
+
+	elapsed := time.Since(m.startTime).Truncate(time.Second)
+	elapsedBlock := fmt.Sprintf("⏱ %s", formatDuration(elapsed))
+
+	var badges []string
+	if m.cfg.JudgeEnabled {
+		badges = append(badges, styleJudgeOn.Render("⚖ Judge"))
+	}
+	if m.cfg.QualityReview {
+		badges = append(badges, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("◇ Quality"))
+	}
+	if m.cfg.Workers > 1 {
+		badges = append(badges, lipgloss.NewStyle().Foreground(colorSky).Bold(true).Render(
+			fmt.Sprintf("⫘ %d Workers", m.cfg.Workers)))
+	}
+
+	badgeStr := ""
+	if len(badges) > 0 {
+		badgeStr = "  │  " + strings.Join(badges, "  ")
+	}
+
+	line2 := fmt.Sprintf("%s  │  %s%s", progressBlock, elapsedBlock, badgeStr)
+
+	// Decorative separator
 	sep := renderDecorativeSeparator(width)
 	return lipgloss.JoinVertical(lipgloss.Left, line1, line2, sep)
+}
+
+func renderCurrentTask(m *Model) string {
+	switch m.phase {
+	case phaseIdle:
+		return styleMuted.Render("Idle mode")
+	case phasePlanning:
+		return lipgloss.NewStyle().Foreground(colorPeach).Render("✦ Generating prd.json from plan...")
+	case phaseReview:
+		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("◇ Review prd.json — press Enter to execute")
+	case phaseDagAnalysis:
+		return lipgloss.NewStyle().Foreground(colorSky).Render("◌ Analyzing story dependencies...")
+	case phaseQualityReview:
+		return lipgloss.NewStyle().Foreground(colorTeal).Render(
+			fmt.Sprintf("⚖ Quality review (round %d)...", m.qualityIteration))
+	case phaseQualityFix:
+		return lipgloss.NewStyle().Foreground(colorTeal).Render(
+			fmt.Sprintf("⚡ Fixing quality issues (round %d)...", m.qualityIteration))
+	case phaseQualityPrompt:
+		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(
+			"◇ Issues remain — Enter to continue, q to finish")
+	case phaseDone:
+		if m.allComplete {
+			return styleSuccess.Render("✓ All stories complete!")
+		}
+		return styleDanger.Render("✗ Max iterations reached")
+	case phaseParallel:
+		if m.coord != nil {
+			active := m.coord.ActiveStoryIDs()
+			if len(active) > 0 {
+				return strings.Join(active, ", ")
+			}
+			return styleMuted.Render("Scheduling...")
+		}
+		return styleMuted.Render("Starting workers...")
+	default:
+		if m.currentStoryID != "" {
+			s := styleStoryID.Render(m.currentStoryID)
+			if m.currentStoryTitle != "" {
+				s += " " + styleStoryTitle.Render(m.currentStoryTitle)
+			}
+			if strings.HasPrefix(m.currentStoryID, "FIX-") {
+				s += " " + styleDanger.Render("[AUTO-FIX]")
+			}
+			return s
+		}
+		return styleMuted.Render("Waiting...")
+	}
 }
 
 func renderProgressBar(fillRatio float64, barWidth int) string {
@@ -94,20 +120,61 @@ func renderProgressBar(fillRatio float64, barWidth int) string {
 		filled = barWidth
 	}
 	empty := barWidth - filled
-	return styleProgressFilled.Render(strings.Repeat("█", filled)) +
-		styleProgressEmpty.Render(strings.Repeat("░", empty))
+
+	// Use gradient blocks for a fancier look
+	filledStr := ""
+	for i := 0; i < filled; i++ {
+		filledStr += "█"
+	}
+	emptyStr := strings.Repeat("░", empty)
+
+	return styleProgressFilled.Render(filledStr) +
+		styleProgressEmpty.Render(emptyStr)
 }
 
 func renderDecorativeSeparator(width int) string {
 	accent := styleClaudeSparkle.Render("✦")
-	// " ✦ " takes 3 visible characters in the center
+	// ─── ✦ ──── with gradient-like feel
 	sideWidth := (width - 3) / 2
 	if sideWidth < 0 {
 		sideWidth = 0
 	}
-	left := strings.Repeat("┄", sideWidth)
-	right := strings.Repeat("┄", width-3-sideWidth)
-	return styleHeaderLine.Render(left) + " " + accent + " " + styleHeaderLine.Render(right)
+
+	// Mix heavy and light dashes for texture
+	left := renderGradientLine(sideWidth, true)
+	right := renderGradientLine(width-3-sideWidth, false)
+
+	return left + " " + accent + " " + right
+}
+
+// renderGradientLine creates a decorative line with varying dash styles.
+func renderGradientLine(width int, fadeRight bool) string {
+	if width <= 0 {
+		return ""
+	}
+
+	heavy := lipgloss.NewStyle().Foreground(colorClaude)
+	medium := lipgloss.NewStyle().Foreground(colorBorder)
+	light := lipgloss.NewStyle().Foreground(colorSurface1)
+
+	var sb strings.Builder
+	for i := 0; i < width; i++ {
+		var dist int
+		if fadeRight {
+			dist = width - 1 - i
+		} else {
+			dist = i
+		}
+		switch {
+		case dist < 2:
+			sb.WriteString(heavy.Render("━"))
+		case dist < 5:
+			sb.WriteString(medium.Render("─"))
+		default:
+			sb.WriteString(light.Render("┄"))
+		}
+	}
+	return sb.String()
 }
 
 func renderPhase(p phase) string {
@@ -144,8 +211,12 @@ func renderPhase(p phase) string {
 }
 
 func formatDuration(d time.Duration) string {
-	m := int(d.Minutes())
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
 	s := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %02dm %02ds", h, m, s)
+	}
 	if m > 0 {
 		return fmt.Sprintf("%dm %02ds", m, s)
 	}

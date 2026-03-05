@@ -12,6 +12,16 @@ var (
 	colorBorder       = lipgloss.Color("#585B70") // Surface2
 	colorActiveBorder = lipgloss.Color("#CBA6F7") // Mauve
 	colorClaude       = lipgloss.Color("#F9845C") // Claude orange
+	colorPeach        = lipgloss.Color("#FAB387") // Peach
+	colorTeal         = lipgloss.Color("#94E2D5") // Teal
+	colorLavender     = lipgloss.Color("#B4BEFE") // Lavender
+	colorFlamingo     = lipgloss.Color("#F2CDCD") // Flamingo
+	colorSky          = lipgloss.Color("#89DCEB") // Sky
+	colorSurface0     = lipgloss.Color("#313244") // Surface0
+	colorSurface1     = lipgloss.Color("#45475A") // Surface1
+	colorText         = lipgloss.Color("#CDD6F4") // Text
+	colorSubtext0     = lipgloss.Color("#A6ADC8") // Subtext0
+	colorSubtext1     = lipgloss.Color("#BAC2DE") // Subtext1
 
 	// Header
 	styleTitle = lipgloss.NewStyle().
@@ -19,7 +29,7 @@ var (
 			Foreground(colorPrimary)
 
 	styleHeaderLine = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#BAC2DE")) // Subtext1
+			Foreground(colorSubtext1)
 
 	styleJudgeOn = lipgloss.NewStyle().
 			Foreground(colorSuccess).
@@ -107,4 +117,45 @@ var (
 	styleDanger = lipgloss.NewStyle().
 			Foreground(colorDanger).
 			Bold(true)
+
+	// Story status styles
+	styleStoryPassed = lipgloss.NewStyle().
+				Foreground(colorSuccess)
+
+	styleStoryRunning = lipgloss.NewStyle().
+				Foreground(colorClaude).
+				Bold(true)
+
+	styleStoryPending = lipgloss.NewStyle().
+				Foreground(colorMuted)
+
+	styleStoryFailed = lipgloss.NewStyle().
+				Foreground(colorDanger)
+
+	styleStoryID = lipgloss.NewStyle().
+			Foreground(colorLavender).
+			Bold(true)
+
+	styleStoryTitle = lipgloss.NewStyle().
+				Foreground(colorSubtext1)
+
+	styleWorkerBadge = lipgloss.NewStyle().
+				Foreground(colorSky).
+				Bold(true)
+
+	// Context panel section headers
+	styleSectionHeader = lipgloss.NewStyle().
+				Foreground(colorPeach).
+				Bold(true)
+
+	// Tag badges
+	styleTagActive = lipgloss.NewStyle().
+			Foreground(colorSurface0).
+			Background(colorClaude).
+			Bold(true).
+			Padding(0, 1)
+
+	styleTagInactive = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Padding(0, 1)
 )

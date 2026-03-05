@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,9 +26,8 @@ import (
 )
 
 const (
-	panelProgress = iota
-	panelWorktree
-	panelJudge
+	panelStories = iota
+	panelContext
 	panelClaude
 	panelCount
 )
@@ -56,25 +56,31 @@ type Model struct {
 	worktreeContent string
 	claudeContent   string
 	judgeContent    string
+	qualityContent  string
+
+	// Story data for the stories panel
+	storyDisplayInfos []StoryDisplayInfo
+	animFrame         int // animation frame for spinners
+
+	// Context panel mode
+	ctxMode contextMode
 
 	// Active panel for scrolling
 	activePanel int
 
 	// Components
-	progressVP  viewport.Model
-	worktreeVP  viewport.Model
-	judgeVP     viewport.Model
-	claudeVP    viewport.Model
-	spinner     spinner.Model
+	storiesVP  viewport.Model
+	contextVP  viewport.Model
+	claudeVP   viewport.Model
+	spinner    spinner.Model
 
 	// Terminal size
 	width  int
 	height int
 
 	// Track if we should auto-scroll
-	prevProgressLen int
-	prevClaudeLen   int
-	prevJudgeLen    int
+	prevContextLen int
+	prevClaudeLen  int
 
 	// Spring-animated progress bar
 	progressSpring harmonica.Spring
@@ -101,9 +107,8 @@ func NewModel(cfg *config.Config, version string) *Model {
 		phase:          phaseInit,
 		startTime:      time.Now(),
 		spinner:        newSpinner(),
-		progressVP:     newProgressViewport(40, 10),
-		worktreeVP:     newWorktreeViewport(30, 10),
-		judgeVP:        newJudgeViewport(30, 10),
+		storiesVP:      newStoriesViewport(35, 10),
+		contextVP:      newContextViewport(60, 10),
 		claudeVP:       newClaudeViewport(80, 20),
 		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
 	}
@@ -159,16 +164,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		claudeHeight := available - topHeight
 
-		progressWidth := m.width * 40 / 100
-		worktreeWidth := m.width * 30 / 100
-		judgeWidth := m.width - progressWidth - worktreeWidth
+		storiesWidth := m.width * 35 / 100
+		contextWidth := m.width - storiesWidth
 
-		m.progressVP.Width = progressWidth - 4 // border(2) + padding(2)
-		m.progressVP.Height = topHeight - 3    // border(2) + title(1)
-		m.worktreeVP.Width = worktreeWidth - 4
-		m.worktreeVP.Height = topHeight - 3
-		m.judgeVP.Width = judgeWidth - 4
-		m.judgeVP.Height = topHeight - 3
+		m.storiesVP.Width = storiesWidth - 4
+		m.storiesVP.Height = topHeight - 3
+		m.contextVP.Width = contextWidth - 4
+		m.contextVP.Height = topHeight - 4 // extra line for tab bar
 		m.claudeVP.Width = m.width - 4
 		m.claudeVP.Height = claudeHeight - 3
 
@@ -206,50 +208,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case msg.String() == "j" || msg.String() == "down":
 			switch m.activePanel {
-			case panelProgress:
-				m.progressVP.LineDown(1)
-			case panelWorktree:
-				m.worktreeVP.LineDown(1)
-			case panelJudge:
-				m.judgeVP.LineDown(1)
+			case panelStories:
+				m.storiesVP.LineDown(1)
+			case panelContext:
+				m.contextVP.LineDown(1)
 			case panelClaude:
 				m.claudeVP.LineDown(1)
 			}
 			return m, nil
 		case msg.String() == "k" || msg.String() == "up":
 			switch m.activePanel {
-			case panelProgress:
-				m.progressVP.LineUp(1)
-			case panelWorktree:
-				m.worktreeVP.LineUp(1)
-			case panelJudge:
-				m.judgeVP.LineUp(1)
+			case panelStories:
+				m.storiesVP.LineUp(1)
+			case panelContext:
+				m.contextVP.LineUp(1)
 			case panelClaude:
 				m.claudeVP.LineUp(1)
 			}
 			return m, nil
 		case msg.String() == "pgdown":
 			switch m.activePanel {
-			case panelProgress:
-				m.progressVP.ViewDown()
-			case panelWorktree:
-				m.worktreeVP.ViewDown()
-			case panelJudge:
-				m.judgeVP.ViewDown()
+			case panelStories:
+				m.storiesVP.ViewDown()
+			case panelContext:
+				m.contextVP.ViewDown()
 			case panelClaude:
 				m.claudeVP.ViewDown()
 			}
 			return m, nil
 		case msg.String() == "pgup":
 			switch m.activePanel {
-			case panelProgress:
-				m.progressVP.ViewUp()
-			case panelWorktree:
-				m.worktreeVP.ViewUp()
-			case panelJudge:
-				m.judgeVP.ViewUp()
+			case panelStories:
+				m.storiesVP.ViewUp()
+			case panelContext:
+				m.contextVP.ViewUp()
 			case panelClaude:
 				m.claudeVP.ViewUp()
+			}
+			return m, nil
+		case msg.String() == "[" || msg.String() == "]":
+			// Cycle context panel tabs
+			if msg.String() == "]" {
+				m.ctxMode = (m.ctxMode + 1) % 4
+			} else {
+				m.ctxMode = (m.ctxMode + 3) % 4 // -1 with wrap
 			}
 			return m, nil
 		case msg.String() == "enter":
@@ -288,6 +290,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fastTickMsg:
 		cmds = append(cmds, fastTickCmd())
 		cmds = append(cmds, pollProgressCmd(m.cfg.ProgressFile))
+
+		// Advance animation frame
+		m.animFrame++
+
+		// Update story display infos from PRD
+		if p, err := prd.Load(m.cfg.PRDFile); err == nil {
+			var coordIface interface {
+				Workers() map[worker.WorkerID]*worker.Worker
+			}
+			if m.coord != nil {
+				coordIface = m.coord
+			}
+			m.storyDisplayInfos = BuildStoryDisplayInfos(p.UserStories, m.currentStoryID, coordIface, m.phase)
+		}
+
+		// Auto-select context mode based on phase
+		autoMode := autoSelectContextMode(m.phase, m.judgeContent, m.qualityContent)
+		if autoMode != m.ctxMode {
+			// Only auto-switch if user hasn't manually changed (check if content appeared)
+			switch m.phase {
+			case phaseJudgeRun, phaseQualityReview, phaseQualityFix, phaseQualityPrompt:
+				m.ctxMode = autoMode
+			}
+		}
 
 		// Update spring-animated progress bar
 		target := 0.0
@@ -329,13 +355,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// --- Data updates ---
 	case progressContentMsg:
 		m.progressContent = msg.Content
-		newLen := len(msg.Content)
-		m.progressVP.SetContent(msg.Content)
-		// Auto-scroll if new content
-		if newLen > m.prevProgressLen {
-			m.progressVP.GotoBottom()
-		}
-		m.prevProgressLen = newLen
 
 	case worktreeMsg:
 		m.worktreeContent = msg.Content
@@ -631,14 +650,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case judgeDoneMsg:
-		// Show judge result in the judge panel
+		// Show judge result in the context panel
 		m.judgeContent += judge.FormatResult(m.currentStoryID, msg.Result)
-		newJudgeLen := len(m.judgeContent)
-		m.judgeVP.SetContent(m.judgeContent)
-		if newJudgeLen > m.prevJudgeLen {
-			m.judgeVP.GotoBottom()
-		}
-		m.prevJudgeLen = newJudgeLen
+		m.ctxMode = contextJudge
 
 		// Persist judge result to progress.txt
 		judge.AppendJudgeResult(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
@@ -681,13 +695,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastAssessment = &msg.Assessment
 		summary := quality.FormatSummary(msg.Assessment)
 		m.claudeContent += "\n" + summary
-		m.judgeContent += "\n" + summary
+		m.qualityContent += "\n" + summary
 		m.claudeVP.SetContent(m.claudeContent)
 		m.claudeVP.GotoBottom()
 		m.prevClaudeLen = len(m.claudeContent)
-		m.judgeVP.SetContent(m.judgeContent)
-		m.judgeVP.GotoBottom()
-		m.prevJudgeLen = len(m.judgeContent)
 
 		if msg.Assessment.TotalFindings() == 0 {
 			m.claudeContent += "\n── Quality review: all clean! ──\n"
@@ -780,17 +791,13 @@ func (m *Model) handleJudgeCheck() tea.Cmd {
 		judge.AppendAutoPass(m.cfg.ProgressFile, m.currentStoryID, rejections)
 		judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
 		m.judgeContent += fmt.Sprintf("\n── Judge: %s ── AUTO-PASS after %d rejections [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, rejections)
-		m.judgeVP.SetContent(m.judgeContent)
-		m.judgeVP.GotoBottom()
-		m.prevJudgeLen = len(m.judgeContent)
+		m.ctxMode = contextJudge
 		return nil
 	}
 
 	m.phase = phaseJudgeRun
 	m.judgeContent += "\n── Judge reviewing " + m.currentStoryID + "... ──\n"
-	m.judgeVP.SetContent(m.judgeContent)
-	m.judgeVP.GotoBottom()
-	m.prevJudgeLen = len(m.judgeContent)
+	m.ctxMode = contextJudge
 	return runJudgeCmd(m.ctx, m.cfg, m.currentStoryID, m.preRevs)
 }
 
@@ -800,7 +807,6 @@ func (m *Model) View() string {
 	}
 
 	// Layout: header(3) + top panels + claude activity + footer(1)
-	// Reserve exact line counts for fixed elements
 	headerHeight := 3
 	footerHeight := 1
 	available := m.height - headerHeight - footerHeight
@@ -815,54 +821,65 @@ func (m *Model) View() string {
 	}
 	claudeHeight := available - topHeight
 
-	progressWidth := m.width * 40 / 100
-	worktreeWidth := m.width * 30 / 100
-	judgeWidth := m.width - progressWidth - worktreeWidth
+	storiesWidth := m.width * 35 / 100
+	contextWidth := m.width - storiesWidth
 
-	// Render sections
+	// Render header
 	header := renderHeader(m, m.width)
 
-	progressPanel := renderProgressPanel(
-		m.progressVP,
-		m.activePanel == panelProgress,
-		progressWidth,
+	// Stories panel
+	storiesPanel := renderStoriesPanel(
+		m.storiesVP,
+		m.storyDisplayInfos,
+		m.activePanel == panelStories,
+		storiesWidth,
+		topHeight,
+		m.animFrame,
+	)
+
+	// Context panel
+	ctxData := contextPanelData{
+		Mode:            m.ctxMode,
+		ProgressContent: m.progressContent,
+		WorktreeContent: m.worktreeContent,
+		JudgeContent:    m.judgeContent,
+		QualityContent:  m.qualityContent,
+		Phase:           m.phase,
+	}
+	ctxPanel := renderContextPanel(
+		m.contextVP,
+		ctxData,
+		m.activePanel == panelContext,
+		contextWidth,
 		topHeight,
 	)
 
-	worktreePanel := renderWorktreePanel(
-		m.worktreeVP,
-		m.worktreeContent,
-		m.activePanel == panelWorktree,
-		worktreeWidth,
-		topHeight,
-	)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, storiesPanel, ctxPanel)
 
-	judgePanel := renderJudgePanel(
-		m.judgeVP,
-		m.judgeContent,
-		m.activePanel == panelJudge,
-		judgeWidth,
-		topHeight,
-	)
-
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, progressPanel, worktreePanel, judgePanel)
-
+	// Claude panel
 	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun || m.phase == phaseParallel || m.phase == phaseDagAnalysis || m.phase == phasePlanning || m.phase == phaseQualityReview || m.phase == phaseQualityFix
 	var workerTabStr string
 	if m.phase == phaseParallel && m.coord != nil {
 		workers := m.coord.Workers()
+		// Sort worker IDs for stable display
+		var sortedIDs []worker.WorkerID
+		for id := range workers {
+			sortedIDs = append(sortedIDs, id)
+		}
+		sort.Slice(sortedIDs, func(i, j int) bool { return sortedIDs[i] < sortedIDs[j] })
 		var tabParts []string
-		for id, w := range workers {
+		for _, id := range sortedIDs {
+			w := workers[id]
 			if w.State == worker.WorkerIdle {
 				continue
 			}
 			marker := ""
 			if id == m.activeWorkerView {
-				marker = ">"
+				marker = "▸"
 			}
 			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s[%s]", marker, id, w.StoryID, w.State))
 		}
-		workerTabStr = strings.Join(tabParts, " | ")
+		workerTabStr = strings.Join(tabParts, " │ ")
 	}
 	claudePanel := renderClaudePanel(
 		m.claudeVP,
@@ -908,31 +925,30 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 	if confirmQuit {
 		return "  " + styleQuitConfirm.Render("Press q again to quit, any other key to cancel")
 	}
-	help := styleKey.Render("q") + styleFooter.Render(": quit  ") +
-		styleKey.Render("tab") + styleFooter.Render(": switch panel  ") +
+	baseHelp := styleKey.Render("q") + styleFooter.Render(": quit  ") +
+		styleKey.Render("tab") + styleFooter.Render(": panel  ") +
+		styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
 		styleKey.Render("j/k") + styleFooter.Render(": scroll")
 	if parallel {
-		help += "  " + styleKey.Render("1-9") + styleFooter.Render(": switch worker")
+		baseHelp += "  " + styleKey.Render("1-9") + styleFooter.Render(": worker")
 	}
 	if qualityPrompt {
-		qpHelp := styleKey.Render("enter") + styleFooter.Render(": continue fixing  ") +
+		return "  " + styleKey.Render("enter") + styleFooter.Render(": continue fixing  ") +
 			styleKey.Render("q") + styleFooter.Render(": finish  ") +
-			styleKey.Render("tab") + styleFooter.Render(": switch panel  ") +
+			styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
 			styleKey.Render("j/k") + styleFooter.Render(": scroll")
-		return "  " + qpHelp
 	}
 	if review {
-		reviewHelp := styleKey.Render("enter") + styleFooter.Render(": execute  ") +
+		return "  " + styleKey.Render("enter") + styleFooter.Render(": execute  ") +
 			styleKey.Render("q") + styleFooter.Render(": quit  ") +
-			styleKey.Render("tab") + styleFooter.Render(": switch panel  ") +
+			styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
 			styleKey.Render("j/k") + styleFooter.Render(": scroll")
-		return "  " + reviewHelp
 	}
 	if idle {
-		return "  " + styleMuted.Render("Idle — ") + help
+		return "  " + styleMuted.Render("Idle — ") + baseHelp
 	}
 	if done {
-		return "  " + styleSuccess.Render("Run complete — ") + help
+		return "  " + styleSuccess.Render("Run complete — ") + baseHelp
 	}
-	return "  " + help
+	return "  " + baseHelp
 }
