@@ -10,10 +10,13 @@ import (
 	"github.com/eoghanhynes/ralph/internal/archive"
 	"github.com/eoghanhynes/ralph/internal/autofix"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/coordinator"
+	"github.com/eoghanhynes/ralph/internal/dag"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/eoghanhynes/ralph/internal/worker"
 )
 
 func fastTickCmd() tea.Cmd {
@@ -170,4 +173,64 @@ func captureRevsCmd(ctx context.Context, dirs []string) []judge.DirRev {
 		revs = append(revs, judge.DirRev{Dir: dir, Rev: rev})
 	}
 	return revs
+}
+
+func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		p, err := prd.Load(cfg.PRDFile)
+		if err != nil {
+			return coordinator.DAGAnalyzedMsg{Err: err}
+		}
+
+		// Only analyze incomplete stories
+		var incomplete []prd.UserStory
+		for _, s := range p.UserStories {
+			if !s.Passes {
+				incomplete = append(incomplete, s)
+			}
+		}
+
+		if len(incomplete) == 0 {
+			return coordinator.DAGAnalyzedMsg{Err: fmt.Errorf("no incomplete stories")}
+		}
+
+		d, err := dag.Analyze(ctx, cfg.ProjectDir, incomplete)
+		if err != nil {
+			// Fallback to linear
+			d = dag.LinearFallback(incomplete)
+			return coordinator.DAGAnalyzedMsg{DAG: d}
+		}
+
+		// Validate
+		ids := make([]string, len(incomplete))
+		for i, s := range incomplete {
+			ids[i] = s.ID
+		}
+		if err := d.Validate(ids); err != nil {
+			d = dag.LinearFallback(incomplete)
+		}
+
+		return coordinator.DAGAnalyzedMsg{DAG: d}
+	}
+}
+
+func mergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.WorkerUpdate) tea.Cmd {
+	return func() tea.Msg {
+		err := coord.MergeAndSync(ctx, u)
+		return coordinator.MergeCompleteMsg{
+			StoryID:  u.StoryID,
+			WorkerID: u.WorkerID,
+			Err:      err,
+		}
+	}
+}
+
+func pollWorkerActivityCmd(wID worker.WorkerID, activityPath string) tea.Cmd {
+	return func() tea.Msg {
+		content := runner.ReadActivityContent(activityPath)
+		return coordinator.WorkerActivityMsg{
+			WorkerID: wID,
+			Content:  content,
+		}
+	}
 }

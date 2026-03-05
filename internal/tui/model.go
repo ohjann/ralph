@@ -14,10 +14,13 @@ import (
 	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/coordinator"
+	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/events"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/eoghanhynes/ralph/internal/worker"
 )
 
 const (
@@ -76,6 +79,11 @@ type Model struct {
 	progressSpring harmonica.Spring
 	animatedFill   float64 // current animated fill ratio (0.0–1.0)
 	fillVelocity   float64 // spring velocity
+
+	// Parallel execution
+	coord            *coordinator.Coordinator
+	storyDAG         *dag.DAG
+	activeWorkerView worker.WorkerID // which worker's output to show in Claude panel
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
@@ -155,6 +163,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case msg.String() == "ctrl+c":
+			if m.coord != nil {
+				m.coord.CancelAll()
+				m.coord.CleanupAll(context.Background())
+			}
 			m.cancel()
 			return m, tea.Quit
 		case msg.String() == "q":
@@ -217,6 +229,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		default:
 			m.confirmQuit = false
+			// Worker tab switching: 1-9
+			if m.phase == phaseParallel && len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+				m.activeWorkerView = worker.WorkerID(msg.String()[0] - '0')
+				m.claudeContent = ""
+				m.prevClaudeLen = 0
+			}
 		}
 
 	case spinner.TickMsg:
@@ -243,6 +261,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.phase == phaseClaudeRun {
 			cmds = append(cmds, pollStuckCmd(m.cfg.ProjectDir, m.iteration))
+		}
+		if m.phase == phaseParallel && m.coord != nil && m.activeWorkerView > 0 {
+			activityPath := m.coord.GetWorkerActivityPath(m.activeWorkerView)
+			if activityPath != "" {
+				wID := m.activeWorkerView
+				cmds = append(cmds, pollWorkerActivityCmd(wID, activityPath))
+			}
 		}
 
 	// --- Slow tick: poll worktree + prd ---
@@ -280,8 +305,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// --- Phase transitions ---
 	case archiveDoneMsg:
-		m.phase = phaseIterating
-		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+		if m.cfg.Workers > 1 {
+			m.phase = phaseDagAnalysis
+			cmds = append(cmds, dagAnalyzeCmd(m.ctx, m.cfg))
+		} else {
+			m.phase = phaseIterating
+			cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+		}
 
 	case nextStoryMsg:
 		if msg.AllDone {
@@ -419,6 +449,120 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseIterating
 		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
 
+	// --- Parallel execution messages ---
+	case coordinator.DAGAnalyzedMsg:
+		if msg.Err != nil || msg.DAG == nil {
+			// Fallback to serial
+			m.claudeContent += fmt.Sprintf("\n── DAG analysis failed: %v — falling back to serial ──\n", msg.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+			m.cfg.Workers = 1
+			m.phase = phaseIterating
+			cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+		} else {
+			m.storyDAG = msg.DAG
+			p, err := prd.Load(m.cfg.PRDFile)
+			if err != nil {
+				m.phase = phaseDone
+				m.exitCode = 1
+				return m, nil
+			}
+			// Filter to incomplete stories only
+			var incomplete []prd.UserStory
+			for _, s := range p.UserStories {
+				if !s.Passes {
+					incomplete = append(incomplete, s)
+				}
+			}
+			m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, incomplete)
+			m.phase = phaseParallel
+			m.coord.ScheduleReady(m.ctx)
+			cmds = append(cmds, m.coord.ListenCmd())
+		}
+
+	case coordinator.WorkerUpdateMsg:
+		u := msg.Update
+		m.coord.HandleUpdate(u)
+
+		// Update active worker view to first active worker if current is gone
+		if m.activeWorkerView == 0 || u.WorkerID == m.activeWorkerView {
+			m.activeWorkerView = u.WorkerID
+		}
+
+		switch u.State {
+		case worker.WorkerDone:
+			if u.Passed && u.ChangeID != "" {
+				cmds = append(cmds, mergeBackCmd(m.ctx, m.coord, u))
+			} else {
+				// Failed or didn't pass — cleanup workspace
+				go m.coord.CleanupWorker(m.ctx, u.WorkerID)
+				// Try to schedule more
+				m.coord.ScheduleReady(m.ctx)
+				if m.coord.AllDone() {
+					m.phase = phaseDone
+					m.allComplete = m.coord.CompletedCount() == m.totalStories
+					if m.allComplete {
+						m.exitCode = 0
+					} else {
+						m.exitCode = 1
+					}
+					return m, nil
+				}
+			}
+		case worker.WorkerFailed:
+			m.claudeContent += fmt.Sprintf("\n── Worker %d failed (%s): %v ──\n", u.WorkerID, u.StoryID, u.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+			go m.coord.CleanupWorker(m.ctx, u.WorkerID)
+			m.coord.ScheduleReady(m.ctx)
+			if m.coord.AllDone() {
+				m.phase = phaseDone
+				m.exitCode = 1
+				return m, nil
+			}
+		}
+		// Keep listening for more updates
+		cmds = append(cmds, m.coord.ListenCmd())
+
+	case coordinator.MergeCompleteMsg:
+		if msg.Err != nil {
+			m.claudeContent += fmt.Sprintf("\n── Merge failed (%s): %v ──\n", msg.StoryID, msg.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		} else {
+			m.claudeContent += fmt.Sprintf("\n── Merged %s into main ──\n", msg.StoryID)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		}
+		go m.coord.CleanupWorker(m.ctx, msg.WorkerID)
+		// Schedule more work
+		m.coord.ScheduleReady(m.ctx)
+		if m.coord.AllDone() {
+			m.phase = phaseDone
+			m.allComplete = m.coord.CompletedCount() == m.totalStories
+			if m.allComplete {
+				m.exitCode = 0
+			} else {
+				m.exitCode = 1
+			}
+			return m, nil
+		}
+
+	case coordinator.WorkerActivityMsg:
+		if msg.WorkerID == m.activeWorkerView {
+			m.claudeContent = msg.Content
+			newLen := len(msg.Content)
+			m.claudeVP.SetContent(msg.Content)
+			if newLen > m.prevClaudeLen {
+				m.claudeVP.GotoBottom()
+			}
+			m.prevClaudeLen = newLen
+		}
+
 	case judgeDoneMsg:
 		// Show judge result in the judge panel
 		m.judgeContent += judge.FormatResult(m.currentStoryID, msg.Result)
@@ -548,7 +692,23 @@ func (m *Model) View() string {
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, progressPanel, worktreePanel, judgePanel)
 
-	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun
+	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun || m.phase == phaseParallel || m.phase == phaseDagAnalysis
+	var workerTabStr string
+	if m.phase == phaseParallel && m.coord != nil {
+		workers := m.coord.Workers()
+		var tabParts []string
+		for id, w := range workers {
+			if w.State == worker.WorkerIdle {
+				continue
+			}
+			marker := ""
+			if id == m.activeWorkerView {
+				marker = ">"
+			}
+			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s[%s]", marker, id, w.StoryID, w.State))
+		}
+		workerTabStr = strings.Join(tabParts, " | ")
+	}
 	claudePanel := renderClaudePanel(
 		m.claudeVP,
 		m.spinner,
@@ -557,9 +717,10 @@ func (m *Model) View() string {
 		m.activePanel == panelClaude,
 		m.width,
 		claudeHeight,
+		workerTabStr,
 	)
 
-	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle)
+	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel)
 
 	output := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -588,13 +749,16 @@ func clampLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderFooter(width int, confirmQuit bool, done bool, idle bool) string {
+func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool) string {
 	if confirmQuit {
 		return "  " + styleQuitConfirm.Render("Press q again to quit, any other key to cancel")
 	}
 	help := styleKey.Render("q") + styleFooter.Render(": quit  ") +
 		styleKey.Render("tab") + styleFooter.Render(": switch panel  ") +
 		styleKey.Render("j/k") + styleFooter.Render(": scroll")
+	if parallel {
+		help += "  " + styleKey.Render("1-9") + styleFooter.Render(": switch worker")
+	}
 	if idle {
 		return "  " + styleMuted.Render("Idle — ") + help
 	}

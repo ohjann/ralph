@@ -9,11 +9,20 @@ import (
 )
 
 func renderHeader(m *Model, width int) string {
-	// Line 1: ❖ RALPH  Iter X/Y  |  US-XXX: Title
+	// Line 1: ❖ RALPH  Iter X/Y  |  AB-XXX: Title
 	iterStr := fmt.Sprintf("Iter %d/%d", m.iteration, m.cfg.MaxIterations)
 
 	storyStr := "Waiting..."
-	if m.currentStoryID != "" {
+	if m.phase == phaseParallel && m.coord != nil {
+		active := m.coord.ActiveStoryIDs()
+		if len(active) > 0 {
+			storyStr = strings.Join(active, ", ")
+		} else {
+			storyStr = "Scheduling..."
+		}
+	} else if m.phase == phaseDagAnalysis {
+		storyStr = "Analyzing dependencies..."
+	} else if m.currentStoryID != "" {
 		storyStr = m.currentStoryID
 		if m.currentStoryTitle != "" {
 			storyStr += ": " + m.currentStoryTitle
@@ -54,6 +63,10 @@ func renderHeader(m *Model, width int) string {
 	}
 
 	phaseStr := renderPhase(m.phase)
+	if m.phase == phaseParallel && m.coord != nil {
+		activeCount := m.coord.ActiveCount()
+		phaseStr = stylePhaseActive.Render(fmt.Sprintf("⚡ %d/%d workers", activeCount, m.cfg.Workers))
+	}
 
 	line2 := fmt.Sprintf("  %s  │  %s  │  %s  │  %s", storiesStr, elapsedStr, judgeStr, phaseStr)
 
@@ -101,6 +114,10 @@ func renderPhase(p phase) string {
 		return stylePhaseDone.Render("✓ Complete")
 	case phaseIdle:
 		return stylePhaseDone.Render("◇ Idle")
+	case phaseDagAnalysis:
+		return stylePhaseActive.Render("◌ Analyzing DAG")
+	case phaseParallel:
+		return stylePhaseActive.Render("⚡ Parallel")
 	default:
 		return ""
 	}

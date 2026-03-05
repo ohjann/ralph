@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -14,6 +15,8 @@ type Config struct {
 	JudgeEnabled       bool
 	JudgeMaxRejections int
 	IdleMode           bool
+	Workers            int    // --workers N, default 1 (serial)
+	WorkspaceBase      string // default /tmp/ralph-workspaces
 
 	// Derived paths
 	PRDFile        string
@@ -27,6 +30,8 @@ func Parse(args []string) (*Config, error) {
 	cfg := &Config{
 		MaxIterations:      0, // 0 = auto (use number of stories in PRD)
 		JudgeMaxRejections: 2,
+		Workers:            1,
+		WorkspaceBase:      "/tmp/ralph-workspaces",
 	}
 
 	i := 0
@@ -47,6 +52,25 @@ func Parse(args []string) (*Config, error) {
 		case "--judge":
 			cfg.JudgeEnabled = true
 			i++
+		case "--workers":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--workers requires a number")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return nil, fmt.Errorf("--workers: invalid number %q", args[i+1])
+			}
+			if n < 1 {
+				n = 1
+			}
+			cfg.Workers = n
+			i += 2
+		case "--workspace-base":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--workspace-base requires a path")
+			}
+			cfg.WorkspaceBase = args[i+1]
+			i += 2
 		case "--judge-max-rejections":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--judge-max-rejections requires a number")
@@ -58,9 +82,26 @@ func Parse(args []string) (*Config, error) {
 			cfg.JudgeMaxRejections = n
 			i += 2
 		default:
-			// Check for --dir=value and --judge-max-rejections=value
+			// Check for --key=value forms
 			if len(args[i]) > 6 && args[i][:6] == "--dir=" {
 				cfg.ProjectDir = args[i][6:]
+				i++
+				continue
+			}
+			if strings.HasPrefix(args[i], "--workers=") {
+				n, err := strconv.Atoi(args[i][len("--workers="):])
+				if err != nil {
+					return nil, fmt.Errorf("--workers: invalid number %q", args[i][len("--workers="):])
+				}
+				if n < 1 {
+					n = 1
+				}
+				cfg.Workers = n
+				i++
+				continue
+			}
+			if strings.HasPrefix(args[i], "--workspace-base=") {
+				cfg.WorkspaceBase = args[i][len("--workspace-base="):]
 				i++
 				continue
 			}
@@ -180,6 +221,8 @@ Options:
   --idle                          Launch TUI in idle mode (no execution, just display layout)
   --judge                         Enable LLM-as-Judge verification (requires gemini CLI)
   --judge-max-rejections <n>      Max judge rejections per story before auto-passing (default: 2)
+  --workers <n>                   Number of parallel workers (default: 1 = serial)
+  --workspace-base <path>         Base directory for workspaces (default: /tmp/ralph-workspaces)
   --help, -h                      Show this help message
 
 Arguments:

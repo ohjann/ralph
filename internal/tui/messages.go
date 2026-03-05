@@ -15,6 +15,8 @@ const (
 	phaseJudgeRun
 	phaseDone
 	phaseIdle
+	phaseDagAnalysis // Claude Code analyzing dependencies
+	phaseParallel    // coordinator running workers
 )
 
 // Tick messages

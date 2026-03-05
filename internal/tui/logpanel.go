@@ -26,13 +26,17 @@ func newClaudeViewport(width, height int) viewport.Model {
 	return vp
 }
 
-func renderClaudePanel(vp viewport.Model, sp spinner.Model, content string, running bool, active bool, width, height int) string {
+func renderClaudePanel(vp viewport.Model, sp spinner.Model, content string, running bool, active bool, width, height int, workerTabs ...string) string {
 	// Build title with sparkle
 	var title string
 	if running {
 		title = fmt.Sprintf("%s %s", sp.View(), stylePanelTitle.Render("Claude"))
 	} else {
 		title = fmt.Sprintf("%s %s", styleClaudeSparkle.Render("✻"), stylePanelTitle.Render("Claude"))
+	}
+	// Append worker tabs if present
+	if len(workerTabs) > 0 && workerTabs[0] != "" {
+		title += "  " + styleMuted.Render(workerTabs[0])
 	}
 
 	// Content area inside ornate border: border uses 2 cols each side + 1 space padding each side = 6
