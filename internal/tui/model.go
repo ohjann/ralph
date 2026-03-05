@@ -95,6 +95,11 @@ type Model struct {
 	// Quality review
 	qualityIteration  int
 	lastAssessment    *quality.Assessment
+
+	// Worker log cache: persists logs after workspace cleanup
+	workerLogCache map[worker.WorkerID]string
+	// Ordered list of worker tab entries for stable 1-9 mapping
+	workerTabOrder []worker.WorkerID
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
@@ -111,6 +116,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		contextVP:      newContextViewport(60, 10),
 		claudeVP:       newClaudeViewport(80, 20),
 		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
+		workerLogCache: make(map[worker.WorkerID]string),
 	}
 }
 
@@ -119,9 +125,12 @@ func (m *Model) ExitCode() int {
 }
 
 func (m *Model) Init() tea.Cmd {
+	setTitle := tea.SetWindowTitle("✦ ralph")
+
 	if m.cfg.IdleMode {
 		m.phase = phaseIdle
 		return tea.Batch(
+			setTitle,
 			m.spinner.Tick,
 			fastTickCmd(),
 			tickCmd(),
@@ -130,6 +139,7 @@ func (m *Model) Init() tea.Cmd {
 	if m.cfg.PlanFile != "" {
 		m.phase = phasePlanning
 		return tea.Batch(
+			setTitle,
 			planCmd(m.ctx, m.cfg),
 			m.spinner.Tick,
 			fastTickCmd(),
@@ -137,6 +147,7 @@ func (m *Model) Init() tea.Cmd {
 		)
 	}
 	return tea.Batch(
+		setTitle,
 		archiveCmd(m.cfg),
 		m.spinner.Tick,
 		fastTickCmd(),
@@ -273,11 +284,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			m.confirmQuit = false
-			// Worker tab switching: 1-9
+			// Worker tab switching: 1-9 maps to tab position, not worker ID
 			if m.phase == phaseParallel && len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
-				m.activeWorkerView = worker.WorkerID(msg.String()[0] - '0')
-				m.claudeContent = ""
-				m.prevClaudeLen = 0
+				idx := int(msg.String()[0]-'0') - 1
+				if idx < len(m.workerTabOrder) {
+					wID := m.workerTabOrder[idx]
+					m.activeWorkerView = wID
+					// Load cached logs if available (for completed workers)
+					if cached, ok := m.workerLogCache[wID]; ok {
+						m.claudeContent = cached
+						m.prevClaudeLen = len(cached)
+					} else {
+						m.claudeContent = ""
+						m.prevClaudeLen = 0
+					}
+				}
 			}
 		}
 
@@ -565,13 +586,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u := msg.Update
 		willRetry := m.coord.HandleUpdate(u)
 
-		// Update active worker view to first active worker if current is gone
-		if m.activeWorkerView == 0 || u.WorkerID == m.activeWorkerView {
+		// Auto-select first worker if none selected yet
+		if m.activeWorkerView == 0 {
 			m.activeWorkerView = u.WorkerID
 		}
 
 		switch u.State {
 		case worker.WorkerDone:
+			// Cache the activity log before workspace cleanup
+			m.cacheWorkerLog(u.WorkerID)
 			if u.Passed && u.ChangeID != "" {
 				cmds = append(cmds, mergeBackCmd(m.ctx, m.coord, u))
 			} else {
@@ -590,6 +613,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case worker.WorkerFailed:
+			m.cacheWorkerLog(u.WorkerID)
 			go m.coord.CleanupWorker(m.ctx, u.WorkerID)
 			if willRetry {
 				m.claudeContent += fmt.Sprintf("\n── Worker %d failed (%s): %v — retrying ──\n", u.WorkerID, u.StoryID, u.Err)
@@ -623,6 +647,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update story counts immediately (don't wait for slow tick)
 			m.completedStories = m.coord.CompletedCount()
 		}
+		m.cacheWorkerLog(msg.WorkerID)
 		go m.coord.CleanupWorker(m.ctx, msg.WorkerID)
 		// Schedule more work
 		m.coord.ScheduleReady(m.ctx)
@@ -639,6 +664,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case coordinator.WorkerActivityMsg:
+		// Always update the cache with latest content
+		m.workerLogCache[msg.WorkerID] = msg.Content
 		if msg.WorkerID == m.activeWorkerView {
 			m.claudeContent = msg.Content
 			newLen := len(msg.Content)
@@ -768,6 +795,25 @@ func (m *Model) transitionToComplete() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cacheWorkerLog reads the activity log for a worker and stores it in memory.
+func (m *Model) cacheWorkerLog(wID worker.WorkerID) {
+	if m.coord == nil {
+		return
+	}
+	// If we already have content from the activity poll, it's already cached
+	if _, ok := m.workerLogCache[wID]; ok {
+		return
+	}
+	// Try to read from disk as fallback
+	actPath := m.coord.GetWorkerActivityPath(wID)
+	if actPath == "" {
+		return
+	}
+	if data, err := os.ReadFile(actPath); err == nil {
+		m.workerLogCache[wID] = string(data)
+	}
+}
+
 func (m *Model) handleJudgeCheck() tea.Cmd {
 	// Skip judge if no pre-revisions were captured
 	if len(m.preRevs) == 0 {
@@ -861,23 +907,30 @@ func (m *Model) View() string {
 	var workerTabStr string
 	if m.phase == phaseParallel && m.coord != nil {
 		workers := m.coord.Workers()
-		// Sort worker IDs for stable display
-		var sortedIDs []worker.WorkerID
-		for id := range workers {
-			sortedIDs = append(sortedIDs, id)
-		}
-		sort.Slice(sortedIDs, func(i, j int) bool { return sortedIDs[i] < sortedIDs[j] })
-		var tabParts []string
-		for _, id := range sortedIDs {
-			w := workers[id]
+		// Sort: active workers first (by ID), then completed/failed (by ID)
+		var activeIDs, doneIDs []worker.WorkerID
+		for id, w := range workers {
 			if w.State == worker.WorkerIdle {
 				continue
 			}
+			if w.State == worker.WorkerDone || w.State == worker.WorkerFailed {
+				doneIDs = append(doneIDs, id)
+			} else {
+				activeIDs = append(activeIDs, id)
+			}
+		}
+		sort.Slice(activeIDs, func(i, j int) bool { return activeIDs[i] < activeIDs[j] })
+		sort.Slice(doneIDs, func(i, j int) bool { return doneIDs[i] < doneIDs[j] })
+		m.workerTabOrder = append(activeIDs, doneIDs...)
+
+		var tabParts []string
+		for tabIdx, id := range m.workerTabOrder {
+			w := workers[id]
 			marker := ""
 			if id == m.activeWorkerView {
 				marker = "▸"
 			}
-			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s[%s]", marker, id, w.StoryID, w.State))
+			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s[%s]", marker, tabIdx+1, w.StoryID, w.State))
 		}
 		workerTabStr = strings.Join(tabParts, " │ ")
 	}
