@@ -16,6 +16,8 @@ import (
 	"github.com/eoghanhynes/ralph/internal/workspace"
 )
 
+const maxRetries = 3
+
 type Coordinator struct {
 	cfg        *config.Config
 	dag        *dag.DAG
@@ -27,6 +29,7 @@ type Coordinator struct {
 	completed  map[string]bool
 	failed     map[string]bool
 	inProgress map[string]worker.WorkerID
+	retries    map[string]int // retry count per story
 	nextID     worker.WorkerID
 	stories    map[string]*prd.UserStory // story lookup
 }
@@ -46,6 +49,7 @@ func New(cfg *config.Config, d *dag.DAG, maxWorkers int, stories []prd.UserStory
 		completed:  make(map[string]bool),
 		failed:     make(map[string]bool),
 		inProgress: make(map[string]worker.WorkerID),
+		retries:    make(map[string]int),
 		stories:    storyMap,
 	}
 }
@@ -108,8 +112,9 @@ func (c *Coordinator) ScheduleReady(ctx context.Context) int {
 	return launched
 }
 
-// HandleUpdate processes a worker update. Returns merge action if needed.
-func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) {
+// HandleUpdate processes a worker update.
+// Returns true if the story should be retried (transient failure with retries remaining).
+func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -127,8 +132,14 @@ func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) {
 		}
 	case worker.WorkerFailed:
 		delete(c.inProgress, u.StoryID)
+		if u.Retryable && c.retries[u.StoryID] < maxRetries {
+			c.retries[u.StoryID]++
+			// Don't mark as failed — leave it available for ScheduleReady
+			return true
+		}
 		c.failed[u.StoryID] = true
 	}
+	return false
 }
 
 // MergeAndSync rebases the worker's changes onto main, syncs prd.json and progress.txt.

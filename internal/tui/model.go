@@ -483,7 +483,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case coordinator.WorkerUpdateMsg:
 		u := msg.Update
-		m.coord.HandleUpdate(u)
+		willRetry := m.coord.HandleUpdate(u)
 
 		// Update active worker view to first active worker if current is gone
 		if m.activeWorkerView == 0 || u.WorkerID == m.activeWorkerView {
@@ -511,11 +511,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case worker.WorkerFailed:
-			m.claudeContent += fmt.Sprintf("\n── Worker %d failed (%s): %v ──\n", u.WorkerID, u.StoryID, u.Err)
+			go m.coord.CleanupWorker(m.ctx, u.WorkerID)
+			if willRetry {
+				m.claudeContent += fmt.Sprintf("\n── Worker %d failed (%s): %v — retrying ──\n", u.WorkerID, u.StoryID, u.Err)
+			} else {
+				m.claudeContent += fmt.Sprintf("\n── Worker %d failed (%s): %v ──\n", u.WorkerID, u.StoryID, u.Err)
+			}
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
-			go m.coord.CleanupWorker(m.ctx, u.WorkerID)
 			m.coord.ScheduleReady(m.ctx)
 			if m.coord.AllDone() {
 				m.phase = phaseDone

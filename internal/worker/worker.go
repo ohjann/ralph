@@ -58,12 +58,13 @@ type Worker struct {
 }
 
 type WorkerUpdate struct {
-	WorkerID WorkerID
-	StoryID  string
-	State    WorkerState
-	Err      error
-	Passed   bool
-	ChangeID string // jj change_id of committed work, for rebase
+	WorkerID  WorkerID
+	StoryID   string
+	State     WorkerState
+	Err       error
+	Passed    bool
+	ChangeID  string // jj change_id of committed work, for rebase
+	Retryable bool   // true for transient errors (rate limits, timeouts)
 }
 
 // Run executes the full worker lifecycle in the workspace.
@@ -77,6 +78,17 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			Err:      err,
 			Passed:   passed,
 			ChangeID: changeID,
+		}
+	}
+
+	sendRetryable := func(err error) {
+		w.State = WorkerFailed
+		updateCh <- WorkerUpdate{
+			WorkerID:  w.ID,
+			StoryID:   w.StoryID,
+			State:     WorkerFailed,
+			Err:       err,
+			Retryable: true,
 		}
 	}
 
@@ -118,7 +130,8 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			send(WorkerFailed, w.Ctx.Err(), false, "")
 			return
 		}
-		send(WorkerFailed, fmt.Errorf("claude run: %w", err), false, "")
+		// Claude CLI failures are likely transient (rate limits, network, etc.)
+		sendRetryable(fmt.Errorf("claude run: %w", err))
 		return
 	}
 
