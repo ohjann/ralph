@@ -10,28 +10,45 @@ import (
 	"strings"
 )
 
-// Create creates a jj workspace for the given story, branched from current @.
-// Returns the workspace directory path.
-func Create(ctx context.Context, projectDir, storyID, baseDir string) (string, error) {
+// CreateResult holds the output of workspace creation.
+type CreateResult struct {
+	Dir          string // workspace directory path
+	BaseChangeID string // change ID of the commit the workspace branched from
+}
+
+// Create creates a jj workspace for the given story, branched from current @-.
+func Create(ctx context.Context, projectDir, storyID, baseDir string) (CreateResult, error) {
 	wsDir := filepath.Join(baseDir, storyID)
 
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return "", fmt.Errorf("creating workspace base dir: %w", err)
+		return CreateResult{}, fmt.Errorf("creating workspace base dir: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "jj", "workspace", "add", wsDir, "-r", "@")
+	// Capture the base change ID (@- is the parent of the working copy,
+	// i.e. the last real commit) before creating the workspace.
+	baseCmd := exec.CommandContext(ctx, "jj", "log", "-r", "@-", "--no-graph", "-T", "change_id")
+	baseCmd.Dir = projectDir
+	baseOut, err := baseCmd.CombinedOutput()
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("jj log base: %s: %w", strings.TrimSpace(string(baseOut)), err)
+	}
+	baseChangeID := strings.TrimSpace(string(baseOut))
+
+	// Use @- so the workspace branches from the last real commit,
+	// not the empty working-copy change.
+	cmd := exec.CommandContext(ctx, "jj", "workspace", "add", wsDir, "-r", "@-")
 	cmd.Dir = projectDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("jj workspace add: %s: %w", strings.TrimSpace(string(out)), err)
+		return CreateResult{}, fmt.Errorf("jj workspace add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	return wsDir, nil
+	return CreateResult{Dir: wsDir, BaseChangeID: baseChangeID}, nil
 }
 
 // Destroy forgets a workspace and removes its directory.
 func Destroy(ctx context.Context, projectDir, wsName, wsDir string) error {
-	// Forget the workspace in the main repo
+	// Forget the workspace — this also cleans up the workspace's working-copy commit.
 	cmd := exec.CommandContext(ctx, "jj", "workspace", "forget", wsName)
 	cmd.Dir = projectDir
 	_ = cmd.Run() // best-effort
@@ -40,31 +57,89 @@ func Destroy(ctx context.Context, projectDir, wsName, wsDir string) error {
 	return os.RemoveAll(wsDir)
 }
 
+// MergeResult describes the outcome of a MergeBack operation.
+type MergeResult struct {
+	HasConflict     bool
+	ConflictedFiles string // newline-separated list of conflicted files
+}
+
 // MergeBack rebases the workspace's committed change onto main's current @-
 // (the parent of the working copy), then advances @ on top so subsequent
 // merges form a linear chain without empty intermediate commits.
-func MergeBack(ctx context.Context, mainDir, changeID string) error {
-	cmd := exec.CommandContext(ctx, "jj", "rebase", "-s", changeID, "-d", "@-")
+//
+// Uses -r (not -s) so only the single squashed commit is moved — the
+// workspace's empty working-copy child is left behind and cleaned up by
+// workspace forget.
+//
+// If the rebase produces conflicts, it switches to editing the conflicted
+// commit (jj edit) and returns HasConflict=true so the caller can resolve
+// before advancing @.
+func MergeBack(ctx context.Context, mainDir, changeID string) (MergeResult, error) {
+	// Sync main workspace's operation log — workspace commits create sibling
+	// operations that must be integrated before we can rebase here.
+	syncCmd := exec.CommandContext(ctx, "jj", "workspace", "update-stale")
+	syncCmd.Dir = mainDir
+	_ = syncCmd.Run() // best-effort; no-op if already up to date
+
+	cmd := exec.CommandContext(ctx, "jj", "rebase", "-r", changeID, "-d", "@-")
 	cmd.Dir = mainDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("jj rebase: %s: %w", strings.TrimSpace(string(out)), err)
+		return MergeResult{}, fmt.Errorf("jj rebase: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	// Advance @ to sit on top of the rebased change so the next merge
-	// builds a linear history.
+	// Check if the rebased commit has conflicts.
+	conflictCmd := exec.CommandContext(ctx, "jj", "log", "-r", changeID, "--no-graph", "-T", "conflict")
+	conflictCmd.Dir = mainDir
+	conflictOut, _ := conflictCmd.CombinedOutput()
+	if strings.TrimSpace(string(conflictOut)) == "true" {
+		// Switch to editing the conflicted commit directly so Claude
+		// can resolve the conflict markers in the working copy.
+		editCmd := exec.CommandContext(ctx, "jj", "edit", changeID)
+		editCmd.Dir = mainDir
+		if eOut, eErr := editCmd.CombinedOutput(); eErr != nil {
+			return MergeResult{}, fmt.Errorf("jj edit conflicted: %s: %w", strings.TrimSpace(string(eOut)), eErr)
+		}
+
+		// Get the list of conflicted files for the resolution prompt.
+		listCmd := exec.CommandContext(ctx, "jj", "resolve", "--list")
+		listCmd.Dir = mainDir
+		listOut, _ := listCmd.CombinedOutput()
+
+		return MergeResult{
+			HasConflict:     true,
+			ConflictedFiles: strings.TrimSpace(string(listOut)),
+		}, nil
+	}
+
+	// No conflicts — advance @ to sit on top of the rebased change.
 	cmd = exec.CommandContext(ctx, "jj", "new", changeID)
 	cmd.Dir = mainDir
 	out, err = cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("jj new after rebase: %s: %w", strings.TrimSpace(string(out)), err)
+		return MergeResult{}, fmt.Errorf("jj new after rebase: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return MergeResult{}, nil
+}
+
+// AdvanceAfterResolve creates a new @ on top of the current commit after
+// conflict resolution. Call this after resolving conflicts in a jj edit session.
+func AdvanceAfterResolve(ctx context.Context, mainDir string) error {
+	cmd := exec.CommandContext(ctx, "jj", "new")
+	cmd.Dir = mainDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("jj new after resolve: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
 
-// CommitWorkspace commits the working copy in the workspace and returns the change ID.
-func CommitWorkspace(ctx context.Context, wsDir, storyID, title string) (string, error) {
+// CommitWorkspace commits the working copy in the workspace, squashes all
+// intermediate commits into a single commit, and returns the change ID.
+func CommitWorkspace(ctx context.Context, wsDir, storyID, title, baseChangeID string) (string, error) {
 	msg := fmt.Sprintf("story %s: %s", storyID, title)
+
+	// Commit any remaining working-copy changes.
 	commitCmd := exec.CommandContext(ctx, "jj", "commit", "-m", msg)
 	commitCmd.Dir = wsDir
 	out, err := commitCmd.CombinedOutput()
@@ -72,7 +147,22 @@ func CommitWorkspace(ctx context.Context, wsDir, storyID, title string) (string,
 		return "", fmt.Errorf("jj commit: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	// Get the change ID of the parent (what we just committed)
+	// Squash all intermediate commits (between base and @-) into a single commit.
+	// After `jj commit`, the history is: base → C1 → C2 → ... → final(@-) → empty(@)
+	// This moves changes from C1..C(n-1) into final, and abandoned empty sources.
+	squashRevset := fmt.Sprintf("%s::@- ~ %s ~ @-", baseChangeID, baseChangeID)
+	squashCmd := exec.CommandContext(ctx, "jj", "squash", "--from", squashRevset, "--into", "@-", "-m", msg)
+	squashCmd.Dir = wsDir
+	squashOut, err := squashCmd.CombinedOutput()
+	if err != nil {
+		// Squash can fail if there's only one commit (nothing to squash) — that's fine.
+		outStr := strings.TrimSpace(string(squashOut))
+		if !strings.Contains(outStr, "nothing to do") && !strings.Contains(outStr, "No matching revisions") {
+			return "", fmt.Errorf("jj squash: %s: %w", outStr, err)
+		}
+	}
+
+	// Get the change ID of the squashed commit (now @-)
 	logCmd := exec.CommandContext(ctx, "jj", "log", "-r", "@-", "--no-graph", "-T", "change_id")
 	logCmd.Dir = wsDir
 	idOut, err := logCmd.CombinedOutput()

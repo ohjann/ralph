@@ -299,11 +299,12 @@ func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 
 func mergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.WorkerUpdate) tea.Cmd {
 	return func() tea.Msg {
-		err := coord.MergeAndSync(ctx, u)
+		conflictsResolved, err := coord.MergeAndSync(ctx, u)
 		return coordinator.MergeCompleteMsg{
-			StoryID:  u.StoryID,
-			WorkerID: u.WorkerID,
-			Err:      err,
+			StoryID:           u.StoryID,
+			WorkerID:          u.WorkerID,
+			Err:               err,
+			ConflictsResolved: conflictsResolved,
 		}
 	}
 }

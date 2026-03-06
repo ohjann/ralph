@@ -640,6 +640,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
+		} else if msg.ConflictsResolved {
+			m.claudeContent += fmt.Sprintf("\n── Merged %s into main (conflicts resolved) ──\n", msg.StoryID)
 		} else {
 			m.claudeContent += fmt.Sprintf("\n── Merged %s into main ──\n", msg.StoryID)
 			m.claudeVP.SetContent(m.claudeContent)

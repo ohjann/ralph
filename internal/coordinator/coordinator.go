@@ -13,6 +13,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/runner"
 	"github.com/eoghanhynes/ralph/internal/worker"
 	"github.com/eoghanhynes/ralph/internal/workspace"
 )
@@ -144,28 +145,39 @@ func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) bool {
 }
 
 // MergeAndSync rebases the worker's changes onto main, syncs prd.json and progress.txt.
-func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) error {
+// If the rebase produces conflicts, it runs Claude to resolve them before advancing.
+// Returns true if conflicts were resolved during the merge.
+func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) (conflictsResolved bool, err error) {
 	c.mu.Lock()
 	w, ok := c.workers[u.WorkerID]
 	c.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("worker %d not found", u.WorkerID)
+		return false, fmt.Errorf("worker %d not found", u.WorkerID)
 	}
 
 	if u.ChangeID == "" || w.Workspace == "" {
-		return nil
+		return false, nil
 	}
 
 	// Rebase onto main
-	if err := workspace.MergeBack(ctx, c.cfg.ProjectDir, u.ChangeID); err != nil {
-		return fmt.Errorf("rebase: %w", err)
+	result, mergeErr := workspace.MergeBack(ctx, c.cfg.ProjectDir, u.ChangeID)
+	if mergeErr != nil {
+		return false, fmt.Errorf("rebase: %w", mergeErr)
+	}
+
+	// If conflicts, run Claude to resolve them in-place
+	if result.HasConflict {
+		if resolveErr := c.resolveConflicts(ctx, u.StoryID, result.ConflictedFiles); resolveErr != nil {
+			return false, fmt.Errorf("conflict resolution: %w", resolveErr)
+		}
+		conflictsResolved = true
 	}
 
 	// Sync prd.json: read workspace's prd.json and update main's
-	wsPRD, err := prd.Load(filepath.Join(w.Workspace, "prd.json"))
-	if err == nil {
-		mainPRD, err := prd.Load(c.cfg.PRDFile)
-		if err == nil {
+	wsPRD, prdErr := prd.Load(filepath.Join(w.Workspace, "prd.json"))
+	if prdErr == nil {
+		mainPRD, mainPrdErr := prd.Load(c.cfg.PRDFile)
+		if mainPrdErr == nil {
 			// Update the specific story's passes status
 			wsStory := wsPRD.FindStory(u.StoryID)
 			if wsStory != nil {
@@ -177,9 +189,9 @@ func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) e
 
 	// Append workspace progress.txt entries to main
 	wsProgress := filepath.Join(w.Workspace, "progress.txt")
-	if data, err := os.ReadFile(wsProgress); err == nil && len(data) > 0 {
-		f, err := os.OpenFile(c.cfg.ProgressFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-		if err == nil {
+	if data, readErr := os.ReadFile(wsProgress); readErr == nil && len(data) > 0 {
+		f, openErr := os.OpenFile(c.cfg.ProgressFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+		if openErr == nil {
 			f.Write(data)
 			f.Close()
 		}
@@ -187,18 +199,48 @@ func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) e
 
 	// Append workspace events.jsonl to main
 	wsEvents := filepath.Join(w.Workspace, ".ralph", "events.jsonl")
-	if data, err := os.ReadFile(wsEvents); err == nil && len(data) > 0 {
-		f, err := os.OpenFile(
+	if data, readErr := os.ReadFile(wsEvents); readErr == nil && len(data) > 0 {
+		f, openErr := os.OpenFile(
 			filepath.Join(c.cfg.ProjectDir, ".ralph", "events.jsonl"),
 			os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644,
 		)
-		if err == nil {
+		if openErr == nil {
 			f.Write(data)
 			f.Close()
 		}
 	}
 
-	return nil
+	return conflictsResolved, nil
+}
+
+// resolveConflicts runs Claude to resolve merge conflicts in the main workspace.
+// MergeBack has already switched @ to the conflicted commit via jj edit.
+func (c *Coordinator) resolveConflicts(ctx context.Context, storyID, conflictedFiles string) error {
+	prompt := fmt.Sprintf(`You are resolving merge conflicts in a jj (Jujutsu) repository.
+
+After rebasing story %s, the following files have conflicts:
+%s
+
+INSTRUCTIONS:
+1. Read each conflicted file — they contain jj conflict markers (lines with <<<<<<<, >>>>>>>  etc.)
+2. Resolve ALL conflicts by editing the files to combine both sides correctly
+3. Preserve the intent of BOTH sides — do not simply pick one side
+4. Remove ALL conflict markers
+5. Verify the result compiles / has valid syntax
+6. Do NOT commit or run jj commands — jj auto-snapshots your edits
+
+Be concise. Just fix the conflicts and stop.`, storyID, conflictedFiles)
+
+	logDir := filepath.Join(c.cfg.ProjectDir, ".ralph", "logs")
+	_ = os.MkdirAll(logDir, 0o755)
+	logPath := filepath.Join(logDir, fmt.Sprintf("conflict-resolution-%s.log", storyID))
+
+	if err := runner.RunClaude(ctx, c.cfg.ProjectDir, prompt, logPath); err != nil {
+		return fmt.Errorf("claude conflict resolution: %w", err)
+	}
+
+	// Advance @ past the now-resolved commit
+	return workspace.AdvanceAfterResolve(ctx, c.cfg.ProjectDir)
 }
 
 // CleanupWorker destroys the workspace for a completed/failed worker.
@@ -328,9 +370,10 @@ type WorkerUpdateMsg struct {
 
 // MergeCompleteMsg signals that a merge-back operation completed.
 type MergeCompleteMsg struct {
-	StoryID  string
-	WorkerID worker.WorkerID
-	Err      error
+	StoryID           string
+	WorkerID          worker.WorkerID
+	Err               error
+	ConflictsResolved bool
 }
 
 // DAGAnalyzedMsg signals that DAG analysis is complete.

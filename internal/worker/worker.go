@@ -45,16 +45,17 @@ func (s WorkerState) String() string {
 }
 
 type Worker struct {
-	ID            WorkerID
-	StoryID       string
-	StoryTitle    string
-	State         WorkerState
-	Workspace     string // path to workspace dir
-	WorkspaceName string // jj workspace name (for forget)
-	LogDir        string
-	Iteration     int
-	Ctx           context.Context
-	Cancel        context.CancelFunc
+	ID             WorkerID
+	StoryID        string
+	StoryTitle     string
+	State          WorkerState
+	Workspace      string // path to workspace dir
+	WorkspaceName  string // jj workspace name (for forget)
+	BaseChangeID   string // jj change ID of the commit the workspace branched from
+	LogDir         string
+	Iteration      int
+	Ctx            context.Context
+	Cancel         context.CancelFunc
 }
 
 type WorkerUpdate struct {
@@ -94,27 +95,28 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 
 	// 1. Create workspace
 	send(WorkerSetup, nil, false, "")
-	wsDir, err := workspace.Create(w.Ctx, cfg.ProjectDir, w.StoryID, cfg.WorkspaceBase)
+	ws, err := workspace.Create(w.Ctx, cfg.ProjectDir, w.StoryID, cfg.WorkspaceBase)
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("workspace create: %w", err), false, "")
 		return
 	}
-	w.Workspace = wsDir
+	w.Workspace = ws.Dir
 	w.WorkspaceName = workspace.WorkspaceName(w.StoryID)
+	w.BaseChangeID = ws.BaseChangeID
 
 	// Copy state files into workspace
-	if err := workspace.CopyState(cfg.ProjectDir, wsDir); err != nil {
+	if err := workspace.CopyState(cfg.ProjectDir, ws.Dir); err != nil {
 		send(WorkerFailed, fmt.Errorf("copy state: %w", err), false, "")
 		return
 	}
 
 	// Ensure log directory exists in workspace
-	wsLogDir := filepath.Join(wsDir, ".ralph", "logs")
+	wsLogDir := filepath.Join(ws.Dir, ".ralph", "logs")
 	w.LogDir = wsLogDir
 
 	// 2. Build prompt and run Claude
 	send(WorkerRunning, nil, false, "")
-	prompt, err := runner.BuildPrompt(cfg.RalphHome, wsDir, w.StoryID)
+	prompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID)
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("build prompt: %w", err), false, "")
 		return
@@ -131,7 +133,7 @@ Do NOT check if all stories are complete. Do NOT emit the COMPLETE signal.
 Just implement your story, commit, set passes: true, update progress.txt, and stop.`, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
-	err = runner.RunClaude(w.Ctx, wsDir, prompt, logPath, runner.RunClaudeOpts{
+	err = runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
 		Iteration: w.Iteration,
 		StoryID:   w.StoryID,
 	})
@@ -146,7 +148,7 @@ Just implement your story, commit, set passes: true, update progress.txt, and st
 	}
 
 	// 3. Check if story passed
-	p, err := prd.Load(filepath.Join(wsDir, "prd.json"))
+	p, err := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("load prd: %w", err), false, "")
 		return
@@ -155,7 +157,7 @@ Just implement your story, commit, set passes: true, update progress.txt, and st
 	passed := story != nil && story.Passes
 
 	// 4. Commit workspace changes
-	changeID, err := workspace.CommitWorkspace(w.Ctx, wsDir, w.StoryID, w.StoryTitle)
+	changeID, err := workspace.CommitWorkspace(w.Ctx, ws.Dir, w.StoryID, w.StoryTitle, w.BaseChangeID)
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("commit workspace: %w", err), false, "")
 		return
@@ -166,8 +168,8 @@ Just implement your story, commit, set passes: true, update progress.txt, and st
 		send(WorkerJudging, nil, false, changeID)
 
 		// Capture revs for judge
-		preRevs := []judge.DirRev{{Dir: wsDir, Rev: changeID}}
-		result := judge.RunJudge(w.Ctx, cfg.RalphHome, wsDir, filepath.Join(wsDir, "prd.json"), w.StoryID, preRevs)
+		preRevs := []judge.DirRev{{Dir: ws.Dir, Rev: changeID}}
+		result := judge.RunJudge(w.Ctx, cfg.RalphHome, ws.Dir, filepath.Join(ws.Dir, "prd.json"), w.StoryID, preRevs)
 		if !result.Passed {
 			passed = false
 		}
