@@ -116,7 +116,8 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 
 	// 2. Build prompt and run Claude
 	send(WorkerRunning, nil, false, "")
-	prompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID)
+	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
+	prompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD)
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("build prompt: %w", err), false, "")
 		return

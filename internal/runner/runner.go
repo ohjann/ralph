@@ -11,16 +11,27 @@ import (
 	"strings"
 
 	"github.com/eoghanhynes/ralph/internal/events"
+	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/storystate"
 )
 
-// BuildPrompt reads ralph-prompt.md, appends iteration constraint, and injects judge feedback if present.
-func BuildPrompt(ralphHome, projectDir, storyID string) (string, error) {
+// BuildPrompt reads ralph-prompt.md, appends PRD context, story state, iteration constraint,
+// judge feedback, and event context into the prompt.
+func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD) (string, error) {
 	base, err := os.ReadFile(filepath.Join(ralphHome, "ralph-prompt.md"))
 	if err != nil {
 		return "", fmt.Errorf("reading ralph-prompt.md: %w", err)
 	}
 
-	prompt := string(base) + fmt.Sprintf(`
+	prompt := string(base)
+
+	// Inject PRD context if provided
+	if p != nil {
+		prompt += buildPRDContext(p, storyID)
+		prompt += buildStoryStateContext(projectDir, storyID)
+	}
+
+	prompt += fmt.Sprintf(`
 
 ---
 ## THIS ITERATION
@@ -41,6 +52,102 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 	}
 
 	return prompt, nil
+}
+
+// buildPRDContext generates the YOUR STORY, PROJECT CONTEXT, and OTHER STORIES sections.
+func buildPRDContext(p *prd.PRD, storyID string) string {
+	var b strings.Builder
+
+	// YOUR STORY section
+	story := p.FindStory(storyID)
+	if story != nil {
+		b.WriteString("\n\n---\n## YOUR STORY\n")
+		b.WriteString(fmt.Sprintf("**%s: %s**\n\n", story.ID, story.Title))
+		b.WriteString(story.Description + "\n\n")
+		b.WriteString("### Acceptance Criteria\n")
+		for _, ac := range story.AcceptanceCriteria {
+			b.WriteString(fmt.Sprintf("- %s\n", ac))
+		}
+		if story.Notes != "" {
+			b.WriteString(fmt.Sprintf("\n**Notes:** %s\n", story.Notes))
+		}
+	}
+
+	// PROJECT CONTEXT section
+	b.WriteString("\n\n---\n## PROJECT CONTEXT\n")
+	b.WriteString(fmt.Sprintf("- **Project:** %s\n", p.Project))
+	b.WriteString(fmt.Sprintf("- **Branch:** %s\n", p.BranchName))
+	b.WriteString(fmt.Sprintf("- **Progress:** %d/%d stories complete\n", p.CompletedCount(), p.TotalCount()))
+
+	// OTHER STORIES section
+	b.WriteString("\n\n---\n## OTHER STORIES\n")
+	for _, s := range p.UserStories {
+		if s.ID == storyID {
+			continue
+		}
+		status := "queued"
+		if s.Passes {
+			status = "✓"
+		}
+		b.WriteString(fmt.Sprintf("- %s: %s [%s]\n", s.ID, s.Title, status))
+	}
+
+	return b.String()
+}
+
+// buildStoryStateContext loads story state, plan, and decisions and formats them.
+func buildStoryStateContext(projectDir, storyID string) string {
+	state, err := storystate.Load(projectDir, storyID)
+	if err != nil || state.IterationCount == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	b.WriteString("\n\n---\n## Story State\n")
+	b.WriteString(fmt.Sprintf("- **Status:** %s\n", state.Status))
+	b.WriteString(fmt.Sprintf("- **Iteration:** %d\n", state.IterationCount))
+	b.WriteString(fmt.Sprintf("- **Last Updated:** %s\n", state.LastUpdated.Format("2006-01-02 15:04:05")))
+
+	if len(state.FilesTouched) > 0 {
+		b.WriteString("- **Files Touched:** " + strings.Join(state.FilesTouched, ", ") + "\n")
+	}
+	if len(state.Subtasks) > 0 {
+		b.WriteString("\n### Subtasks\n")
+		for _, st := range state.Subtasks {
+			check := "[ ]"
+			if st.Done {
+				check = "[x]"
+			}
+			b.WriteString(fmt.Sprintf("- %s %s\n", check, st.Description))
+		}
+	}
+	if len(state.ErrorsEncountered) > 0 {
+		b.WriteString("\n### Errors Encountered\n")
+		for _, e := range state.ErrorsEncountered {
+			b.WriteString(fmt.Sprintf("- **Error:** %s\n  **Resolution:** %s\n", e.Error, e.Resolution))
+		}
+	}
+	if len(state.JudgeFeedback) > 0 {
+		b.WriteString("\n### Judge Feedback\n")
+		for _, jf := range state.JudgeFeedback {
+			b.WriteString(fmt.Sprintf("- %s\n", jf))
+		}
+	}
+
+	// Plan
+	if plan, err := storystate.LoadPlan(projectDir, storyID); err == nil && plan != "" {
+		b.WriteString("\n### Implementation Plan\n")
+		b.WriteString(plan + "\n")
+	}
+
+	// Decisions
+	if decisions, err := storystate.LoadDecisions(projectDir, storyID); err == nil && decisions != "" {
+		b.WriteString("\n### Key Decisions\n")
+		b.WriteString(decisions + "\n")
+	}
+
+	return b.String()
 }
 
 // RunClaudeOpts contains optional parameters for RunClaude.

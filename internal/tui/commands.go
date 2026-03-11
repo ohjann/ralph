@@ -188,7 +188,8 @@ func findNextStoryCmd(prdPath string) tea.Cmd {
 
 func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, iteration int) tea.Cmd {
 	return func() tea.Msg {
-		prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID)
+		p, _ := prd.Load(cfg.PRDFile)
+		prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p)
 		if err != nil {
 			return claudeDoneMsg{Err: err}
 		}
