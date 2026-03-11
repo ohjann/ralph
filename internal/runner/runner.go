@@ -5,19 +5,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/eoghanhynes/ralph/internal/events"
+	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/storystate"
 )
 
+// MemoryRetriever abstracts semantic memory retrieval so callers can pass
+// a real ChromaDB+embedder pair or nil to skip retrieval entirely.
+type MemoryRetriever interface {
+	RetrieveContext(ctx context.Context, storyTitle, storyDescription string, acceptanceCriteria []string, opts memory.RetrievalOptions) (string, error)
+}
+
+// BuildPromptOpts holds optional parameters for BuildPrompt.
+type BuildPromptOpts struct {
+	Memory     MemoryRetriever
+	MemoryOpts memory.RetrievalOptions
+}
+
 // BuildPrompt reads ralph-prompt.md, appends PRD context, story state, iteration constraint,
-// judge feedback, and event context into the prompt.
-func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD) (string, error) {
+// judge feedback, event context, and semantic memory into the prompt.
+func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (string, error) {
 	base, err := os.ReadFile(filepath.Join(ralphHome, "ralph-prompt.md"))
 	if err != nil {
 		return "", fmt.Errorf("reading ralph-prompt.md: %w", err)
@@ -48,6 +62,25 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 	if evts, err := events.Load(projectDir); err == nil && len(evts) > 0 {
 		if section := events.FormatContextSection(evts, storyID); section != "" {
 			prompt += "\n\n---\n" + section
+		}
+	}
+
+	// Inject semantic memory context (additive, after event context)
+	if len(opts) > 0 && opts[0].Memory != nil && p != nil {
+		story := p.FindStory(storyID)
+		if story != nil {
+			memCtx, err := opts[0].Memory.RetrieveContext(
+				context.Background(),
+				story.Title,
+				story.Description,
+				story.AcceptanceCriteria,
+				opts[0].MemoryOpts,
+			)
+			if err != nil {
+				log.Printf("warning: semantic memory retrieval failed: %v", err)
+			} else if memCtx != "" {
+				prompt += "\n\n---\n" + memCtx
+			}
 		}
 	}
 
