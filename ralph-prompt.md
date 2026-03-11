@@ -4,19 +4,18 @@ You are an autonomous coding agent working on a software project.
 
 ## Your Task
 
-1. Read the PRD at `prd.json` (in the current working directory)
+1. Your story details, project context, and other story summaries are injected directly into this prompt below — do NOT read prd.json
 2. Read the progress log at `progress.md` (check Codebase Patterns section first)
 3. Use `jj` (Jujutsu) for version control instead of git. Load the `jj-guide` skill for reference. Work from a new revision branched from the current revision with `jj new`
 4. Check progress.md for any `[CONTEXT EXHAUSTED]` entry — if found, **continue that story first** before starting anything new
 5. Check for judge feedback at `.ralph/judge-feedback-{storyId}.md` — if found, read it and address all failed criteria (see Judge Feedback section below)
-6. Otherwise, pick the **highest priority** user story where `passes: false`
-7. Implement that single user story
-8. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
-9. Update CLAUDE.md files if you discover reusable patterns (see below)
-10. If checks pass, commit ALL changes with a simple descriptive message
-11. Update the PRD to set `passes: true` for the completed story
-12. Append your progress to `progress.md`
-13. Note: `prd.json`, `progress.md`, and `.ralph/` are gitignored and will not be committed
+6. Otherwise, implement the story described in the YOUR STORY section below
+7. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
+8. Update CLAUDE.md files if you discover reusable patterns (see below)
+9. If checks pass, commit ALL changes with a simple descriptive message
+10. Update the PRD to set `passes: true` for the completed story
+11. Append your progress to `progress.md`
+12. Note: `prd.json`, `progress.md`, and `.ralph/` are gitignored and will not be committed
 
 ## Progress Report Format
 
@@ -98,9 +97,42 @@ For any story that changes UI, you MUST verify it works in the browser:
 
 A frontend story is NOT complete until browser verification passes.
 
+## Story State Management
+
+Maintain story state files in `.ralph/stories/{id}/` (gitignored) to enable checkpoint/resume across iterations.
+
+**On first iteration of a story**, write an implementation plan to `.ralph/stories/{id}/plan.md` before coding. Keep it concise — key steps and approach only.
+
+**When making non-obvious architectural decisions**, append to `.ralph/stories/{id}/decisions.md` explaining the choice and rationale.
+
+**At the end of each iteration**, write `.ralph/stories/{id}/state.json` with this schema:
+```json
+{
+  "story_id": "P1-001",
+  "status": "in_progress",
+  "iteration_count": 1,
+  "files_touched": ["path/to/file.go"],
+  "subtasks": [
+    {"description": "Implement core logic", "done": true},
+    {"description": "Add tests", "done": false}
+  ],
+  "errors_encountered": [
+    {"error": "type mismatch on X", "resolution": "changed to Y"}
+  ],
+  "judge_feedback": ["feedback string if any"],
+  "last_updated": "2025-01-01T00:00:00Z"
+}
+```
+
+**Status values**: `in_progress`, `blocked`, `context_exhausted`, `complete`, `failed`
+
+Update `files_touched` with all files you modified. Track subtask progress and record any errors with their resolutions. If judge feedback was received, include it in `judge_feedback`.
+
 ## Context Exhausted
 
-If you cannot complete the story in this session (running out of context, blocked by an external issue, etc.), you MUST append the following to progress.md before ending:
+If you cannot complete the story in this session (running out of context, blocked by an external issue, etc.), you MUST:
+1. Set `status` to `context_exhausted` in `.ralph/stories/{id}/state.json`
+2. Append the following to progress.md:
 
 ```
 ## [Date/Time] - [Story ID] [CONTEXT EXHAUSTED]
