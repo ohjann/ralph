@@ -865,6 +865,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.claudeVP.SetContent(m.claudeContent)
 		m.claudeVP.GotoBottom()
 		m.prevClaudeLen = len(m.claudeContent)
+		// Best-effort checkpoint cleanup on clean completion
+		_ = checkpoint.Delete(m.cfg.ProjectDir)
 		m.phase = phaseDone
 		m.allComplete = true
 		m.exitCode = 0
@@ -890,6 +892,8 @@ func (m *Model) transitionToComplete() (tea.Model, tea.Cmd) {
 
 // transitionToSummary starts generating a final summary of all changes.
 func (m *Model) transitionToSummary() (tea.Model, tea.Cmd) {
+	// Best-effort checkpoint cleanup on clean completion
+	_ = checkpoint.Delete(m.cfg.ProjectDir)
 	m.phase = phaseSummary
 	m.claudeContent = "── Generating summary of all changes... ──\n"
 	m.claudeVP.SetContent(m.claudeContent)
