@@ -39,18 +39,27 @@ implement user stories from a PRD. Key existing capabilities:
 ### Key Limitations to Address
 
 1. Memory is flat — no semantic retrieval, all recent context dumped into prompt
-2. Context exhaustion recovery is lossy — relies on text markers in progress.md
-3. No structured per-story work state — agent must reconstruct intent from history
+2. ~~Context exhaustion recovery is lossy — relies on text markers in progress.md~~ → **Addressed in Phase 1** (structured per-story state)
+3. ~~No structured per-story work state — agent must reconstruct intent from history~~ → **Addressed in Phase 1** (storystate package)
 4. No cost visibility — token usage is logged but not surfaced
 5. All Claude invocations use the same generalist prompt
-6. No crash recovery — killing ralph mid-run loses orchestration state
+6. ~~No crash recovery — killing ralph mid-run loses orchestration state~~ → **Addressed in Phase 1** (checkpoint package)
 7. No cross-run learning — each PRD run starts from zero institutional knowledge
 
 ---
 
-## Phase 1: Per-Story Work State & Checkpoint/Resume
+## Phase 1: Per-Story Work State & Checkpoint/Resume ✅ COMPLETE
 
 **Impact: High | Complexity: Low | Dependencies: None**
+
+> **Status: Implemented** (completed 2026-03-11 on branch `ralph/phase1-state-checkpoint`).
+> Phase 1 has been fully implemented. Key deliverables:
+> - `internal/storystate/` package — per-story state files (state.json, plan.md, decisions.md) with full CRUD
+> - `internal/checkpoint/` package — orchestration checkpoint persistence (.ralph/checkpoint.json)
+> - `BuildPrompt()` injects current story context and one-line summaries of other stories directly into the prompt
+> - `ralph-prompt.md` updated to instruct agents to maintain story state and no longer read prd.json
+> - Story state is copied to worker workspaces and synced back after completion
+> - Checkpoint is written after story events and deleted on clean completion
 
 ### Goal
 
@@ -1302,7 +1311,7 @@ Phase 1 (Story State + Checkpoint)
 
 | Order | Phase | Est. Effort | Cumulative Value |
 |-------|-------|-------------|------------------|
-| 1st   | Phase 1: Story State + Checkpoint | ~3-4 days | Foundation for everything |
+| 1st   | Phase 1: Story State + Checkpoint ✅ | ~3-4 days | Foundation for everything |
 | 2nd   | Phase 3: Cost Tracking | ~2 days | Quick win, high visibility |
 | 3rd   | Phase 2: Vector Memory | ~4-5 days | Transformative capability |
 | 4th   | Phase 4: Agent Specialization | ~3-4 days | Quality step-change |
