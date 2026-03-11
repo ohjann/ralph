@@ -135,6 +135,64 @@ func (c *ChromaClient) AddDocuments(ctx context.Context, collection string, docs
 	return nil
 }
 
+// UpsertDocuments adds or updates documents in a collection. This is idempotent —
+// documents with the same ID are overwritten rather than duplicated.
+func (c *ChromaClient) UpsertDocuments(ctx context.Context, collection string, docs []Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
+
+	collectionID, err := c.getCollectionID(ctx, collection)
+	if err != nil {
+		return fmt.Errorf("upsert documents to %q: %w", collection, err)
+	}
+
+	ids := make([]string, len(docs))
+	documents := make([]string, len(docs))
+	embeddings := make([][]float64, len(docs))
+	metadatas := make([]map[string]interface{}, len(docs))
+
+	for i, doc := range docs {
+		ids[i] = doc.ID
+		documents[i] = doc.Content
+		embeddings[i] = doc.Embedding
+		metadatas[i] = doc.Metadata
+		if metadatas[i] == nil {
+			metadatas[i] = map[string]interface{}{}
+		}
+	}
+
+	body := map[string]interface{}{
+		"ids":        ids,
+		"documents":  documents,
+		"embeddings": embeddings,
+		"metadatas":  metadatas,
+	}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal upsert documents request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/collections/%s/upsert", c.baseURL, collectionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("upsert documents request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("upsert documents to %q: %w", collection, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return c.readError(resp, "upsert documents to %q", collection)
+	}
+	return nil
+}
+
 // QueryCollection queries a collection with a pre-computed embedding and returns the top K results.
 func (c *ChromaClient) QueryCollection(ctx context.Context, collection string, queryEmbedding []float64, topK int) ([]QueryResult, error) {
 	collectionID, err := c.getCollectionID(ctx, collection)
