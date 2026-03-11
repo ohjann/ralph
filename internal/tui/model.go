@@ -589,9 +589,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Judge check
 		if m.cfg.JudgeEnabled && m.currentStoryID != "" {
-			// Check if story now passes
-			cmds = append(cmds, m.handleJudgeCheck())
-			if len(cmds) > 0 {
+			if judgeCmd := m.handleJudgeCheck(); judgeCmd != nil {
+				cmds = append(cmds, judgeCmd)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -741,8 +740,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// Keep listening for more updates
-		cmds = append(cmds, m.coord.ListenCmd())
+		// Only keep listening if there are active workers; otherwise we'd
+		// block forever on the update channel with no one sending.
+		if m.coord.ActiveCount() > 0 {
+			cmds = append(cmds, m.coord.ListenCmd())
+		} else if m.coord.AllDone() {
+			// No active workers and nothing left to schedule — we're done
+			m.phase = phaseDone
+			m.allComplete = m.coord.CompletedCount() == m.totalStories
+			if !m.allComplete {
+				m.exitCode = 1
+			}
+			return m, nil
+		}
 
 	case coordinator.MergeCompleteMsg:
 		if msg.Err != nil {

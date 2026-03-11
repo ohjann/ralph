@@ -86,7 +86,7 @@ func renderCurrentTask(m *Model) string {
 		if m.allComplete {
 			return styleSuccess.Render("✓ All stories complete!")
 		}
-		return styleDanger.Render("✗ Max iterations reached")
+		return styleDanger.Render("✗ Some failed stories")
 	case phaseParallel:
 		if m.coord != nil {
 			active := m.coord.ActiveStoryIDs()
