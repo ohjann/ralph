@@ -105,7 +105,7 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	w.BaseChangeID = ws.BaseChangeID
 
 	// Copy state files into workspace
-	if err := workspace.CopyState(cfg.ProjectDir, ws.Dir); err != nil {
+	if err := workspace.CopyState(cfg.ProjectDir, ws.Dir, w.StoryID); err != nil {
 		send(WorkerFailed, fmt.Errorf("copy state: %w", err), false, "")
 		return
 	}

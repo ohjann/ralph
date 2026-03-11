@@ -174,7 +174,9 @@ func CommitWorkspace(ctx context.Context, wsDir, storyID, title, baseChangeID st
 }
 
 // CopyState copies prd.json, progress.md, and .ralph/ state into the workspace.
-func CopyState(mainDir, wsDir string) error {
+// When storyID is non-empty, only .ralph/stories/{storyID}/ is copied (not other
+// stories' state) to avoid leaking unrelated state between parallel workers.
+func CopyState(mainDir, wsDir, storyID string) error {
 	// Copy prd.json
 	if err := copyFile(
 		filepath.Join(mainDir, "prd.json"),
@@ -189,11 +191,11 @@ func CopyState(mainDir, wsDir string) error {
 		filepath.Join(wsDir, "progress.md"),
 	)
 
-	// Copy .ralph/ directory
+	// Copy .ralph/ directory, but only the relevant story's state
 	srcRalph := filepath.Join(mainDir, ".ralph")
 	dstRalph := filepath.Join(wsDir, ".ralph")
 	if _, err := os.Stat(srcRalph); err == nil {
-		if err := copyDir(srcRalph, dstRalph); err != nil {
+		if err := copyDirSelective(srcRalph, dstRalph, storyID); err != nil {
 			return fmt.Errorf("copying .ralph: %w", err)
 		}
 	}
@@ -226,6 +228,47 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// copyDirSelective copies src to dst but only includes .ralph/stories/{storyID}/
+// when storyID is non-empty. Other stories' state directories are skipped.
+func copyDirSelective(src, dst, storyID string) error {
+	storiesDir := filepath.Join(src, "stories")
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip other stories' directories when storyID is specified
+		if storyID != "" && strings.HasPrefix(path, storiesDir+string(filepath.Separator)) {
+			rel, _ := filepath.Rel(storiesDir, path)
+			// rel is like "P1-003/state.json" or "P1-003"
+			topDir := strings.SplitN(rel, string(filepath.Separator), 2)[0]
+			if topDir != storyID {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+
+		// Skip large log files
+		if info.Size() > 10*1024*1024 {
+			return nil
+		}
+
+		return copyFile(path, target)
+	})
 }
 
 func copyDir(src, dst string) error {
