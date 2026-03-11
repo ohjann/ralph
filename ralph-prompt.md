@@ -171,6 +171,16 @@ If ALL stories are complete and passing, reply with:
 
 If there are still stories with `passes: false`, end your response normally (another iteration will pick up the next story).
 
+## Semantic Memory
+
+Your prompt may include a `## Relevant Memory` section containing semantically retrieved context from prior runs and iterations. This context is automatically curated and scored by the memory pipeline.
+
+- **Relevance scores**: Each memory result includes a relevance score (0.0–1.0). Higher scores indicate stronger semantic match to your current task — prioritize those results.
+- **Trust memory over rediscovery**: When memory provides patterns, architectural decisions, or conventions, trust them rather than re-exploring the codebase to rediscover the same information.
+- **Error resolutions**: If memory includes resolutions for errors similar to what you're encountering, try those solutions first before debugging from scratch.
+- **Memory is read-only**: Do not attempt to write to the vector database directly. New memories are embedded and stored automatically by the pipeline when you complete stories and update progress.md.
+- **Complement with progress.md**: Memory provides cross-run semantic context; progress.md provides sequential history. Use both together for the fullest picture.
+
 ## Important
 
 - Work on ONE story per iteration
