@@ -55,20 +55,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Default max iterations to 1.5x the number of stories (headroom for retries)
-	if cfg.MaxIterations == 0 && !cfg.IdleMode {
-		if p, err := prd.Load(cfg.PRDFile); err == nil {
-			n := p.TotalCount()
-			cfg.MaxIterations = n + n/2
-		}
-	}
-
 	// Initialize debug log
 	if err := debuglog.Init(cfg.LogDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not init debug log: %v\n", err)
 	}
 	defer debuglog.Close()
-	debuglog.Log("ralph starting, version=%s, workers=%d, maxIterations=%d", Version, cfg.Workers, cfg.MaxIterations)
+	debuglog.Log("ralph starting, version=%s, workers=%d", Version, cfg.Workers)
 
 	model := tui.NewModel(cfg, Version)
 

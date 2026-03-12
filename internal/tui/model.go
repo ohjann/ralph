@@ -658,15 +658,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.transitionToComplete()
 		}
 		m.iteration++
-		if m.iteration > m.cfg.MaxIterations {
-			m.phase = phaseDone
-			m.allComplete = false
-			m.exitCode = 1
-			m.completionReason = fmt.Sprintf("Max iterations reached (%d)", m.cfg.MaxIterations)
-			debuglog.Log("entering phaseDone: %s", m.completionReason)
-			m.showCompletionReport()
-			return m, nil
-		}
 		m.currentStoryID = msg.StoryID
 		m.currentStoryTitle = msg.StoryTitle
 		m.phase = phaseClaudeRun
@@ -1595,11 +1586,6 @@ func (m *Model) inferStorySkipReason(storyID string) string {
 			return fmt.Sprintf("Blocked: dependency %q failed", dep)
 		}
 		return "Not scheduled (may have been unreachable in DAG)"
-	}
-
-	// Serial mode: check if we hit max iterations
-	if m.iteration > m.cfg.MaxIterations {
-		return fmt.Sprintf("Max iterations reached (%d)", m.cfg.MaxIterations)
 	}
 
 	// Check events log for clues about this story

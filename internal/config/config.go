@@ -28,7 +28,6 @@ func DefaultMemoryConfig() MemoryConfig {
 }
 
 type Config struct {
-	MaxIterations      int
 	ProjectDir         string
 	RalphHome          string
 	JudgeEnabled       bool
@@ -54,7 +53,6 @@ type Config struct {
 
 func Parse(args []string) (*Config, error) {
 	cfg := &Config{
-		MaxIterations:      0, // 0 = auto (use number of stories in PRD)
 		JudgeMaxRejections: 2,
 		Workers:            1,
 		WorkspaceBase:      "/tmp/ralph-workspaces",
@@ -325,13 +323,7 @@ func Parse(args []string) (*Config, error) {
 				i++
 				continue
 			}
-			// Positional: max_iterations
-			n, err := strconv.Atoi(args[i])
-			if err != nil {
-				return nil, fmt.Errorf("unknown argument %q. Use --help for usage", args[i])
-			}
-			cfg.MaxIterations = n
-			i++
+			return nil, fmt.Errorf("unknown argument %q. Use --help for usage", args[i])
 		}
 	}
 
@@ -435,7 +427,7 @@ func hasPromptFiles(dir string) bool {
 }
 
 func printUsage() {
-	fmt.Print(`Usage: ralph [options] [max_iterations]
+	fmt.Print(`Usage: ralph [options]
 
 Run the Ralph autonomous agent loop against a prd.json in the current directory.
 
@@ -457,12 +449,8 @@ Options:
   --memory-port <n>              ChromaDB sidecar port (default: 9876)
   --help, -h                      Show this help message
 
-Arguments:
-  max_iterations                  Maximum loop iterations (default: number of stories in PRD)
-
 Examples:
-  ralph                           Run with iterations matching story count
-  ralph 5                         Run with 5 iterations
+  ralph                           Run until all stories are complete
   ralph --dir ~/myapp             Run against prd.json in ~/myapp
   ralph --idle                    Launch TUI without executing the loop
   ralph --judge                   Run with Gemini judge verification
