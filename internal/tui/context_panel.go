@@ -77,9 +77,11 @@ func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, 
 		}
 	}
 
-	prevOffset := vp.YOffset
 	vp.SetContent(content)
-	vp.SetYOffset(prevOffset)
+	if data.Mode == contextProgress {
+		// Auto-scroll to bottom so latest progress is visible
+		vp.GotoBottom()
+	}
 
 	body := tabs + "\n" + vp.View()
 	body = clampLines(body, height-2)

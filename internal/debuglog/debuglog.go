@@ -16,18 +16,21 @@ var (
 // Init opens the debug log file. Call once at startup.
 func Init(logDir string) error {
 	mu.Lock()
-	defer mu.Unlock()
 	if logFile != nil {
+		mu.Unlock()
 		return nil
 	}
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		mu.Unlock()
 		return err
 	}
 	f, err := os.OpenFile(filepath.Join(logDir, "debug.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
+		mu.Unlock()
 		return err
 	}
 	logFile = f
+	mu.Unlock()
 	Log("debug log initialized")
 	return nil
 }
