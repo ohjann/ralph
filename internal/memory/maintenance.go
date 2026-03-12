@@ -53,7 +53,8 @@ type MaintenanceSummary struct {
 //  1. For confirmed documents: bump relevance_score by 0.1 (capped at 2.0), update last_confirmed
 //  2. For unconfirmed documents: multiply relevance_score by 0.85
 //  3. Evict any documents with relevance_score below 0.3
-func RunDecayCycle(ctx context.Context, client *ChromaClient, tracker *ConfirmationTracker) error {
+func RunDecayCycle(ctx context.Context, client *ChromaClient, tracker *ConfirmationTracker) (MaintenanceSummary, error) {
+	var total MaintenanceSummary
 	collections := AllCollections()
 
 	for _, col := range collections {
@@ -64,9 +65,12 @@ func RunDecayCycle(ctx context.Context, client *ChromaClient, tracker *Confirmat
 		}
 		log.Printf("[memory/maintenance] %s: confirmed=%d decayed=%d evicted=%d",
 			col.Name, summary.Confirmed, summary.Decayed, summary.Evicted)
+		total.Confirmed += summary.Confirmed
+		total.Decayed += summary.Decayed
+		total.Evicted += summary.Evicted
 	}
 
-	return nil
+	return total, nil
 }
 
 // decayCollection processes a single collection's decay cycle.

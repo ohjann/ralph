@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +57,7 @@ type Model struct {
 	completionReason string // why the run finished
 	startTime        time.Time
 	confirmQuit      bool
+	pausedDuring     phase // which phase we were in when paused (for resume)
 
 	// Panel content
 	progressContent string
@@ -121,6 +123,7 @@ type Model struct {
 	chromaClient   *memory.ChromaClient
 	memoryEmbedder memory.Embedder
 	memoryContent  string // rendered content for the memory context panel tab
+	confirmTracker *memory.ConfirmationTracker
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
@@ -138,6 +141,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		claudeVP:       newClaudeViewport(80, 20),
 		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
 		workerLogCache: make(map[worker.WorkerID]string),
+		confirmTracker: memory.NewConfirmationTracker(),
 	}
 }
 
@@ -339,6 +343,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ctxManualAtPhase = m.phase
 			return m, nil
 		case msg.String() == "enter":
+			if m.phase == phasePaused {
+				m.claudeContent += "\n── Resuming... ──\n"
+				m.claudeVP.SetContent(m.claudeContent)
+				m.claudeVP.GotoBottom()
+				m.prevClaudeLen = len(m.claudeContent)
+				m.ctx, m.cancel = context.WithCancel(context.Background())
+
+				switch m.pausedDuring {
+				case phaseParallel:
+					m.coord.Resume()
+					m.phase = phaseParallel
+					m.coord.ScheduleReady(m.ctx)
+					return m, tea.Batch(m.coord.ListenCmd(), fastTickCmd(), tickCmd())
+				case phasePlanning:
+					m.phase = phasePlanning
+					return m, tea.Batch(planCmd(m.ctx, m.cfg), fastTickCmd())
+				default:
+					// Serial mode — retry current story
+					m.phase = phaseIterating
+					return m, findNextStoryCmd(m.cfg.PRDFile)
+				}
+			}
 			if m.phase == phaseReview {
 				m.phase = phaseInit
 				m.claudeContent = ""
@@ -493,6 +519,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// --- Phase transitions ---
 	case planDoneMsg:
 		if msg.Err != nil {
+			var usageErr *runner.UsageLimitError
+			if errors.As(msg.Err, &usageErr) {
+				m.pausedDuring = phasePlanning
+				m.phase = phasePaused
+				m.claudeContent += "\n── Usage Limit Hit ──\nClaude API usage limit reached during planning.\nPress Enter to resume when your limit resets.\n"
+				m.claudeVP.SetContent(m.claudeContent)
+				m.claudeVP.GotoBottom()
+				m.prevClaudeLen = len(m.claudeContent)
+				return m, nil
+			}
 			m.claudeContent += fmt.Sprintf("\n── Plan Error ──\n%s\n", msg.Err)
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
@@ -554,6 +590,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.memorySidecar = msg.Sidecar
 			m.chromaClient = msg.Client
+			m.confirmTracker = memory.NewConfirmationTracker()
 			// Create embedder for semantic memory retrieval in BuildPrompt
 			if embedder, err := memory.NewAnthropicEmbedder(); err != nil {
 				debuglog.Log("memory embedder init failed (retrieval degraded): %v", err)
@@ -632,6 +669,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stopSidecar()
 				return m, tea.Quit
 			}
+			// Usage limit — pause and wait for user
+			var usageErr *runner.UsageLimitError
+			if errors.As(msg.Err, &usageErr) {
+				m.pausedDuring = phaseClaudeRun
+				m.phase = phasePaused
+				m.claudeContent += "\n── Usage Limit Hit ──\nClaude API usage limit reached.\nPress Enter to resume when your limit resets.\n"
+				m.claudeVP.SetContent(m.claudeContent)
+				m.claudeVP.GotoBottom()
+				m.prevClaudeLen = len(m.claudeContent)
+				return m, nil
+			}
+
 			// Show Claude error in activity panel
 			m.claudeContent += fmt.Sprintf("\n── Claude Error ──\n%s\n", msg.Err)
 			m.claudeVP.SetContent(m.claudeContent)
@@ -647,6 +696,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if p, err := prd.Load(m.cfg.PRDFile); err == nil {
 					p.SetPasses(m.currentStoryID, true)
 					_ = prd.Save(m.cfg.PRDFile, p)
+				}
+				// Confirm retrieved docs that contributed to this successful story
+				if m.confirmTracker != nil && len(msg.DocRefs) > 0 {
+					for _, ref := range msg.DocRefs {
+						_ = m.confirmTracker.ConfirmDocument(m.ctx, ref.Collection, ref.DocID)
+					}
+					debuglog.Log("memory: confirmed %d doc refs for story %s", len(msg.DocRefs), m.currentStoryID)
 				}
 				// Trigger embedding pipeline for completed story
 				if m.chromaClient != nil && m.memoryEmbedder != nil {
@@ -785,6 +841,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case coordinator.WorkerUpdateMsg:
 		u := msg.Update
 		willRetry := m.coord.HandleUpdate(u)
+
+		// Usage limit — pause everything and wait for user
+		if u.UsageLimit {
+			m.pausedDuring = phaseParallel
+			m.phase = phasePaused
+			m.claudeContent += fmt.Sprintf("\n── Usage Limit Hit (%s) ──\nClaude API usage limit reached. All workers paused.\nPress Enter to resume when your limit resets.\n", u.StoryID)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+			return m, nil
+		}
 
 		// Auto-select first worker if none selected yet
 		if m.activeWorkerView == 0 {
@@ -1084,6 +1151,16 @@ func (m *Model) transitionToComplete() (tea.Model, tea.Cmd) {
 
 // transitionToSummary starts generating a final summary of all changes.
 func (m *Model) transitionToSummary() (tea.Model, tea.Cmd) {
+	// Run confidence decay cycle before stopping sidecar (needs ChromaDB running)
+	if m.chromaClient != nil && m.confirmTracker != nil {
+		summary, err := memory.RunDecayCycle(m.ctx, m.chromaClient, m.confirmTracker)
+		if err != nil {
+			debuglog.Log("warning: memory decay cycle failed: %v", err)
+		} else {
+			debuglog.Log("Memory maintenance: %d confirmed, %d decayed, %d evicted",
+				summary.Confirmed, summary.Decayed, summary.Evicted)
+		}
+	}
 	// Stop ChromaDB sidecar — no more memory operations needed
 	m.stopSidecar()
 	// Best-effort checkpoint cleanup on clean completion
@@ -1294,7 +1371,7 @@ func (m *Model) View() string {
 		workerTabStr,
 	)
 
-	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt)
+	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused)
 
 	output := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -1378,7 +1455,11 @@ func clampLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool, review bool, qualityPrompt bool, resumePrompt bool) string {
+func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool, review bool, qualityPrompt bool, resumePrompt bool, paused bool) string {
+	if paused {
+		return "  " + styleKey.Render("enter") + styleFooter.Render(": resume  ") +
+			styleKey.Render("q") + styleFooter.Render(": quit")
+	}
 	if resumePrompt {
 		return "  " + styleKey.Render("y") + styleFooter.Render(": resume  ") +
 			styleKey.Render("n") + styleFooter.Render(": start fresh  ") +

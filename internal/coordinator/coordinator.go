@@ -31,6 +31,7 @@ type Coordinator struct {
 
 	mu              sync.Mutex
 	mergeMu         sync.Mutex // serialises MergeAndSync so jj rebase operations never overlap
+	paused          bool       // true when paused due to usage limit
 	workers         map[worker.WorkerID]*worker.Worker
 	completed       map[string]bool
 	failed          map[string]bool
@@ -79,6 +80,10 @@ func New(cfg *config.Config, d *dag.DAG, maxWorkers int, stories []prd.UserStory
 func (c *Coordinator) ScheduleReady(ctx context.Context) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.paused {
+		return 0
+	}
 
 	ready := c.dag.Ready(c.completed)
 
@@ -169,7 +174,17 @@ func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) bool {
 		if u.Err != nil {
 			errMsg = u.Err.Error()
 		}
-		if u.Retryable && c.retries[u.StoryID] < maxRetries {
+		if u.UsageLimit {
+			// Cancel all workers — nothing can proceed until the limit resets
+			for _, w := range c.workers {
+				if w.Cancel != nil {
+					w.Cancel()
+				}
+			}
+			c.paused = true
+			c.failedErrors[u.StoryID] = errMsg
+			// Don't mark as failed — will retry after user resumes
+		} else if u.Retryable && c.retries[u.StoryID] < maxRetries {
 			c.retries[u.StoryID]++
 			c.failedErrors[u.StoryID] = errMsg
 			// Don't mark as failed — leave it available for ScheduleReady
@@ -453,6 +468,20 @@ func (c *Coordinator) Workers() map[worker.WorkerID]*worker.Worker {
 		result[k] = v
 	}
 	return result
+}
+
+// IsPaused returns true if the coordinator is paused due to a usage limit.
+func (c *Coordinator) IsPaused() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.paused
+}
+
+// Resume unpauses the coordinator so scheduling can continue.
+func (c *Coordinator) Resume() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.paused = false
 }
 
 // CancelAll cancels all active workers.

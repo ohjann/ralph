@@ -86,6 +86,8 @@ func renderCurrentTask(m *Model) string {
 	case phaseQualityPrompt:
 		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(
 			"◇ Issues remain — Enter to continue, q to finish")
+	case phasePaused:
+		return styleDanger.Render("⏸ Usage limit — press Enter to resume")
 	case phaseDone:
 		if m.allComplete {
 			return styleSuccess.Render("✓ All stories complete!")
@@ -224,6 +226,8 @@ func renderPhase(p phase) string {
 		return stylePhaseActive.Render("⚡ Quality Fix")
 	case phaseQualityPrompt:
 		return stylePhaseActive.Render("◇ Review Prompt")
+	case phasePaused:
+		return styleDanger.Render("⏸ Paused")
 	default:
 		return ""
 	}
@@ -232,7 +236,7 @@ func renderPhase(p phase) string {
 // isLoopActive returns true when the ralph loop is actively working.
 func isLoopActive(p phase) bool {
 	switch p {
-	case phaseIdle, phaseDone, phaseReview, phaseResumePrompt, phaseQualityPrompt:
+	case phaseIdle, phaseDone, phaseReview, phaseResumePrompt, phaseQualityPrompt, phasePaused:
 		return false
 	}
 	return true

@@ -214,7 +214,7 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			}
 		}
 
-		prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, opts...)
+		prompt, docRefs, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, opts...)
 		if err != nil {
 			return claudeDoneMsg{Err: err}
 		}
@@ -227,7 +227,7 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 
 		completeSignal := runner.LogContainsComplete(logPath)
 
-		return claudeDoneMsg{Err: err, CompleteSignal: completeSignal}
+		return claudeDoneMsg{Err: err, CompleteSignal: completeSignal, DocRefs: docRefs}
 	}
 }
 

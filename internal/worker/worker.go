@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -65,7 +66,8 @@ type WorkerUpdate struct {
 	Err         error
 	Passed      bool
 	ChangeID    string // jj change_id of committed work, for rebase
-	Retryable   bool   // true for transient errors (rate limits, timeouts)
+	Retryable   bool   // true for transient errors (network, timeouts)
+	UsageLimit  bool   // true when Claude hit usage/rate limit
 	JudgeResult *judge.Result
 }
 
@@ -118,7 +120,7 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	// 2. Build prompt and run Claude
 	send(WorkerRunning, nil, false, "")
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
-	prompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD)
+	prompt, _, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD)
 	if err != nil {
 		send(WorkerFailed, fmt.Errorf("build prompt: %w", err), false, "")
 		return
@@ -144,7 +146,20 @@ Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
 			send(WorkerFailed, w.Ctx.Err(), false, "")
 			return
 		}
-		// Claude CLI failures are likely transient (rate limits, network, etc.)
+		// Usage limit — signal to pause, don't retry automatically
+		var usageErr *runner.UsageLimitError
+		if errors.As(err, &usageErr) {
+			w.State = WorkerFailed
+			updateCh <- WorkerUpdate{
+				WorkerID:   w.ID,
+				StoryID:    w.StoryID,
+				State:      WorkerFailed,
+				Err:        err,
+				UsageLimit: true,
+			}
+			return
+		}
+		// Other Claude CLI failures are likely transient (network, etc.)
 		sendRetryable(fmt.Errorf("claude run: %w", err))
 		return
 	}

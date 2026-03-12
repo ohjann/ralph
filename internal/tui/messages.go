@@ -26,6 +26,7 @@ const (
 	phaseQualityPrompt  // asking user whether to continue fixing
 	phaseSummary        // generating final summary of all changes
 	phaseResumePrompt   // asking user whether to resume from checkpoint
+	phasePaused         // paused due to Claude usage limit — waiting for user
 )
 
 // Tick messages
@@ -53,6 +54,7 @@ type nextStoryMsg struct {
 type claudeDoneMsg struct {
 	Err            error
 	CompleteSignal bool // <promise>COMPLETE</promise> found
+	DocRefs        []memory.DocRef // retrieved doc refs for confirmation tracking
 }
 type judgeDoneMsg struct {
 	Result judge.Result
