@@ -123,7 +123,7 @@ func (p *Pipeline) embedPatterns(ctx context.Context, storyID string, evts []eve
 		docs[i].Embedding = embeddings[i]
 	}
 
-	return p.Client.UpsertDocuments(ctx, CollectionPatterns.Name, docs)
+	return DeduplicateInsertBatch(ctx, p.Client, CollectionPatterns.Name, docs)
 }
 
 // embedCompletion creates a summary document for the story completion and
@@ -172,7 +172,7 @@ func (p *Pipeline) embedCompletion(ctx context.Context, storyID string, state st
 		},
 	}
 
-	return p.Client.UpsertDocuments(ctx, CollectionCompletions.Name, []Document{doc})
+	return DeduplicateInsertBatch(ctx, p.Client, CollectionCompletions.Name, []Document{doc})
 }
 
 // embedErrors extracts error+resolution pairs from story state and embeds each
@@ -210,7 +210,7 @@ func (p *Pipeline) embedErrors(ctx context.Context, storyID string, state storys
 		docs[i].Embedding = embeddings[i]
 	}
 
-	return p.Client.UpsertDocuments(ctx, CollectionErrors.Name, docs)
+	return DeduplicateInsertBatch(ctx, p.Client, CollectionErrors.Name, docs)
 }
 
 // embedDecisions parses decisions.md into individual decision blocks and embeds
@@ -259,7 +259,7 @@ func (p *Pipeline) embedDecisions(ctx context.Context, storyID, decisions string
 		docs[i].Embedding = embeddings[i]
 	}
 
-	return p.Client.UpsertDocuments(ctx, CollectionDecisions.Name, docs)
+	return DeduplicateInsertBatch(ctx, p.Client, CollectionDecisions.Name, docs)
 }
 
 // splitDecisions splits a decisions.md file into individual decision blocks.
