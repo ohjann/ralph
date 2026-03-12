@@ -18,8 +18,8 @@ func NewRetriever(client *ChromaClient, embedder Embedder) *Retriever {
 	return &Retriever{Client: client, Embedder: embedder}
 }
 
-// RetrieveContext queries all memory collections and returns formatted markdown
+// RetrieveContext queries all memory collections and returns a RetrievalResult
 // for prompt injection. Delegates to the package-level RetrieveContext function.
-func (r *Retriever) RetrieveContext(ctx context.Context, storyTitle, storyDescription string, acceptanceCriteria []string, opts RetrievalOptions) (string, error) {
+func (r *Retriever) RetrieveContext(ctx context.Context, storyTitle, storyDescription string, acceptanceCriteria []string, opts RetrievalOptions) (RetrievalResult, error) {
 	return RetrieveContext(ctx, r.Client, r.Embedder, storyTitle, storyDescription, acceptanceCriteria, opts)
 }

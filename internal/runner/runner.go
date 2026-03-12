@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/eoghanhynes/ralph/internal/events"
@@ -20,7 +21,7 @@ import (
 // MemoryRetriever abstracts semantic memory retrieval so callers can pass
 // a real ChromaDB+embedder pair or nil to skip retrieval entirely.
 type MemoryRetriever interface {
-	RetrieveContext(ctx context.Context, storyTitle, storyDescription string, acceptanceCriteria []string, opts memory.RetrievalOptions) (string, error)
+	RetrieveContext(ctx context.Context, storyTitle, storyDescription string, acceptanceCriteria []string, opts memory.RetrievalOptions) (memory.RetrievalResult, error)
 }
 
 // BuildPromptOpts holds optional parameters for BuildPrompt.
@@ -40,8 +41,10 @@ func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...Buil
 	prompt := string(base)
 
 	// Inject PRD context if provided
+	var story *prd.UserStory
 	if p != nil {
-		prompt += buildPRDContext(p, storyID)
+		story = p.FindStory(storyID)
+		prompt += buildPRDContext(p, storyID, story)
 		prompt += buildStoryStateContext(projectDir, storyID)
 	}
 
@@ -66,21 +69,18 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 	}
 
 	// Inject semantic memory context (additive, after event context)
-	if len(opts) > 0 && opts[0].Memory != nil && p != nil {
-		story := p.FindStory(storyID)
-		if story != nil {
-			memCtx, err := opts[0].Memory.RetrieveContext(
-				context.Background(),
-				story.Title,
-				story.Description,
-				story.AcceptanceCriteria,
-				opts[0].MemoryOpts,
-			)
-			if err != nil {
-				log.Printf("warning: semantic memory retrieval failed: %v", err)
-			} else if memCtx != "" {
-				prompt += "\n\n---\n" + memCtx
-			}
+	if len(opts) > 0 && opts[0].Memory != nil && story != nil {
+		memCtx, err := opts[0].Memory.RetrieveContext(
+			context.Background(),
+			story.Title,
+			story.Description,
+			story.AcceptanceCriteria,
+			opts[0].MemoryOpts,
+		)
+		if err != nil {
+			log.Printf("warning: semantic memory retrieval failed: %v", err)
+		} else if memCtx.Text != "" {
+			prompt += "\n\n---\n" + memCtx.Text
 		}
 	}
 
@@ -88,11 +88,10 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 }
 
 // buildPRDContext generates the YOUR STORY, PROJECT CONTEXT, and OTHER STORIES sections.
-func buildPRDContext(p *prd.PRD, storyID string) string {
+func buildPRDContext(p *prd.PRD, storyID string, story *prd.UserStory) string {
 	var b strings.Builder
 
 	// YOUR STORY section
-	story := p.FindStory(storyID)
 	if story != nil {
 		b.WriteString("\n\n---\n## YOUR STORY\n")
 		b.WriteString(fmt.Sprintf("**%s: %s**\n\n", story.ID, story.Title))
@@ -126,6 +125,12 @@ func buildPRDContext(p *prd.PRD, storyID string) string {
 	}
 
 	return b.String()
+}
+
+var validStoryID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func isValidStoryID(id string) bool {
+	return validStoryID.MatchString(id)
 }
 
 // buildStoryStateContext loads story state, plan, and decisions and formats them.

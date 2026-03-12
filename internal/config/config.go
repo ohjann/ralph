@@ -17,6 +17,16 @@ type MemoryConfig struct {
 	Port      int     // --memory-port: ChromaDB sidecar port (default 9876)
 }
 
+// DefaultMemoryConfig returns the default memory configuration values.
+func DefaultMemoryConfig() MemoryConfig {
+	return MemoryConfig{
+		TopK:      5,
+		MinScore:  0.7,
+		MaxTokens: 2000,
+		Port:      9876,
+	}
+}
+
 type Config struct {
 	MaxIterations      int
 	ProjectDir         string
@@ -50,12 +60,7 @@ func Parse(args []string) (*Config, error) {
 		WorkspaceBase:      "/tmp/ralph-workspaces",
 		QualityWorkers:     3,
 		QualityMaxIters:    2,
-		Memory: MemoryConfig{
-			TopK:      5,
-			MinScore:  0.7,
-			MaxTokens: 2000,
-			Port:      9876,
-		},
+		Memory: DefaultMemoryConfig(),
 	}
 
 	// Check for "memory" subcommand as first argument.

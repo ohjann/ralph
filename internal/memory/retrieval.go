@@ -6,7 +6,10 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/eoghanhynes/ralph/internal/config"
 )
 
 // RetrievalOptions controls how semantic retrieval behaves.
@@ -30,12 +33,13 @@ type RetrievalResult struct {
 	DocRefs []DocRef
 }
 
-// DefaultRetrievalOptions returns options with sensible defaults.
+// DefaultRetrievalOptions returns options derived from the default config.
 func DefaultRetrievalOptions() RetrievalOptions {
+	defaults := config.DefaultMemoryConfig()
 	return RetrievalOptions{
-		TopK:      5,
-		MinScore:  0.7,
-		MaxTokens: 2000,
+		TopK:      defaults.TopK,
+		MinScore:  defaults.MinScore,
+		MaxTokens: defaults.MaxTokens,
 	}
 }
 
@@ -72,15 +76,23 @@ func RetrieveContext(
 		return RetrievalResult{}, nil
 	}
 
+	if client == nil {
+		return RetrievalResult{}, fmt.Errorf("chromadb client is nil")
+	}
+	if embedder == nil {
+		return RetrievalResult{}, fmt.Errorf("embedder is nil")
+	}
+
 	// Apply defaults for zero values.
+	defaults := DefaultRetrievalOptions()
 	if opts.TopK <= 0 {
-		opts.TopK = 5
+		opts.TopK = defaults.TopK
 	}
 	if opts.MinScore <= 0 {
-		opts.MinScore = 0.7
+		opts.MinScore = defaults.MinScore
 	}
 	if opts.MaxTokens <= 0 {
-		opts.MaxTokens = 2000
+		opts.MaxTokens = defaults.MaxTokens
 	}
 
 	// Build query string from story context.
@@ -97,26 +109,51 @@ func RetrieveContext(
 		return RetrievalResult{}, fmt.Errorf("embed query: %w", err)
 	}
 
-	// Query all collections and gather results.
-	var ranked []rankedResult
+	// Query all collections concurrently and gather results.
+	collections := AllCollections()
 	now := time.Now()
 
-	for _, col := range AllCollections() {
-		results, err := client.QueryCollection(ctx, col.Name, embedding, opts.TopK)
-		if err != nil {
-			// Skip collections that don't exist or fail — partial results are fine.
-			continue
-		}
+	type colResults struct {
+		name    string
+		results []QueryResult
+	}
 
-		for _, r := range results {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	allResults := make([]colResults, 0, len(collections))
+	var queryErrors []error
+
+	for _, col := range collections {
+		wg.Add(1)
+		go func(colName string) {
+			defer wg.Done()
+			results, err := client.QueryCollection(ctx, colName, embedding, opts.TopK)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				queryErrors = append(queryErrors, fmt.Errorf("collection %s: %w", colName, err))
+				return
+			}
+			allResults = append(allResults, colResults{name: colName, results: results})
+		}(col.Name)
+	}
+	wg.Wait()
+
+	// If all collections failed, surface the errors.
+	if len(allResults) == 0 && len(queryErrors) == len(collections) {
+		return RetrievalResult{}, fmt.Errorf("all collection queries failed: %v", queryErrors[0])
+	}
+
+	ranked := make([]rankedResult, 0, len(collections)*opts.TopK)
+	for _, cr := range allResults {
+		for _, r := range cr.results {
 			if r.Score < opts.MinScore {
 				continue
 			}
-
 			recencyWeight := computeRecencyWeight(r.Document.LastConfirmed(), now)
 			ranked = append(ranked, rankedResult{
 				result:     r,
-				collection: col.Name,
+				collection: cr.name,
 				combined:   r.Score * recencyWeight,
 			})
 		}
@@ -143,7 +180,18 @@ func RetrieveContext(
 		tokenCount += contentTokens
 	}
 
-	return formatMarkdown(selected), nil
+	docRefs := make([]DocRef, len(selected))
+	for i, r := range selected {
+		docRefs[i] = DocRef{
+			Collection: r.collection,
+			DocID:      r.result.Document.ID,
+		}
+	}
+
+	return RetrievalResult{
+		Text:    formatMarkdown(selected),
+		DocRefs: docRefs,
+	}, nil
 }
 
 // computeRecencyWeight returns a decay factor based on how many days ago
@@ -157,8 +205,12 @@ func computeRecencyWeight(lastConfirmed time.Time, now time.Time) float64 {
 	if days < 0 {
 		days = 0
 	}
-	// Exponential decay: half-life of 30 days.
-	return math.Exp(-0.693 * days / 30)
+	// Exponential decay: half-life of 30 days, capped at 1.0.
+	w := math.Exp(-0.693 * days / 30)
+	if w > 1.0 {
+		w = 1.0
+	}
+	return w
 }
 
 // estimateTokens provides a rough token count as len(content)/4.
@@ -203,4 +255,22 @@ func formatMarkdown(results []rankedResult) string {
 	}
 
 	return sb.String()
+}
+
+// maxContentLen caps individual document content length to limit blast radius.
+const maxContentLen = 2000
+
+// sanitizeContent strips potentially dangerous content from documents retrieved
+// from ChromaDB before injecting them into the LLM prompt.
+func sanitizeContent(s string) string {
+	if len(s) > maxContentLen {
+		s = s[:maxContentLen]
+	}
+	// Replace markdown heading markers that could break prompt structure.
+	s = strings.ReplaceAll(s, "\n#", "\n ")
+	// Collapse multiple newlines to prevent layout injection.
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return s
 }
