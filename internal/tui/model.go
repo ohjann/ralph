@@ -382,6 +382,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.coord.CancelAll()
 				m.coord.CleanupAll(context.Background())
 			}
+			m.cleanupWorkerLogs()
 			m.stopStatusServer()
 			m.stopSidecar()
 			m.cancel()
@@ -447,12 +448,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case msg.String() == "q":
 			if m.phase == phaseResumePrompt {
+				m.cleanupWorkerLogs()
 				m.stopStatusServer()
 				m.stopSidecar()
 				m.cancel()
 				return m, tea.Quit
 			}
 			if m.phase == phaseReview {
+				m.cleanupWorkerLogs()
 				m.stopStatusServer()
 				m.stopSidecar()
 				m.cancel()
@@ -463,6 +466,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.transitionToSummary()
 			}
 			if m.confirmQuit || m.phase == phaseDone || m.phase == phaseIdle {
+				m.cleanupWorkerLogs()
 				m.stopStatusServer()
 				m.stopSidecar()
 				m.cancel()
@@ -564,20 +568,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			m.confirmQuit = false
-			// Worker tab switching: 1-9 maps to tab position, not worker ID
-			if m.phase == phaseParallel && len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
-				idx := int(msg.String()[0]-'0') - 1
-				if idx < len(m.workerTabOrder) {
-					wID := m.workerTabOrder[idx]
-					m.activeWorkerView = wID
-					// Load cached logs if available (for completed workers)
-					if cached, ok := m.workerLogCache[wID]; ok {
-						m.claudeContent = cached
-						m.prevClaudeLen = len(cached)
-					} else {
-						m.claudeContent = ""
-						m.prevClaudeLen = 0
+			if m.phase == phaseParallel && len(m.workerTabOrder) > 0 {
+				// Worker tab switching: 1-9 maps to tab position, not worker ID
+				if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+					idx := int(msg.String()[0]-'0') - 1
+					m.switchToWorkerTab(idx)
+				}
+				// </>: cycle prev/next worker (wraps around, works for any count)
+				if msg.String() == "<" || msg.String() == "," {
+					cur := m.workerTabIndex()
+					next := cur - 1
+					if next < 0 {
+						next = len(m.workerTabOrder) - 1
 					}
+					m.switchToWorkerTab(next)
+				}
+				if msg.String() == ">" || msg.String() == "." {
+					cur := m.workerTabIndex()
+					next := (cur + 1) % len(m.workerTabOrder)
+					m.switchToWorkerTab(next)
 				}
 			}
 		}
@@ -663,7 +672,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, reloadPRDCmd(m.cfg.PRDFile))
 		// Refresh memory stats periodically (picks up embedding pipeline changes)
 		if m.chromaClient != nil {
-			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled))
+			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
 		}
 
 	// --- Data updates ---
@@ -795,7 +804,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.memoryEmbedder != nil {
 				cmds = append(cmds, codebaseScanCmd(m.ctx, m.cfg, m.chromaClient, m.memoryEmbedder))
 			}
-			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled))
+			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
 		}
 
 	case codebaseScanDoneMsg:
@@ -804,7 +813,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Refresh memory stats after scan completes (collection counts changed)
 		if m.chromaClient != nil {
-			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled))
+			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
 		}
 
 	case memoryStatsMsg:
@@ -822,6 +831,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debuglog.Log("pipeline embed failed for %s (non-fatal): %v", msg.StoryID, msg.Err)
 		} else {
 			debuglog.Log("pipeline embed complete for %s", msg.StoryID)
+		}
+		// Refresh memory stats immediately after embed so counts update
+		if m.chromaClient != nil {
+			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
 		}
 
 	case nextStoryMsg:
@@ -859,6 +872,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Context cancelled = user quit
 			if m.ctx.Err() != nil {
 				debuglog.Log("claudeDone: context cancelled, quitting")
+				m.cleanupWorkerLogs()
 				m.stopStatusServer()
 				m.stopSidecar()
 				return m, tea.Quit
@@ -1080,6 +1094,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case worker.WorkerDone:
 			// Cache the activity log before workspace cleanup
 			m.cacheWorkerLog(u.WorkerID)
+			// Preserve logs to .ralph/logs/ so they survive workspace destruction
+			m.coord.PreserveWorkerLogs(u.StoryID, u.WorkerID)
 			if u.Passed && u.ChangeID != "" {
 				m.notifyStoryComplete(u.StoryID, m.coord.StoryTitle(u.StoryID))
 				cmds = append(cmds, mergeBackCmd(m.ctx, m.coord, u))
@@ -1436,6 +1452,46 @@ func (m *Model) cacheWorkerLog(wID worker.WorkerID) {
 	}
 }
 
+// cleanupWorkerLogs removes persisted worker log files from .ralph/logs/.
+func (m *Model) cleanupWorkerLogs() {
+	logsDir := filepath.Join(m.cfg.ProjectDir, ".ralph", "logs")
+	entries, err := os.ReadDir(logsDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "worker-") && strings.HasSuffix(e.Name(), ".log") {
+			_ = os.Remove(filepath.Join(logsDir, e.Name()))
+		}
+	}
+}
+
+// switchToWorkerTab switches the active worker view to the worker at the given tab index.
+func (m *Model) switchToWorkerTab(idx int) {
+	if idx < 0 || idx >= len(m.workerTabOrder) {
+		return
+	}
+	wID := m.workerTabOrder[idx]
+	m.activeWorkerView = wID
+	if cached, ok := m.workerLogCache[wID]; ok {
+		m.claudeContent = cached
+		m.prevClaudeLen = len(cached)
+	} else {
+		m.claudeContent = ""
+		m.prevClaudeLen = 0
+	}
+}
+
+// workerTabIndex returns the current tab index for the active worker view.
+func (m *Model) workerTabIndex() int {
+	for i, id := range m.workerTabOrder {
+		if id == m.activeWorkerView {
+			return i
+		}
+	}
+	return 0
+}
+
 // totalCost returns the current run total cost, or 0 if cost tracking is not available.
 func (m *Model) totalCost() float64 {
 	if m.runCosting == nil {
@@ -1749,7 +1805,7 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 		styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
 		styleKey.Render("j/k") + styleFooter.Render(": scroll")
 	if parallel {
-		baseHelp += "  " + styleKey.Render("1-9") + styleFooter.Render(": worker")
+		baseHelp += "  " + styleKey.Render("</>") + styleFooter.Render(": worker")
 	}
 	if qualityPrompt {
 		return "  " + styleKey.Render("enter") + styleFooter.Render(": continue fixing  ") +

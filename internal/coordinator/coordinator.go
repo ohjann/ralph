@@ -447,6 +447,16 @@ func (c *Coordinator) CleanupWorker(ctx context.Context, workerID worker.WorkerI
 // PreserveFailedLogs copies the worker's activity log to the main project's
 // .ralph/logs/worker-<storyID>-failed.log for post-mortem debugging.
 func (c *Coordinator) PreserveFailedLogs(storyID string, workerID worker.WorkerID) {
+	c.preserveWorkerLogs(storyID, workerID, "failed")
+}
+
+// PreserveWorkerLogs copies the worker's activity log to the main project's
+// .ralph/logs/worker-<storyID>.log so output survives workspace cleanup.
+func (c *Coordinator) PreserveWorkerLogs(storyID string, workerID worker.WorkerID) {
+	c.preserveWorkerLogs(storyID, workerID, "")
+}
+
+func (c *Coordinator) preserveWorkerLogs(storyID string, workerID worker.WorkerID, suffix string) {
 	c.mu.Lock()
 	w, ok := c.workers[workerID]
 	c.mu.Unlock()
@@ -462,8 +472,11 @@ func (c *Coordinator) PreserveFailedLogs(storyID string, workerID worker.WorkerI
 
 	dstDir := filepath.Join(c.cfg.ProjectDir, ".ralph", "logs")
 	_ = os.MkdirAll(dstDir, 0o755)
-	dstPath := filepath.Join(dstDir, fmt.Sprintf("worker-%s-failed.log", storyID))
-	_ = os.WriteFile(dstPath, data, 0o644)
+	filename := fmt.Sprintf("worker-%s.log", storyID)
+	if suffix != "" {
+		filename = fmt.Sprintf("worker-%s-%s.log", storyID, suffix)
+	}
+	_ = os.WriteFile(filepath.Join(dstDir, filename), data, 0o644)
 }
 
 // ListenCmd returns a tea.Cmd that waits for the next worker update.

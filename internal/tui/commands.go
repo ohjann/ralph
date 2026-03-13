@@ -491,7 +491,11 @@ func runPipelineCmd(ctx context.Context, client *memory.ChromaClient, embedder m
 }
 
 // memoryStatsCmd fetches collection statistics and formats them for the memory panel.
-func memoryStatsCmd(ctx context.Context, client *memory.ChromaClient, disabled bool) tea.Cmd {
+func memoryStatsCmd(ctx context.Context, client *memory.ChromaClient, disabled bool, opts ...memoryStatsOption) tea.Cmd {
+	var o memoryStatsOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return func() tea.Msg {
 		if disabled {
 			return memoryStatsMsg{Content: "  Memory disabled"}
@@ -520,7 +524,23 @@ func memoryStatsCmd(ctx context.Context, client *memory.ChromaClient, disabled b
 		}
 		b.WriteString(fmt.Sprintf("\n  Total documents: %d\n", totalDocs))
 
+		if !o.hasEmbedder {
+			b.WriteString("\n  ⚠ Embedder not available — no new documents will be stored\n")
+		}
+
 		return memoryStatsMsg{Content: b.String()}
+	}
+}
+
+type memoryStatsOptions struct {
+	hasEmbedder bool
+}
+
+type memoryStatsOption func(*memoryStatsOptions)
+
+func withEmbedder(has bool) memoryStatsOption {
+	return func(o *memoryStatsOptions) {
+		o.hasEmbedder = has
 	}
 }
 
