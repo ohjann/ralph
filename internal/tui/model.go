@@ -1151,6 +1151,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// block forever on the update channel with no one sending.
 		if m.coord.ActiveCount() > 0 {
 			cmds = append(cmds, m.coord.ListenCmd())
+		} else if len(cmds) > 0 {
+			// There are pending commands (e.g. mergeBackCmd) — don't enter
+			// phaseDone yet; let them run and check completion afterwards.
 		} else if m.coord.AllDone() {
 			// No active workers and nothing left to schedule — we're done
 			m.phase = phaseDone
@@ -1197,7 +1200,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Schedule more work
 		m.coord.ScheduleReady(m.ctx)
-		if m.coord.AllDone() {
+		// Re-register listener if new workers were launched — without this,
+		// workers scheduled from a merge-complete (rather than a worker-update)
+		// would send updates into the channel with nobody listening, stalling
+		// the entire run.
+		if m.coord.ActiveCount() > 0 {
+			cmds = append(cmds, m.coord.ListenCmd())
+		} else if m.coord.AllDone() {
 			// Final sync of story counts
 			m.completedStories = m.coord.CompletedCount()
 			if m.completedStories == m.totalStories {
