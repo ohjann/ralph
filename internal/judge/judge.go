@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/eoghanhynes/ralph/internal/costs"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
 	"github.com/eoghanhynes/ralph/internal/prd"
 )
@@ -36,6 +37,7 @@ type Result struct {
 	CriteriaMet    []string
 	CriteriaFailed []string
 	Suggestion     string
+	TokenUsage     costs.TokenUsage
 }
 
 // RunJudge performs the full judge flow for a story.
@@ -80,15 +82,15 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	prompt = strings.ReplaceAll(prompt, "{{DIFF}}", diff)
 
 	// Run gemini
-	output, err := rexec.RunGemini(ctx, prompt)
+	output, tokenUsage, err := rexec.RunGemini(ctx, prompt)
 	if err != nil || output == "" {
-		return Result{Passed: true, Warning: "gemini returned empty output or error"}
+		return Result{Passed: true, Warning: "gemini returned empty output or error", TokenUsage: tokenUsage}
 	}
 
 	// Parse verdict
 	verdict := parseVerdict(output)
 	if verdict == nil {
-		return Result{Passed: true, Warning: "could not parse judge verdict JSON"}
+		return Result{Passed: true, Warning: "could not parse judge verdict JSON", TokenUsage: tokenUsage}
 	}
 
 	if verdict.Verdict == "PASS" {
@@ -97,6 +99,7 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 			Reason:      verdict.Reason,
 			CriteriaMet: verdict.CriteriaMet,
 			Suggestion:  verdict.Suggestion,
+			TokenUsage:  tokenUsage,
 		}
 	}
 
@@ -114,10 +117,11 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 			CriteriaMet:    verdict.CriteriaMet,
 			CriteriaFailed: verdict.CriteriaFailed,
 			Suggestion:     verdict.Suggestion,
+			TokenUsage:     tokenUsage,
 		}
 	}
 
-	return Result{Passed: true, Warning: fmt.Sprintf("unknown verdict %q", verdict.Verdict)}
+	return Result{Passed: true, Warning: fmt.Sprintf("unknown verdict %q", verdict.Verdict), TokenUsage: tokenUsage}
 }
 
 // GetRejectionCount reads the rejection count for a story.

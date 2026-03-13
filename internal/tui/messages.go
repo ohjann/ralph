@@ -65,8 +65,9 @@ type stuckDetectedMsg struct {
 	Info runner.StuckInfo
 }
 type fixStoryGeneratedMsg struct {
-	StoryID string
-	Err     error
+	StoryID    string
+	TokenUsage costs.TokenUsage
+	Err        error
 }
 type planDoneMsg struct {
 	Err error

@@ -245,16 +245,16 @@ func generateFixStoryCmd(ctx context.Context, cfg *config.Config, info runner.St
 		activityPath := runner.ActivityFilePath(cfg.LogDir, info.Iteration)
 		activityTail := runner.ReadLogTail(activityPath, 50)
 
-		fix, err := autofix.GenerateFixStory(ctx, info, *original, activityTail)
+		fix, tokenUsage, err := autofix.GenerateFixStory(ctx, info, *original, activityTail)
 		if err != nil {
-			return fixStoryGeneratedMsg{Err: err}
+			return fixStoryGeneratedMsg{Err: err, TokenUsage: tokenUsage}
 		}
 
 		if err := autofix.InsertFixStory(cfg.PRDFile, fix, info.StoryID); err != nil {
-			return fixStoryGeneratedMsg{Err: err}
+			return fixStoryGeneratedMsg{Err: err, TokenUsage: tokenUsage}
 		}
 
-		return fixStoryGeneratedMsg{StoryID: fix.ID}
+		return fixStoryGeneratedMsg{StoryID: fix.ID, TokenUsage: tokenUsage}
 	}
 }
 

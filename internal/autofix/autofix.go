@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eoghanhynes/ralph/internal/costs"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/runner"
 )
 
 // GenerateFixStory uses Gemini to analyze a stuck pattern and generate a fix story.
+// Returns the generated story, token usage from the Gemini call, and any error.
 func GenerateFixStory(ctx context.Context, info runner.StuckInfo,
-	original prd.UserStory, activityTail string) (*prd.UserStory, error) {
+	original prd.UserStory, activityTail string) (*prd.UserStory, costs.TokenUsage, error) {
 
 	prompt := fmt.Sprintf(`You are analyzing a stuck autonomous coding agent. Generate a short fix task.
 
@@ -41,9 +43,9 @@ Respond with ONLY the JSON object, no markdown fences.`,
 		info.Pattern, info.Count, strings.Join(info.Commands, ", "),
 		activityTail)
 
-	output, err := rexec.RunGemini(ctx, prompt)
+	output, tokenUsage, err := rexec.RunGemini(ctx, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("gemini fix generation: %w", err)
+		return nil, tokenUsage, fmt.Errorf("gemini fix generation: %w", err)
 	}
 
 	// Parse the response - extract JSON
@@ -57,7 +59,7 @@ Respond with ONLY the JSON object, no markdown fences.`,
 	start := strings.Index(output, "{")
 	end := strings.LastIndex(output, "}")
 	if start < 0 || end < 0 || end <= start {
-		return nil, fmt.Errorf("no JSON found in gemini response")
+		return nil, tokenUsage, fmt.Errorf("no JSON found in gemini response")
 	}
 
 	type fixResponse struct {
@@ -68,7 +70,7 @@ Respond with ONLY the JSON object, no markdown fences.`,
 
 	var resp fixResponse
 	if err := json.Unmarshal([]byte(output[start:end+1]), &resp); err != nil {
-		return nil, fmt.Errorf("parsing fix response: %w", err)
+		return nil, tokenUsage, fmt.Errorf("parsing fix response: %w", err)
 	}
 
 	fixStory := &prd.UserStory{
@@ -79,7 +81,7 @@ Respond with ONLY the JSON object, no markdown fences.`,
 		Passes:             false,
 	}
 
-	return fixStory, nil
+	return fixStory, tokenUsage, nil
 }
 
 // InsertFixStory loads the PRD, inserts the fix story before the given story ID, and saves.
