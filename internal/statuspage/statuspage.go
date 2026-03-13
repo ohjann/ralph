@@ -280,25 +280,49 @@ margin-right:6px;animation:pulse 2s infinite}
 </style>
 </head>
 <body>
-<h1>Ralph &mdash; %s</h1>
+<h1>Ralph &mdash; <span id="prd-name">%s</span></h1>
 <div class="meta">
-  <span>Phase: %s</span>
-  <span>Running: %s</span>
+  <span>Phase: <span id="phase">%s</span></span>
+  <span>Running: <span id="duration">%s</span></span>
 </div>
-<div class="summary"><span class="live-dot"></span>Stories: %s</div>
-<div class="cost-total">Cost: $%.2f</div>
-<div class="stories">%s</div>
+<div class="summary"><span class="live-dot"></span>Stories: <span id="summary">%s</span></div>
+<div class="cost-total">Cost: $<span id="total-cost">%.2f</span></div>
+<div id="stories" class="stories">%s</div>
 <script>
 (function(){
-  var es = new EventSource("/events");
-  es.onmessage = function(e){
+  var statusEmoji={"done":"&#x2705;","failed":"&#x274C;","running":"&#x2699;&#xFE0F;","stuck":"&#x274C;","queued":"&#x23F3;"};
+  function esc(s){var d=document.createElement("div");d.textContent=s;return d.innerHTML}
+  function renderStories(stories){
+    var html="",done=0,failed=0,running=0;
+    for(var i=0;i<stories.length;i++){
+      var s=stories[i];
+      if(s.status==="done")done++;
+      else if(s.status==="failed"||s.status==="stuck")failed++;
+      else if(s.status==="running")running++;
+      var cost=s.cost>0?"$"+s.cost.toFixed(2):"&mdash;";
+      var detail="";
+      if(s.detail)detail='<span class="detail">('+esc(s.detail)+')</span>';
+      else if(s.iteration>0&&s.role)detail='<span class="detail">(iter '+s.iteration+', '+esc(s.role)+')</span>';
+      html+='<div class="story '+esc(s.status)+'"><span class="emoji">'+(statusEmoji[s.status]||"&#x2B55;")+'</span><span class="id">'+esc(s.id)+'</span><span class="status">'+esc(s.status)+'</span><span class="cost">'+cost+'</span>'+detail+'</div>';
+    }
+    var summary=done+"/"+stories.length+" complete";
+    if(failed>0)summary+=" | "+failed+" failed";
+    if(running>0)summary+=" | "+running+" in progress";
+    return{html:html,summary:summary};
+  }
+  var es=new EventSource("/events");
+  es.onmessage=function(e){
     try{
-      var d = JSON.parse(e.data);
-      document.location.reload();
+      var d=JSON.parse(e.data);
+      document.getElementById("prd-name").textContent=d.prd_name;
+      document.getElementById("phase").textContent=d.phase;
+      document.getElementById("duration").textContent=d.run_duration;
+      document.getElementById("total-cost").textContent=d.total_cost.toFixed(2);
+      var r=renderStories(d.stories||[]);
+      document.getElementById("stories").innerHTML=r.html;
+      document.getElementById("summary").textContent=r.summary;
+      document.title="Ralph \u2014 "+d.prd_name;
     }catch(err){}
-  };
-  es.onerror = function(){
-    setTimeout(function(){es=new EventSource("/events")},3000);
   };
 })();
 </script>

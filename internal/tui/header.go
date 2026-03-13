@@ -56,6 +56,13 @@ func renderHeader(m *Model, width int) string {
 		badges = append(badges, lipgloss.NewStyle().Foreground(colorSky).Bold(true).Render(
 			fmt.Sprintf("⫘ %d Workers", m.cfg.Workers)))
 	}
+	if m.cfg.NotifyTopic != "" {
+		badges = append(badges, lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("🔔 ntfy"))
+	}
+	if m.cfg.StatusPort > 0 {
+		badges = append(badges, lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render(
+			fmt.Sprintf("📡 :%d", m.cfg.StatusPort)))
+	}
 
 	badgeStr := ""
 	if len(badges) > 0 {

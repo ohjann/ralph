@@ -157,8 +157,12 @@ func NewModel(cfg *config.Config, version string) *Model {
 			ss = nil
 		} else {
 			debuglog.Log("Status page: http://localhost:%d", cfg.StatusPort)
-			fmt.Printf("Status page: http://localhost:%d\n", cfg.StatusPort)
 		}
+	}
+
+	initialContent := ""
+	if summary := cfg.MonitoringSummary(); summary != "" {
+		initialContent = summary + "\n\n"
 	}
 
 	return &Model{
@@ -172,6 +176,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		storiesVP:      newStoriesViewport(35, 10),
 		contextVP:      newContextViewport(60, 10),
 		claudeVP:       newClaudeViewport(80, 20),
+		claudeContent:  initialContent,
 		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
 		runCosting:     costs.NewRunCosting(),
 		workerLogCache: make(map[worker.WorkerID]string),
