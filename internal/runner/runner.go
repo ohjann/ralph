@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/events"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
@@ -202,18 +203,19 @@ type RunClaudeOpts struct {
 
 // RunClaude executes claude with streaming JSON output, parsing events into
 // a human-readable activity file for the TUI to display. Raw JSON is written
-// to the log file for debugging.
-func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) error {
+// to the log file for debugging. Returns accumulated token usage from the
+// streaming response alongside any error.
+func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) (*costs.TokenUsage, error) {
 	logFile, err := os.Create(logFilePath)
 	if err != nil {
-		return fmt.Errorf("creating log file: %w", err)
+		return nil, fmt.Errorf("creating log file: %w", err)
 	}
 	defer logFile.Close()
 
 	activityPath := activityPathFromLog(logFilePath)
 	activityFile, err := os.Create(activityPath)
 	if err != nil {
-		return fmt.Errorf("creating activity file: %w", err)
+		return nil, fmt.Errorf("creating activity file: %w", err)
 	}
 	defer activityFile.Close()
 
@@ -231,11 +233,11 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("creating stdout pipe: %w", err)
+		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting claude: %w", err)
+		return nil, fmt.Errorf("starting claude: %w", err)
 	}
 
 	proc := &streamProcessor{activityFile: activityFile, projectDir: projectDir}
@@ -253,16 +255,18 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 		proc.processLine(line)
 	}
 
+	usage := proc.tokenUsage()
+
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return &usage, ctx.Err()
 		}
 		if IsUsageLimitError(stderrBuf.String()) {
-			return &UsageLimitError{Stderr: strings.TrimSpace(stderrBuf.String())}
+			return &usage, &UsageLimitError{Stderr: strings.TrimSpace(stderrBuf.String())}
 		}
-		return err
+		return &usage, err
 	}
-	return nil
+	return &usage, nil
 }
 
 // LogFilePath returns the log file path for a given iteration.
@@ -381,6 +385,41 @@ type streamProcessor struct {
 	iteration   int
 	storyID     string
 	isFixStory  bool
+
+	// Token usage accumulation
+	model        string
+	inputTokens  int
+	outputTokens int
+	cacheRead    int
+	cacheWrite   int
+}
+
+// tokenUsage returns the accumulated token usage as a costs.TokenUsage.
+func (sp *streamProcessor) tokenUsage() costs.TokenUsage {
+	return costs.TokenUsage{
+		InputTokens:  sp.inputTokens,
+		OutputTokens: sp.outputTokens,
+		CacheRead:    sp.cacheRead,
+		CacheWrite:   sp.cacheWrite,
+		Model:        sp.model,
+		Provider:     "claude",
+	}
+}
+
+// parseUsage extracts token counts from a usage object in streaming events.
+func (sp *streamProcessor) parseUsage(usage map[string]interface{}) {
+	if v, ok := usage["input_tokens"].(float64); ok {
+		sp.inputTokens += int(v)
+	}
+	if v, ok := usage["output_tokens"].(float64); ok {
+		sp.outputTokens += int(v)
+	}
+	if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
+		sp.cacheWrite += int(v)
+	}
+	if v, ok := usage["cache_read_input_tokens"].(float64); ok {
+		sp.cacheRead += int(v)
+	}
 }
 
 func (sp *streamProcessor) processLine(line string) {
@@ -405,6 +444,27 @@ func (sp *streamProcessor) processLine(line string) {
 	eventType, _ := event["type"].(string)
 
 	switch eventType {
+	case "message_start":
+		// Extract model and initial usage from the message object
+		if msg, ok := event["message"].(map[string]interface{}); ok {
+			if model, ok := msg["model"].(string); ok {
+				sp.model = model
+			}
+			if usage, ok := msg["usage"].(map[string]interface{}); ok {
+				sp.parseUsage(usage)
+			} else {
+				log.Printf("warning: message_start event missing usage field")
+			}
+		}
+
+	case "message_delta":
+		// Extract incremental usage from delta
+		if usage, ok := event["usage"].(map[string]interface{}); ok {
+			sp.parseUsage(usage)
+		} else {
+			log.Printf("warning: message_delta event missing usage field")
+		}
+
 	case "content_block_start":
 		block, ok := event["content_block"].(map[string]interface{})
 		if !ok {

@@ -709,6 +709,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevClaudeLen = len(m.claudeContent)
 		}
 
+		// Send cost update if token usage was collected
+		if msg.TokenUsage != nil && m.currentStoryID != "" {
+			cmds = append(cmds, func() tea.Msg {
+				return costUpdateMsg{Usage: *msg.TokenUsage, StoryID: m.currentStoryID}
+			})
+		}
+
 		// Mark current story as passed in prd.json if agent reported it complete.
 		// The system owns the passes field — the agent no longer modifies prd.json.
 		if msg.Err == nil && m.currentStoryID != "" {

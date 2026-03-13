@@ -156,7 +156,7 @@ Do NOT check if all stories are complete. Do NOT emit the COMPLETE signal.
 Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
-	err = runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
+	_, err = runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
 		Iteration: w.Iteration,
 		StoryID:   w.StoryID,
 	})

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/quality"
@@ -53,8 +54,9 @@ type nextStoryMsg struct {
 }
 type claudeDoneMsg struct {
 	Err            error
-	CompleteSignal bool // <promise>COMPLETE</promise> found
-	DocRefs        []memory.DocRef // retrieved doc refs for confirmation tracking
+	CompleteSignal bool              // <promise>COMPLETE</promise> found
+	DocRefs        []memory.DocRef   // retrieved doc refs for confirmation tracking
+	TokenUsage     *costs.TokenUsage // accumulated token usage from streaming
 }
 type judgeDoneMsg struct {
 	Result judge.Result
@@ -96,6 +98,12 @@ type pipelineEmbedDoneMsg struct {
 }
 type memoryStatsMsg struct {
 	Content string
+}
+
+// Cost tracking
+type costUpdateMsg struct {
+	Usage   costs.TokenUsage
+	StoryID string
 }
 
 // Terminal size

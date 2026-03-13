@@ -399,7 +399,7 @@ Be concise. Just fix the conflicts and stop.`, storyID, conflictedFiles)
 	_ = os.MkdirAll(logDir, 0o755)
 	logPath := filepath.Join(logDir, fmt.Sprintf("conflict-resolution-%s.log", storyID))
 
-	if err := runner.RunClaude(ctx, c.cfg.ProjectDir, prompt, logPath); err != nil {
+	if _, err := runner.RunClaude(ctx, c.cfg.ProjectDir, prompt, logPath); err != nil {
 		return fmt.Errorf("claude conflict resolution: %w", err)
 	}
 

@@ -146,7 +146,7 @@ All stories must have "passes": false and "notes": "".
 		_ = os.MkdirAll(cfg.LogDir, 0o755)
 
 		logPath := filepath.Join(cfg.LogDir, "plan.log")
-		err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		_, err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
 		if err != nil {
 			return planDoneMsg{Err: fmt.Errorf("claude plan generation failed: %w", err)}
 		}
@@ -220,14 +220,14 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
-		err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
+		usage, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
 			Iteration: iteration,
 			StoryID:   storyID,
 		})
 
 		completeSignal := runner.LogContainsComplete(logPath)
 
-		return claudeDoneMsg{Err: err, CompleteSignal: completeSignal, DocRefs: docRefs}
+		return claudeDoneMsg{Err: err, CompleteSignal: completeSignal, DocRefs: docRefs, TokenUsage: usage}
 	}
 }
 
@@ -400,7 +400,7 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 `, string(prdData), string(progressData))
 
 		logPath := filepath.Join(cfg.LogDir, "summary.log")
-		err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		_, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
 
 		// Read the generated summary
 		summaryPath := filepath.Join(cfg.ProjectDir, "SUMMARY.md")
