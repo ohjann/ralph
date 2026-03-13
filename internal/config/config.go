@@ -42,6 +42,7 @@ type Config struct {
 	Memory             MemoryConfig
 	MemoryCommand      string // "stats", "search", "prune", "reset" (empty = normal TUI mode)
 	MemoryQuery        string // query text for "ralph memory search <query>"
+	StatusPort         int    // --status-port <port>: remote status page (0 = disabled)
 
 	// Derived paths
 	PRDFile        string
@@ -227,6 +228,16 @@ func Parse(args []string) (*Config, error) {
 			}
 			cfg.Memory.Port = n
 			i += 2
+		case "--status-port":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--status-port requires a port number")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return nil, fmt.Errorf("--status-port: invalid number %q", args[i+1])
+			}
+			cfg.StatusPort = n
+			i += 2
 		default:
 			// Check for --key=value forms
 			if len(args[i]) > 6 && args[i][:6] == "--dir=" {
@@ -322,6 +333,15 @@ func Parse(args []string) (*Config, error) {
 					return nil, fmt.Errorf("--memory-port: invalid number %q", args[i][len("--memory-port="):])
 				}
 				cfg.Memory.Port = n
+				i++
+				continue
+			}
+			if strings.HasPrefix(args[i], "--status-port=") {
+				n, err := strconv.Atoi(args[i][len("--status-port="):])
+				if err != nil {
+					return nil, fmt.Errorf("--status-port: invalid number %q", args[i][len("--status-port="):])
+				}
+				cfg.StatusPort = n
 				i++
 				continue
 			}
@@ -449,6 +469,7 @@ Options:
   --memory-max-tokens <n>        Max tokens for memory context (default: 2000)
   --memory-disable               Disable semantic memory (skip ChromaDB sidecar)
   --memory-port <n>              ChromaDB sidecar port (default: 9876)
+  --status-port <port>           Start remote status page on given port (disabled by default)
   --help, -h                      Show this help message
 
 Examples:
