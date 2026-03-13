@@ -2,9 +2,27 @@
 
 ![Ralph](ralph.webp)
 
-Ralph is an autonomous AI agent that runs [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a loop until all user stories in a PRD are complete. Each iteration gets a fresh context window. Memory persists via version control history, `progress.md`, and `prd.json`.
+Ralph is an autonomous AI agent that runs [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a loop until all user stories in a PRD are complete. Each iteration gets a fresh context window. Memory persists via version control history, `progress.md`, `prd.json`, and semantic vector retrieval.
 
 Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
+
+## Features
+
+- **Per-story work state** — each story gets its own `.ralph/stories/{id}/` directory with `state.json`, `plan.md`, and `decisions.md`, persisted across iterations
+- **PRD context injection** — the current story is injected in full + one-line summaries of other stories directly into the prompt (~200 tokens vs ~3K)
+- **Crash-resilient checkpoints** — orchestration state saved to `.ralph/checkpoint.json` after every story event; on restart Ralph detects the checkpoint and offers to resume
+- **Parallel execution** — DAG analysis determines story dependencies; independent stories run across N workers in isolated jj workspaces
+- **Gemini judge** — an independent LLM reviews each story after Claude marks it complete, rejecting subpar implementations
+- **Quality review gate** — five parallel "lens" reviewers (security, efficiency, DRY, error handling, testing) examine the full changeset after all stories pass
+- **Semantic memory** — ChromaDB vector database with Voyage AI embeddings stores patterns, errors, decisions, and codebase signatures across runs
+- **Confidence decay** — unconfirmed memories decay by 0.85x per run; confirmed memories get boosted
+- **Real-time cost tracking** — token usage parsed from Claude and Gemini streaming output, aggregated per-story and per-run
+- **TUI costs tab** — per-story cost breakdown, total run cost, token counts, cache hit rate
+- **Run history** — `ralph history` shows recent runs with date, stories, cost, and duration
+- **Push notifications** — ntfy.sh notifications on story complete/fail/stuck and run done; zero accounts needed
+- **Remote status page** — mobile-friendly HTTP status page with SSE live updates; JSON API at `/api/status`
+- **Stuck detection** — detects tool-call loops, cancels the process, and inserts a targeted fix story
+- **Automatic archiving** — previous runs archived to `.ralph/archive/` when you start a new feature
 
 ## Prerequisites
 
@@ -134,8 +152,24 @@ Options:
   --no-quality-review             Disable final quality review (enabled by default)
   --quality-workers <n>           Parallel quality reviewers (default: 3)
   --quality-max-iterations <n>    Max review-fix cycles (default: 2)
+  --notify <topic>                Send push notifications via ntfy.sh to given topic
+  --ntfy-server <url>             Self-hosted ntfy server URL (default: https://ntfy.sh)
+  --status-port <port>            Start remote status page on given port (disabled by default)
+  --memory-max-tokens <n>         Max tokens for injected memory context (default: 2000)
+  --memory-top-k <n>              Results per memory collection (default: 5)
+  --memory-min-score <float>      Memory similarity threshold (default: 0.7)
+  --memory-disable                Skip ChromaDB startup
+  --memory-port <port>            ChromaDB sidecar port (default: 9876)
   --idle                          Launch TUI without executing (display only)
   --help, -h                      Show help
+
+Subcommands:
+  ralph history                   Show recent run summaries (last 10)
+  ralph history --all             Show all run history
+  ralph memory stats              Show memory collection statistics
+  ralph memory search <query>     Test semantic retrieval
+  ralph memory prune              Force memory confidence decay
+  ralph memory reset              Clear all memory collections
 
 Arguments:
   max_iterations                  Max loop iterations (default: 1.5x story count)
@@ -148,6 +182,7 @@ Examples:
   ralph --no-judge                               Run without Gemini judge
   ralph --no-quality-review                     Run without final quality gate
   ralph --plan plan.md --workers 2              Full pipeline
+  ralph --notify my-topic --status-port 8080    Run with notifications and status page
 ```
 
 ## TUI Keybindings
@@ -162,42 +197,93 @@ Examples:
 | `1-9` | Switch worker view (parallel mode) |
 | `Enter` | Start execution (review phase only) |
 
-## Project Structure
+## Configuration
 
-```
-cmd/ralph/          Entry point
-internal/
-  config/           CLI flag parsing and configuration
-  tui/              Bubbletea TUI (model, views, commands, styles)
-  runner/           Claude Code CLI integration and output streaming
-  prd/              prd.json loading, saving, story management
-  coordinator/      Parallel worker scheduling and state sync
-  worker/           Worker goroutine lifecycle
-  dag/              Dependency analysis via Claude CLI
-  workspace/        jj workspace create/destroy/merge
-  judge/            Gemini judge integration
-  archive/          Run archiving (previous prd.json + progress.md)
-  autofix/          Stuck loop detection and fix story generation
-  quality/          Final quality review gate (multi-lens reviewers)
-  events/           Event log (events.jsonl)
-  exec/             Shell command helpers (jj wrappers)
-ralph-prompt.md     Prompt template for Claude Code iterations
-judge-prompt.md     Review template for Gemini judge
-skills/ralph/       Claude Code skill for converting plans to prd.json
+### Push Notifications (ntfy.sh)
+
+Ralph sends push notifications via [ntfy.sh](https://ntfy.sh) — a free, open-source notification service that requires zero accounts.
+
+**Setup:**
+
+1. Install the ntfy app on your phone ([iOS](https://apps.apple.com/app/ntfy/id1625396347) / [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy))
+2. Subscribe to a secret topic (e.g., `ralph-yourname-a8f3`) in the app
+3. Run ralph with the same topic:
+
+```bash
+ralph --notify ralph-yourname-a8f3
 ```
 
-## Key Files (In Your Project)
+You'll receive push notifications for: story completion, story failure, stuck detection, and run completion (with cost summary).
 
-Ralph creates and manages these files in the project directory:
+**Self-hosted ntfy:** If you run your own ntfy instance (e.g., on your Tailscale network):
 
-| File | Purpose |
-|------|---------|
-| `prd.json` | User stories with `passes` status -- the task list |
-| `progress.md` | Append-only learnings for future iterations |
-| `.ralph/` | Logs, events, judge feedback, stuck detection |
-| `.ralph/logs/` | Claude output logs per iteration |
-| `.ralph/archive/` | Archived runs from previous features |
-| `.ralph/quality/` | Quality review assessments per iteration |
+```bash
+ralph --notify my-topic --ntfy-server https://ntfy.my-server.ts.net
+```
+
+### Remote Status Page + Tailscale
+
+Ralph serves a mobile-friendly status page with live Server-Sent Events updates. Combined with [Tailscale](https://tailscale.com), you can monitor runs from your phone without port forwarding.
+
+**Setup:**
+
+1. Install [Tailscale](https://tailscale.com/download) on your laptop and phone
+2. Start ralph with a status port:
+
+```bash
+ralph --status-port 8080
+```
+
+3. Find your laptop's Tailscale IP:
+
+```bash
+tailscale ip -4    # e.g., 100.64.1.42
+```
+
+4. Open `http://100.64.1.42:8080` on your phone (connected to Tailscale)
+
+The status page shows: PRD name, current phase, run duration, story list with status/cost, and total run cost — all updating in real-time via SSE.
+
+A JSON API is also available at `/api/status` for programmatic access.
+
+### Semantic Memory (ChromaDB)
+
+Ralph uses a ChromaDB vector database for semantic memory across runs. It requires a Python environment with `chromadb` installed.
+
+**Setup:**
+
+1. Install conda (or ensure pip is available)
+2. Ralph will automatically create a conda environment and install chromadb on first run
+3. Memory data persists in `.ralph/memory/chroma/`
+
+To use Voyage AI embeddings (recommended), set your API key:
+
+```bash
+export VOYAGE_API_KEY=your-key    # or uses ANTHROPIC_API_KEY as fallback
+```
+
+To disable semantic memory entirely:
+
+```bash
+ralph --memory-disable
+```
+
+### Full Remote Monitoring Stack
+
+For the complete phone monitoring experience:
+
+```bash
+# On your laptop (connected to Tailscale)
+ralph --plan .claude/plans/my-feature.md \
+      --workers 3 \
+      --notify ralph-yourname-a8f3 \
+      --status-port 8080
+```
+
+Then on your phone:
+- **Status page**: `http://<tailscale-ip>:8080` for live progress
+- **ntfy app**: push notifications for key events
+- **ralph history**: check past runs when you're back at your laptop
 
 ## prd.json Format
 
@@ -244,12 +330,14 @@ Stories execute in priority order. Earlier stories must not depend on later ones
 
 ### Memory Between Iterations
 
-Each iteration is a fresh Claude Code instance. The only memory is:
+Each iteration is a fresh Claude Code instance. Memory persists via:
 
 - **jj history** -- commits from previous iterations
 - **`progress.md`** -- learnings, patterns, and context
-- **`prd.json`** -- which stories are done
+- **`prd.json`** -- which stories are done (injected directly into prompt)
 - **`CLAUDE.md`** -- Ralph updates these with discovered patterns
+- **Story state** -- structured state.json, plan.md, decisions.md per story
+- **Semantic memory** -- ChromaDB vector retrieval of relevant patterns, errors, and decisions from past runs
 
 ### Stuck Detection
 
@@ -263,6 +351,53 @@ If Claude gets stuck in a loop (repeatedly running the same command or editing t
 ### Archiving
 
 When you start a new feature (different `branchName` in prd.json), Ralph automatically archives the previous run's `prd.json` and `progress.md` to `.ralph/archive/YYYY-MM-DD-feature-name/`.
+
+## Project Structure
+
+```
+cmd/ralph/          Entry point
+internal/
+  config/           CLI flag parsing and configuration
+  tui/              Bubbletea TUI (model, views, commands, styles)
+  runner/           Claude Code CLI integration and output streaming
+  prd/              prd.json loading, saving, story management
+  coordinator/      Parallel worker scheduling and state sync
+  worker/           Worker goroutine lifecycle
+  dag/              Dependency analysis via Claude CLI
+  workspace/        jj workspace create/destroy/merge
+  judge/            Gemini judge integration
+  archive/          Run archiving (previous prd.json + progress.md)
+  autofix/          Stuck loop detection and fix story generation
+  quality/          Final quality review gate (multi-lens reviewers)
+  events/           Event log (events.jsonl)
+  exec/             Shell command helpers (jj wrappers)
+  storystate/       Per-story state persistence (state.json, plan.md, decisions.md)
+  checkpoint/       Orchestration checkpoint for crash recovery and resume
+  memory/           ChromaDB sidecar, embedding pipeline, semantic retrieval
+  costs/            Token usage tracking, pricing, run history
+  notify/           Push notifications via ntfy.sh
+  statuspage/       Remote HTTP status page with SSE live updates
+ralph-prompt.md     Prompt template for Claude Code iterations
+judge-prompt.md     Review template for Gemini judge
+skills/ralph/       Claude Code skill for converting plans to prd.json
+```
+
+## Key Files (In Your Project)
+
+Ralph creates and manages these files in the project directory:
+
+| File | Purpose |
+|------|---------|
+| `prd.json` | User stories with `passes` status -- the task list |
+| `progress.md` | Append-only learnings for future iterations |
+| `.ralph/` | Logs, events, judge feedback, stuck detection |
+| `.ralph/logs/` | Claude output logs per iteration |
+| `.ralph/archive/` | Archived runs from previous features |
+| `.ralph/quality/` | Quality review assessments per iteration |
+| `.ralph/stories/` | Per-story state (state.json, plan.md, decisions.md) |
+| `.ralph/checkpoint.json` | Orchestration checkpoint for resume |
+| `.ralph/memory/` | ChromaDB vector database storage |
+| `.ralph/run-history.json` | Accumulated run summaries with cost data |
 
 ## References
 
