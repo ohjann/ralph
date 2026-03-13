@@ -43,6 +43,8 @@ func renderHeader(m *Model, width int) string {
 	elapsed := time.Since(m.startTime).Truncate(time.Second)
 	elapsedBlock := fmt.Sprintf("⏱ %s", formatDuration(elapsed))
 
+	costBlock := styleCost.Render(fmt.Sprintf("$%.2f", m.runCosting.TotalCost))
+
 	var badges []string
 	if m.cfg.JudgeEnabled {
 		badges = append(badges, styleJudgeOn.Render("⚖ Judge"))
@@ -60,7 +62,7 @@ func renderHeader(m *Model, width int) string {
 		badgeStr = "  │  " + strings.Join(badges, "  ")
 	}
 
-	line2 := fmt.Sprintf("%s  │  %s%s", progressBlock, elapsedBlock, badgeStr)
+	line2 := fmt.Sprintf("%s  │  %s  │  %s%s", progressBlock, elapsedBlock, costBlock, badgeStr)
 
 	// Decorative separator
 	sep := renderDecorativeSeparator(width, running, pulse)

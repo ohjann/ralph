@@ -38,6 +38,9 @@ var (
 	styleJudgeOff = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
+	styleCost = lipgloss.NewStyle().
+			Foreground(colorPrimary) // dim yellow
+
 	// Panels — standard rounded border
 	stylePanelBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).

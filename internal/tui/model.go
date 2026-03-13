@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/checkpoint"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/notify"
 	"github.com/eoghanhynes/ralph/internal/coordinator"
@@ -119,6 +120,9 @@ type Model struct {
 	// Resume checkpoint (loaded during phaseInit)
 	loadedCheckpoint *checkpoint.Checkpoint
 
+	// Cost tracking
+	runCosting *costs.RunCosting
+
 	// Memory / ChromaDB sidecar
 	memorySidecar  *memory.Sidecar
 	chromaClient   *memory.ChromaClient
@@ -150,6 +154,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		contextVP:      newContextViewport(60, 10),
 		claudeVP:       newClaudeViewport(80, 20),
 		progressSpring: harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.5),
+		runCosting:     costs.NewRunCosting(),
 		workerLogCache: make(map[worker.WorkerID]string),
 		confirmTracker: memory.NewConfirmationTracker(),
 		notifier:       n,
@@ -1183,6 +1188,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.exitCode = 0
 		m.completionReason = "All stories completed successfully"
 		debuglog.Log("entering phaseDone: %s", m.completionReason)
+
+	case costUpdateMsg:
+		m.runCosting.AddIteration(msg.StoryID, msg.Usage, 0)
 	}
 
 	return m, tea.Batch(cmds...)
