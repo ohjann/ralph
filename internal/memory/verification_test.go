@@ -80,9 +80,9 @@ func statefulChromaServer(t *testing.T, store *statefulChromaStore) *httptest.Se
 		store.mu.Lock()
 		defer store.mu.Unlock()
 
-		// GET /api/v1/collections/{name} — collection lookup by name
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/collections/") {
-			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/collections/"), "/")
+		// GET /api/v2/tenants/default_tenant/databases/default_database/collections/{name} — collection lookup by name
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/") {
+			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/"), "/")
 			key := parts[0]
 
 			// Check UUID-based count endpoint

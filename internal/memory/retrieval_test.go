@@ -239,9 +239,9 @@ func newFakeChromaServer(results map[string][]QueryResult, failCollections map[s
 	}
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle GET /api/v1/collections/{name} (used by getCollectionID)
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/collections/") {
-			name := strings.TrimPrefix(r.URL.Path, "/api/v1/collections/")
+		// Handle GET /api/v2/tenants/default_tenant/databases/default_database/collections/{name} (used by getCollectionID)
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/") {
+			name := strings.TrimPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/")
 			if id, ok := collectionIDs[name]; ok {
 				json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "name": name})
 				return

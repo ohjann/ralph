@@ -154,7 +154,7 @@ func getAllDocuments(ctx context.Context, client *ChromaClient, collection strin
 		return nil, fmt.Errorf("get collection %q: %w", collection, err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/get", client.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/get", client.baseURL, collectionID)
 
 	body := strings.NewReader(`{"include":["documents","metadatas"]}`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)

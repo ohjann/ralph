@@ -51,8 +51,10 @@ func (s *Sidecar) Start(ctx context.Context, pythonPath string, dataDir string, 
 	}
 	s.logFile = lf
 
+	// ChromaDB 1.x uses a native binary instead of the Python module.
+	chromaBin := filepath.Join(filepath.Dir(pythonPath), "chroma")
 	s.cmd = exec.CommandContext(ctx,
-		pythonPath, "-m", "chromadb.cli.cli", "run",
+		chromaBin, "run",
 		"--path", chromaDir,
 		"--port", fmt.Sprintf("%d", port),
 	)
@@ -169,7 +171,7 @@ var isHealthyFunc = isHealthy
 // isHealthy checks if ChromaDB is responding on the given port.
 func isHealthy(port int) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/api/v1/heartbeat", port))
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/api/v2/heartbeat", port))
 	if err != nil {
 		return false
 	}

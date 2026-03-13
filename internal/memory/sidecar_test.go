@@ -22,7 +22,7 @@ func TestStart_DetectsRunningInstance(t *testing.T) {
 
 	// Create a mock heartbeat server.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/heartbeat" {
+		if r.URL.Path == "/api/v2/heartbeat" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -42,7 +42,7 @@ func TestStart_DetectsRunningInstance(t *testing.T) {
 		if p != port {
 			return false
 		}
-		resp, err := http.Get(srv.URL + "/api/v1/heartbeat")
+		resp, err := http.Get(srv.URL + "/api/v2/heartbeat")
 		if err != nil {
 			return false
 		}
@@ -106,7 +106,7 @@ func TestIsRunning_FalseAfterStop(t *testing.T) {
 		if p != port {
 			return false
 		}
-		resp, err := http.Get(srv.URL + "/api/v1/heartbeat")
+		resp, err := http.Get(srv.URL + "/api/v2/heartbeat")
 		if err != nil {
 			return false
 		}
@@ -146,7 +146,7 @@ func TestPort_ReturnsConfiguredPort(t *testing.T) {
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
 	isHealthyFunc = func(p int) bool {
-		resp, err := http.Get(srv.URL + "/api/v1/heartbeat")
+		resp, err := http.Get(srv.URL + "/api/v2/heartbeat")
 		if err != nil {
 			return false
 		}

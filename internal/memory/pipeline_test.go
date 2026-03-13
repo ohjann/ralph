@@ -56,8 +56,8 @@ func trackingChromaServer(t *testing.T, nearDuplicate bool) (*httptest.Server, *
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GET endpoints: collection lookup by name or UUID-based count
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/collections/") {
-			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/collections/"), "/")
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/") {
+			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v2/tenants/default_tenant/databases/default_database/collections/"), "/")
 			key := parts[0]
 
 			// Check if key is a UUID (for count endpoint)
@@ -148,7 +148,7 @@ func trackingChromaServer(t *testing.T, nearDuplicate bool) (*httptest.Server, *
 			}
 		}
 
-		// GET count endpoint: /api/v1/collections/{uuid}/count
+		// GET count endpoint: /api/v2/tenants/default_tenant/databases/default_database/collections/{uuid}/count
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/count") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("1"))

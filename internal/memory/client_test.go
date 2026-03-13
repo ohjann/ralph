@@ -119,15 +119,15 @@ func TestNewClient(t *testing.T) {
 // --- Mock server helpers ---
 
 // collectionServer returns an httptest.Server that handles:
-// - GET /api/v1/collections/{name} -> returns collection with given ID
-// - POST /api/v1/collections/{id}/add -> records request body, returns 200
-// - POST /api/v1/collections/{id}/query -> returns mock query results
-// - GET /api/v1/collections/{id}/count -> returns mock count
+// - GET /api/v2/tenants/default_tenant/databases/default_database/collections/{name} -> returns collection with given ID
+// - POST /api/v2/tenants/default_tenant/databases/default_database/collections/{id}/add -> records request body, returns 200
+// - POST /api/v2/tenants/default_tenant/databases/default_database/collections/{id}/query -> returns mock query results
+// - GET /api/v2/tenants/default_tenant/databases/default_database/collections/{id}/count -> returns mock count
 func collectionServer(t *testing.T, collectionID string, handler func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Handle collection lookup by name
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/test-collection" {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v2/tenants/default_tenant/databases/default_database/collections/test-collection" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"id": collectionID})
 			return
@@ -177,8 +177,8 @@ func TestAddDocuments_ConstructsCorrectRequest(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", capturedMethod)
 	}
-	if capturedPath != "/api/v1/collections/col-uuid-123/add" {
-		t.Errorf("path = %q, want /api/v1/collections/col-uuid-123/add", capturedPath)
+	if capturedPath != "/api/v2/tenants/default_tenant/databases/default_database/collections/col-uuid-123/add" {
+		t.Errorf("path = %q, want /api/v2/tenants/default_tenant/databases/default_database/collections/col-uuid-123/add", capturedPath)
 	}
 
 	// Verify request body structure
@@ -303,7 +303,7 @@ func TestQueryCollection_EmptyResults(t *testing.T) {
 
 func TestCountDocuments_ParsesResponse(t *testing.T) {
 	srv := collectionServer(t, "col-uuid-cnt", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/collections/col-uuid-cnt/count" {
+		if r.URL.Path != "/api/v2/tenants/default_tenant/databases/default_database/collections/col-uuid-cnt/count" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
@@ -329,7 +329,7 @@ func TestCountDocuments_ParsesResponse(t *testing.T) {
 func TestClientMethods_Non2xxErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Collection lookup succeeds, but operations fail
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/test-collection" {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v2/tenants/default_tenant/databases/default_database/collections/test-collection" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"id": "col-err"})
 			return

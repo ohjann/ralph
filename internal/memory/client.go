@@ -35,7 +35,7 @@ func (c *ChromaClient) CreateCollection(ctx context.Context, name string) error 
 		return fmt.Errorf("marshal create collection request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/collections", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v2/tenants/default_tenant/databases/default_database/collections", bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("create collection request: %w", err)
 	}
@@ -55,13 +55,7 @@ func (c *ChromaClient) CreateCollection(ctx context.Context, name string) error 
 
 // DeleteCollection deletes a collection by name from ChromaDB.
 func (c *ChromaClient) DeleteCollection(ctx context.Context, name string) error {
-	// First get the collection ID
-	collectionID, err := c.getCollectionID(ctx, name)
-	if err != nil {
-		return fmt.Errorf("delete collection %q: %w", name, err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/collections/"+collectionID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v2/tenants/default_tenant/databases/default_database/collections/"+name, nil)
 	if err != nil {
 		return fmt.Errorf("delete collection request: %w", err)
 	}
@@ -116,7 +110,7 @@ func (c *ChromaClient) AddDocuments(ctx context.Context, collection string, docs
 		return fmt.Errorf("marshal add documents request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/add", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/add", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("add documents request: %w", err)
@@ -174,7 +168,7 @@ func (c *ChromaClient) UpsertDocuments(ctx context.Context, collection string, d
 		return fmt.Errorf("marshal upsert documents request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/upsert", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/upsert", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("upsert documents request: %w", err)
@@ -211,7 +205,7 @@ func (c *ChromaClient) QueryCollection(ctx context.Context, collection string, q
 		return nil, fmt.Errorf("marshal query request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/query", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/query", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("query collection request: %w", err)
@@ -284,7 +278,7 @@ func (c *ChromaClient) GetDocument(ctx context.Context, collection string, docID
 		return Document{}, fmt.Errorf("marshal get document request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/get", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/get", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return Document{}, fmt.Errorf("get document request: %w", err)
@@ -350,7 +344,7 @@ func (c *ChromaClient) UpdateDocument(ctx context.Context, collection string, do
 		return fmt.Errorf("marshal update document request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/update", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/update", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("update document request: %w", err)
@@ -385,7 +379,7 @@ func (c *ChromaClient) DeleteDocument(ctx context.Context, collection string, do
 		return fmt.Errorf("marshal delete document request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/delete", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/delete", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("delete document request: %w", err)
@@ -411,7 +405,7 @@ func (c *ChromaClient) CountDocuments(ctx context.Context, collection string) (i
 		return 0, fmt.Errorf("count documents in %q: %w", collection, err)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/collections/%s/count", c.baseURL, collectionID)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s/count", c.baseURL, collectionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, fmt.Errorf("count documents request: %w", err)
@@ -436,7 +430,7 @@ func (c *ChromaClient) CountDocuments(ctx context.Context, collection string) (i
 
 // getCollectionID looks up a collection by name and returns its UUID.
 func (c *ChromaClient) getCollectionID(ctx context.Context, name string) (string, error) {
-	url := fmt.Sprintf("%s/api/v1/collections/%s", c.baseURL, name)
+	url := fmt.Sprintf("%s/api/v2/tenants/default_tenant/databases/default_database/collections/%s", c.baseURL, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("get collection request: %w", err)
