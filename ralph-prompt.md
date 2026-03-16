@@ -100,7 +100,7 @@ A frontend story is NOT complete until browser verification passes.
 
 Maintain story state files in `.ralph/stories/{id}/` (gitignored) to enable checkpoint/resume across iterations.
 
-**On first iteration of a story**, write an implementation plan to `.ralph/stories/{id}/plan.md` before coding. Keep it concise — key steps and approach only.
+**On first iteration of a story**, write an implementation plan to `.ralph/stories/{id}/plan.md` before coding. Read broadly when planning — explore the full module, related tests, and neighboring files to build a complete picture before making changes. Keep the plan concise — key steps and approach only.
 
 **When making non-obvious architectural decisions**, append to `.ralph/stories/{id}/decisions.md` explaining the choice and rationale.
 
@@ -129,7 +129,7 @@ Update `files_touched` with all files you modified. Track subtask progress and r
 
 ## Context Exhausted
 
-If you cannot complete the story in this session (running out of context, blocked by an external issue, etc.), you MUST:
+If you cannot complete the story in this session (blocked by an external issue, hit an unresolvable error, etc.), you MUST:
 1. Set `status` to `context_exhausted` in `.ralph/stories/{id}/state.json`
 2. Append the following to progress.md:
 
@@ -184,3 +184,4 @@ Your prompt may include a `## Relevant Memory` section containing semantically r
 - Commit frequently
 - Keep CI green
 - Read the Codebase Patterns section in progress.md before starting
+- Read broadly before coding — understand the full module, related files, and tests to avoid regressions
