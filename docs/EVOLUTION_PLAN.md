@@ -419,9 +419,19 @@ and TUI. Plus ChromaDB setup/management scripts. The hygiene mechanisms add
 
 ---
 
-## Phase 3: Cost Tracking, TUI Analytics & Remote Monitoring
+## Phase 3: Cost Tracking, TUI Analytics & Remote Monitoring ✅ COMPLETE
 
 **Impact: High (visibility) | Complexity: Low | Dependencies: None (can be built in parallel with Phase 1 or 2)**
+
+> **Status: Complete** (completed 2026-03-13).
+> Phase 3 has been fully implemented. Key deliverables:
+> - `internal/costs/` package — token usage parsing, cost estimation, per-story and per-run costing
+> - Costs context tab in TUI with per-story breakdown, judge costs, token counts, cache hit rate
+> - Header bar shows running cost total
+> - Run history persisted to `.ralph/run-history.json`, viewable via `ralph history`
+> - Push notifications via ntfy.sh (`--notify <topic>`)
+> - Remote status page with SSE live updates (`--status-port <port>`)
+> - JSON API endpoint at `/api/status`
 
 ### Goal
 
@@ -620,23 +630,214 @@ STORY-10 ✅  done       $0.00
 
 ### Acceptance Criteria
 
-- [ ] Token usage is parsed from Claude streaming output per iteration
-- [ ] Cost estimates are calculated using configurable pricing table
-- [ ] New "Costs" context tab in TUI shows per-story and total costs
-- [ ] Header bar shows running cost total
-- [ ] Gemini token usage is tracked for judge and autofix invocations
-- [ ] Run history is persisted and viewable across runs
-- [ ] Cost data is included in checkpoint (Phase 1) for resume accuracy
-- [ ] Push notifications fire for story completion, failure, stuck, and run done
-- [ ] Notifications are disabled by default, enabled via `--notify <topic>`
-- [ ] Status page serves mobile-friendly HTML with live SSE updates
-- [ ] Status page is accessible from phone via Tailscale
-- [ ] JSON API endpoint available for programmatic access
+- [x] Token usage is parsed from Claude streaming output per iteration
+- [x] Cost estimates are calculated using configurable pricing table
+- [x] New "Costs" context tab in TUI shows per-story and total costs
+- [x] Header bar shows running cost total
+- [x] Gemini token usage is tracked for judge and autofix invocations
+- [x] Run history is persisted and viewable across runs
+- [x] Cost data is included in checkpoint (Phase 1) for resume accuracy
+- [x] Push notifications fire for story completion, failure, stuck, and run done
+- [x] Notifications are disabled by default, enabled via `--notify <topic>`
+- [x] Status page serves mobile-friendly HTML with live SSE updates
+- [x] Status page is accessible from phone via Tailscale
+- [x] JSON API endpoint available for programmatic access
 
 ### Estimated Scope
 
 ~700-800 lines of new Go code. Cost tracking (~400), notifications (~50),
 status page (~250). Mostly parsing, TUI rendering, and stdlib `net/http`.
+
+---
+
+## Phase 3.1: 1M Context Recalibration
+
+**Impact: Medium-High | Complexity: Low-Medium | Dependencies: Phases 1, 2, 3 (all complete)**
+
+> Claude now supports 1M token context. Many Phase 1-2 design decisions were
+> driven by context scarcity (128K-200K windows). This phase recalibrates
+> existing parameters and heuristics to take advantage of the larger window
+> without rearchitecting anything.
+
+### Goal
+
+Loosen context-scarcity constraints across Phases 1-3 so that Ralph produces
+fewer, larger stories and injects richer memory context per iteration. The
+agent loop, orchestration, and quality systems remain unchanged — they solve
+execution control, not context management.
+
+### What to Change
+
+#### 3.1a. Relax Memory Retrieval Defaults
+
+**File: `internal/config/config.go` (`DefaultMemoryConfig`)**
+
+| Parameter | Current | New | Rationale |
+|-----------|---------|-----|-----------|
+| `--memory-top-k` | 5 | 15 | More relevant memories per collection without context pressure |
+| `--memory-max-tokens` | 2000 | 8000 | 4× budget — still <1% of 1M context |
+| `--memory-min-score` | 0.7 | 0.6 | Include slightly less confident memories; more context is cheap now |
+
+Also update the help text in `config.go` and `README.md` to reflect new defaults.
+
+#### 3.1b. Relax Story Sizing in `/ralph` Skill
+
+**File: `skills/ralph/SKILL.md`**
+
+Replace the "completable in ONE context window" framing with a scope-quality
+framing. The constraint is no longer context size — it's coherent execution.
+
+New guidance:
+- **Right-sized stories**: Coherent, self-contained changes that can be
+  implemented and tested in one pass. Can span 5-15 files if the changes
+  are logically related.
+- **Too big**: Changes that require fundamentally different expertise
+  (e.g., schema + middleware + UI + tests for a new feature). Split by
+  *concern*, not by *file count*.
+- **Rule of thumb**: If the acceptance criteria require unrelated types of
+  work, split. If they're all facets of the same change, keep together.
+
+Remove references to "context window" and "runs out of context" as the
+primary splitting rationale.
+
+#### 3.1c. Update `ralph-prompt.md` Context Guidance
+
+**File: `ralph-prompt.md`**
+
+The agent prompt should reflect that context is abundant:
+- Remove any language suggesting the agent should be conservative about
+  reading files or exploring the codebase
+- Encourage the agent to read more broadly when planning (the full module,
+  not just the target file)
+- Keep the instruction to update story state — that's for orchestration,
+  not context recovery
+
+#### 3.1d. Increase Activity Log Cap
+
+**File: `internal/runner/runner.go` (`ReadActivityContent`)**
+
+| Parameter | Current | New | Rationale |
+|-----------|---------|-----|-----------|
+| MaxSize | 64KB | 256KB | Longer iterations produce more output; 64KB truncates early context that explains the agent's approach |
+
+The TUI already tail-trims, so this doesn't affect memory usage meaningfully.
+With bigger stories and 10-15 file changes per iteration, users lose the
+planning/exploration phase of the output under the current cap.
+
+#### 3.1e. Show Iteration Count in Stories Panel
+
+**File: `internal/tui/stories_panel.go`**
+
+Display the current iteration number next to running stories:
+
+```
+⠋ P3-003: Implement auth middleware       (iter 3) W2  1m 42s
+```
+
+The iteration count is already tracked in story state (`iteration_count`)
+and internally in the TUI model. Just not rendered. With bigger stories
+taking more iterations, this is important signal for the user to gauge
+progress and spot stuck stories early.
+
+#### 3.1f. Show Retrieved Memories in Memory Tab
+
+**File: `internal/tui/context_panel.go` (memory tab rendering)**
+
+Currently the memory tab shows only capacity bars per collection:
+
+```
+ralph_patterns   [████░░░░] 42/100
+ralph_completions [██░░░░░░] 18/200
+```
+
+Add a section below showing the memories that were actually injected into
+the current story's prompt — titles, collection source, and relevance
+scores. The retrieval results are already formatted by
+`internal/memory/retrieval.go` `RetrieveContext()` — capture the individual
+results before formatting and surface them in the TUI.
+
+```
+╭─ Retrieved for P3-003 ─────────────────────╮
+│ 0.92  patterns    Config uses viper with... │
+│ 0.87  completions P2-001: Added auth mid... │
+│ 0.81  errors      TestDB connection refus.. │
+│ 0.74  decisions   Chose JWT over session... │
+│        ... 11 more (8,000 token budget)     │
+╰─────────────────────────────────────────────╯
+```
+
+This requires `RetrieveContext()` to return structured results alongside the
+formatted string (or expose a separate method). The TUI receives these via
+a new message type and renders them in the memory tab.
+
+#### 3.1g. Expandable Story Details in Stories Panel
+
+**File: `internal/tui/stories_panel.go`**
+
+Allow pressing Enter or right-arrow on a story to expand inline details:
+
+```
+✓ P3-001: Create storystate package          ✓ passed
+  ├─ Files: internal/storystate/state.go, state_test.go (+2 more)
+  ├─ Iterations: 2 | Judge: passed (1 attempt)
+  └─ Subtasks: 4/4 complete
+
+⠋ P3-003: Implement auth middleware          (iter 3) W2  1m 42s
+  ├─ Files: internal/auth/middleware.go, handler.go
+  ├─ Judge: rejected (1x) — "missing error handling on line 42"
+  └─ Subtasks: 2/5 complete
+```
+
+All this data exists in story state files (`state.json`): `files_touched`,
+`subtasks`, `judge_feedback`, `errors_encountered`, `iteration_count`. For
+completed stories, read from `.ralph/stories/{id}/state.json`. For running
+stories in parallel mode, read from the worker's synced state.
+
+Press Enter or right-arrow to expand, again to collapse. Only one story
+expanded at a time.
+
+#### 3.1h. Show Judge Feedback in Judge Tab
+
+**File: `internal/tui/context_panel.go` (judge tab rendering)**
+
+Currently the judge tab shows the formatted verdict (pass/fail per
+criterion). Add the judge's textual feedback below each failed criterion
+so the user can see exactly why without digging into logs. With bigger
+stories, judge rejections are costlier — immediate visibility matters.
+
+The feedback is already available from `judge.FormatResult()` — ensure
+the full rejection reasoning is included, not just the pass/fail icon.
+
+### What NOT to Change
+
+- **The agent loop** — still needed for execution control, test feedback,
+  judge verification
+- **Semantic retrieval over flat injection** — relevance > recency is still
+  better even with abundant context. Dumping everything is worse signal.
+- **Dedup and hygiene** — noise reduction matters regardless of window size
+- **Checkpoint/resume** — orthogonal to context size
+- **Phase 1b (PRD injection)** — already shipped, still saves a tool call.
+  Not worth reverting, just not worth optimising further.
+
+### Acceptance Criteria
+
+- [ ] Memory retrieval defaults updated (top-k=15, max-tokens=8000, min-score=0.6)
+- [ ] `/ralph` skill story-sizing guidance rewritten for scope-quality, not context-size
+- [ ] `ralph-prompt.md` removes context-scarcity language
+- [ ] All help text and README updated to match new defaults
+- [ ] Activity log cap increased from 64KB to 256KB
+- [ ] Iteration count shown next to running stories in stories panel
+- [ ] Memory tab shows retrieved memories with scores for current story
+- [ ] Stories panel supports expand/collapse to show files, subtasks, judge feedback
+- [ ] Judge tab shows full rejection reasoning per failed criterion
+- [ ] Existing tests pass with new defaults
+
+### Estimated Scope
+
+~400-600 lines of Go code. Config/doc changes (~50 lines), activity cap
+(~5 lines), iteration display (~20 lines), memory retrieval display (~100
+lines including new message type), expandable stories (~150 lines), judge
+feedback (~50 lines). No new packages.
 
 ---
 
@@ -868,8 +1069,8 @@ from execution, but the skill that creates the *input* never improves.
 After post-run analysis (5a), extract lessons specifically relevant to PRD
 quality and store them in a `ralph_prd_lessons` vector DB collection:
 
-- **Story sizing lessons**: "Stories touching `internal/api/` routinely cause
-  context exhaustion when they span 4+ files — split more aggressively"
+- **Story sizing lessons**: "Stories touching `internal/api/` fail when they
+  mix schema changes with endpoint logic — split by concern, not file count"
 - **Criteria quality lessons**: "Judge rejects stories with 'handles errors
   gracefully' — use specific error scenarios instead"
 - **Ordering lessons**: "UI stories that depend on server actions fail when
@@ -888,12 +1089,13 @@ without the skill template growing.
 **Example injection into skill context:**
 ```
 ## Learned PRD Constraints (from previous ralph runs)
-- Stories modifying internal/auth/ should be split to ≤3 files per story
-  (confidence: 0.9, confirmed 3 times)
+- Stories modifying internal/auth/ should split schema vs middleware vs UI
+  concerns (confidence: 0.9, confirmed 3 times)
 - Always include "Tests pass" for stories touching internal/db/
   (confidence: 0.85, confirmed 2 times)
-- Stories with >5 acceptance criteria tend to cause context exhaustion —
-  split into two stories instead (confidence: 0.75, confirmed 2 times)
+- Stories mixing unrelated acceptance criteria (e.g., UI + API + schema)
+  tend to produce lower quality — split by concern instead
+  (confidence: 0.75, confirmed 2 times)
 ```
 
 ### Acceptance Criteria
@@ -1306,9 +1508,9 @@ want a shared view.
 ## Phase Dependency Graph
 
 ```
-Phase 1 (Story State + Checkpoint)
+Phase 1 (Story State + Checkpoint) ✅
   │
-  ├──→ Phase 2 (Vector Memory)
+  ├──→ Phase 2 (Vector Memory) ✅
   │      │
   │      ├──→ Phase 5 (Learning Loop)
   │      ├──→ Phase 7 (MCP Server)
@@ -1319,7 +1521,9 @@ Phase 1 (Story State + Checkpoint)
   │
   ├──→ Phase 9 (Speculative Parallel)
   │
-  Phase 3 (Cost Tracking) ← independent, can run in parallel with 1 & 2
+  Phase 3 (Cost Tracking) ✅
+  │
+  ├──→ Phase 3.1 (1M Context Recalibration) ← next, before Phase 4
   │
   └──→ Phase 6 (Multi-Model) ← benefits from Phase 3 + 4
                 │
@@ -1331,21 +1535,22 @@ Phase 1 (Story State + Checkpoint)
 | Order | Phase | Est. Effort | Cumulative Value |
 |-------|-------|-------------|------------------|
 | 1st   | Phase 1: Story State + Checkpoint ✅ | ~3-4 days | Foundation for everything |
-| 2nd   | Phase 3: Cost Tracking | ~2 days | Quick win, high visibility |
+| 2nd   | Phase 3: Cost Tracking ✅ | ~2 days | Quick win, high visibility |
 | 3rd   | Phase 2: Vector Memory ✅ | ~4-5 days | Transformative capability |
-| 4th   | Phase 4: Agent Specialization | ~3-4 days | Quality step-change |
-| 5th   | Phase 6: Multi-Model | ~2 days | Cost optimization |
-| 6th   | Phase 5: Learning Loop | ~3-4 days | Compounding returns |
-| 7th   | Phase 7: MCP Server | ~4-5 days | Agent coordination leap |
-| 8th   | Phase 8: Knowledge Graph | ~5-6 days | Structural intelligence |
-| 9th   | Phase 9: Speculative Parallel | ~4-5 days | Throughput optimization |
-| 10th  | Phase 10: Web Dashboard | ~3-4 days | Team visibility (if needed) |
+| 4th   | **Phase 3.1: 1M Context Recalibration** | ~2-3 days | Recalibrate defaults + TUI improvements for bigger stories |
+| 5th   | Phase 4: Agent Specialization | ~3-4 days | Quality step-change |
+| 6th   | Phase 6: Multi-Model | ~2 days | Cost optimization |
+| 7th   | Phase 5: Learning Loop | ~3-4 days | Compounding returns |
+| 8th   | Phase 7: MCP Server | ~4-5 days | Agent coordination leap |
+| 9th   | Phase 8: Knowledge Graph | ~5-6 days | Structural intelligence |
+| 10th  | Phase 9: Speculative Parallel | ~4-5 days | Throughput optimization |
+| 11th  | Phase 10: Web Dashboard | ~3-4 days | Team visibility (if needed) |
 
-**Total estimated effort: ~33-39 days of focused work**
+**Total estimated effort: ~34-40 days of focused work**
 
-Note: Phases 1 and 3 have no dependency on each other and can be built
-concurrently. Similarly, Phase 6 is relatively independent and could be
-pulled forward if cost is a pressing concern.
+Note: Phase 3.1 should be done before Phase 4 so that agent specialization
+builds on the recalibrated defaults. Phase 6 is relatively independent and
+could be pulled forward if cost is a pressing concern.
 
 ---
 
