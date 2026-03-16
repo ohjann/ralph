@@ -31,17 +31,18 @@ implement user stories from a PRD. Key existing capabilities:
 - **Jujutsu (jj) version control** with workspace isolation per worker
 - **Judge system** (Gemini) for independent story verification
 - **Quality review** with 5 parallel lens reviewers (security, efficiency, DRY, error handling, testing)
-- **Stuck detection** with auto-fix story generation
+- **Stuck detection** with auto-fix story generation and tool-call loop detection
 - **Memory**: `progress.md` (append-only text log) and `events.jsonl` (structured event log)
 - **Context injection**: recent events formatted into next iteration's prompt
 - **Archive system**: preserves history across branch/feature changes
+- **Terminal & macOS notifications** for story events
 
 ### Key Limitations to Address
 
 1. ~~Memory is flat — no semantic retrieval, all recent context dumped into prompt~~ → **Addressed in Phase 2** (semantic memory with vector DB)
 2. ~~Context exhaustion recovery is lossy — relies on text markers in progress.md~~ → **Addressed in Phase 1** (structured per-story state)
 3. ~~No structured per-story work state — agent must reconstruct intent from history~~ → **Addressed in Phase 1** (storystate package)
-4. No cost visibility — token usage is logged but not surfaced
+4. ~~No cost visibility — token usage is logged but not surfaced~~ → **Addressed in Phase 3** (usage tracking tab, run history, remote status page)
 5. All Claude invocations use the same generalist prompt
 6. ~~No crash recovery — killing ralph mid-run loses orchestration state~~ → **Partially addressed in Phase 1** (checkpoint package — detection and prompt work, but resume logic is a stub)
 7. ~~No cross-run learning — each PRD run starts from zero institutional knowledge~~ → **Addressed in Phase 2** (semantic memory with vector DB)
@@ -419,26 +420,31 @@ and TUI. Plus ChromaDB setup/management scripts. The hygiene mechanisms add
 
 ---
 
-## Phase 3: Cost Tracking, TUI Analytics & Remote Monitoring ✅ COMPLETE
+## Phase 3: Usage Tracking, TUI Analytics & Remote Monitoring ✅ COMPLETE
 
 **Impact: High (visibility) | Complexity: Low | Dependencies: None (can be built in parallel with Phase 1 or 2)**
 
 > **Status: Complete** (completed 2026-03-13).
 > Phase 3 has been fully implemented. Key deliverables:
-> - `internal/costs/` package — token usage parsing, cost estimation, per-story and per-run costing
-> - Costs context tab in TUI with per-story breakdown, judge costs, token counts, cache hit rate
-> - Header bar shows running cost total
+> - `internal/costs/` package — token usage parsing, per-story and per-run tracking
+> - Usage context tab in TUI with per-story breakdown, judge usage, token counts, cache hit rate
+> - When token data is unavailable (e.g., Claude Max subscription), displays iteration turns and duration instead
+> - Header bar shows running usage total
 > - Run history persisted to `.ralph/run-history.json`, viewable via `ralph history`
-> - Push notifications via ntfy.sh (`--notify <topic>`)
+> - Push notifications via ntfy.sh (`--notify <topic>`) and macOS Notification Center
 > - Remote status page with SSE live updates (`--status-port <port>`)
 > - JSON API endpoint at `/api/status`
+>
+> **Post-completion update:** "Costs" tab renamed to "Usage" tab to better reflect
+> that users on subscription plans (Claude Max) don't have per-token costs. The tab
+> now gracefully falls back to showing iteration turns and duration when token
+> data is unavailable.
 
 ### Goal
 
-Surface token usage, cost estimates, and run analytics directly in the TUI.
-Enable remote monitoring of ralph runs from a phone via a lightweight status
-page and push notifications (for when you leave your laptop running and walk
-away). Critical for understanding spend and demonstrating sophistication.
+Surface token usage and run analytics directly in the TUI. Enable remote
+monitoring of ralph runs from a phone via a lightweight status page and push
+notifications (for when you leave your laptop running and walk away).
 
 ### Context for Builder
 
@@ -631,9 +637,9 @@ STORY-10 ✅  done       $0.00
 ### Acceptance Criteria
 
 - [x] Token usage is parsed from Claude streaming output per iteration
-- [x] Cost estimates are calculated using configurable pricing table
-- [x] New "Costs" context tab in TUI shows per-story and total costs
-- [x] Header bar shows running cost total
+- [x] Usage estimates tracked (falls back to turns/duration when tokens unavailable)
+- [x] New "Usage" context tab in TUI shows per-story and total usage
+- [x] Header bar shows running usage total
 - [x] Gemini token usage is tracked for judge and autofix invocations
 - [x] Run history is persisted and viewable across runs
 - [x] Cost data is included in checkpoint (Phase 1) for resume accuracy
@@ -650,12 +656,23 @@ status page (~250). Mostly parsing, TUI rendering, and stdlib `net/http`.
 
 ---
 
-## Phase 3.1: 1M Context Recalibration
+## Phase 3.1: 1M Context Recalibration ✅ COMPLETE
 
 **Impact: Medium-High | Complexity: Low-Medium | Dependencies: Phases 1, 2, 3 (all complete)**
 
+> **Status: Complete** (completed 2026-03-16).
+> Phase 3.1 has been fully implemented. Key deliverables:
+> - Memory retrieval defaults recalibrated (top-k=15, max-tokens=8000, min-score=0.6)
+> - `/ralph` skill story-sizing guidance rewritten for scope-quality over context-size
+> - `ralph-prompt.md` updated to remove context-scarcity language, encourage broad exploration
+> - Activity log cap increased from 64KB to 256KB
+> - Iteration count displayed next to running stories in stories panel
+> - Memory tab shows retrieved memories with relevance scores for current story
+> - Stories panel supports expand/collapse to show files, subtasks, judge feedback
+> - Judge tab shows full rejection reasoning per failed criterion
+>
 > Claude now supports 1M token context. Many Phase 1-2 design decisions were
-> driven by context scarcity (128K-200K windows). This phase recalibrates
+> driven by context scarcity (128K-200K windows). This phase recalibrated
 > existing parameters and heuristics to take advantage of the larger window
 > without rearchitecting anything.
 
@@ -821,16 +838,16 @@ the full rejection reasoning is included, not just the pass/fail icon.
 
 ### Acceptance Criteria
 
-- [ ] Memory retrieval defaults updated (top-k=15, max-tokens=8000, min-score=0.6)
-- [ ] `/ralph` skill story-sizing guidance rewritten for scope-quality, not context-size
-- [ ] `ralph-prompt.md` removes context-scarcity language
-- [ ] All help text and README updated to match new defaults
-- [ ] Activity log cap increased from 64KB to 256KB
-- [ ] Iteration count shown next to running stories in stories panel
-- [ ] Memory tab shows retrieved memories with scores for current story
-- [ ] Stories panel supports expand/collapse to show files, subtasks, judge feedback
-- [ ] Judge tab shows full rejection reasoning per failed criterion
-- [ ] Existing tests pass with new defaults
+- [x] Memory retrieval defaults updated (top-k=15, max-tokens=8000, min-score=0.6)
+- [x] `/ralph` skill story-sizing guidance rewritten for scope-quality, not context-size
+- [x] `ralph-prompt.md` removes context-scarcity language
+- [x] All help text and README updated to match new defaults
+- [x] Activity log cap increased from 64KB to 256KB
+- [x] Iteration count shown next to running stories in stories panel
+- [x] Memory tab shows retrieved memories with scores for current story
+- [x] Stories panel supports expand/collapse to show files, subtasks, judge feedback
+- [x] Judge tab shows full rejection reasoning per failed criterion
+- [x] Existing tests pass with new defaults
 
 ### Estimated Scope
 
@@ -1517,13 +1534,13 @@ Phase 1 (Story State + Checkpoint) ✅
   │      │      │
   │      │      └──→ Phase 8 (Knowledge Graph)
   │      │
-  │      └──→ Phase 4 (Agent Specialization)
+  │      └──→ Phase 4 (Agent Specialization) ← next
   │
   ├──→ Phase 9 (Speculative Parallel)
   │
-  Phase 3 (Cost Tracking) ✅
+  Phase 3 (Usage Tracking) ✅
   │
-  ├──→ Phase 3.1 (1M Context Recalibration) ← next, before Phase 4
+  ├──→ Phase 3.1 (1M Context Recalibration) ✅
   │
   └──→ Phase 6 (Multi-Model) ← benefits from Phase 3 + 4
                 │
@@ -1535,10 +1552,10 @@ Phase 1 (Story State + Checkpoint) ✅
 | Order | Phase | Est. Effort | Cumulative Value |
 |-------|-------|-------------|------------------|
 | 1st   | Phase 1: Story State + Checkpoint ✅ | ~3-4 days | Foundation for everything |
-| 2nd   | Phase 3: Cost Tracking ✅ | ~2 days | Quick win, high visibility |
+| 2nd   | Phase 3: Usage Tracking ✅ | ~2 days | Quick win, high visibility |
 | 3rd   | Phase 2: Vector Memory ✅ | ~4-5 days | Transformative capability |
-| 4th   | **Phase 3.1: 1M Context Recalibration** | ~2-3 days | Recalibrate defaults + TUI improvements for bigger stories |
-| 5th   | Phase 4: Agent Specialization | ~3-4 days | Quality step-change |
+| 4th   | Phase 3.1: 1M Context Recalibration ✅ | ~2-3 days | Recalibrate defaults + TUI improvements for bigger stories |
+| 5th   | **Phase 4: Agent Specialization** | ~3-4 days | Quality step-change |
 | 6th   | Phase 6: Multi-Model | ~2 days | Cost optimization |
 | 7th   | Phase 5: Learning Loop | ~3-4 days | Compounding returns |
 | 8th   | Phase 7: MCP Server | ~4-5 days | Agent coordination leap |
@@ -1546,11 +1563,10 @@ Phase 1 (Story State + Checkpoint) ✅
 | 10th  | Phase 9: Speculative Parallel | ~4-5 days | Throughput optimization |
 | 11th  | Phase 10: Web Dashboard | ~3-4 days | Team visibility (if needed) |
 
-**Total estimated effort: ~34-40 days of focused work**
+**Total estimated effort: ~34-40 days of focused work (~10-13 days remaining)**
 
-Note: Phase 3.1 should be done before Phase 4 so that agent specialization
-builds on the recalibrated defaults. Phase 6 is relatively independent and
-could be pulled forward if cost is a pressing concern.
+Phase 6 is relatively independent and could be pulled forward if cost is a
+pressing concern.
 
 ---
 

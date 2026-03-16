@@ -89,6 +89,26 @@ func LoadDecisions(projectDir, storyID string) (string, error) {
 	return loadOptionalFile(projectDir, storyID, "decisions.md")
 }
 
+// LoadHint reads hint.md contents for the given story ID.
+// Returns an empty string if the file doesn't exist.
+func LoadHint(projectDir, storyID string) (string, error) {
+	return loadOptionalFile(projectDir, storyID, "hint.md")
+}
+
+// SaveHint writes a user hint to .ralph/stories/{story_id}/hint.md.
+func SaveHint(projectDir, storyID, hint string) error {
+	dir := storyDir(projectDir, storyID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "hint.md"), []byte(hint), 0o644)
+}
+
+// ClearHint removes the hint file after it has been consumed.
+func ClearHint(projectDir, storyID string) {
+	_ = os.Remove(filepath.Join(storyDir(projectDir, storyID), "hint.md"))
+}
+
 // loadOptionalFile reads a file from the story directory, returning empty string if missing.
 func loadOptionalFile(projectDir, storyID, filename string) (string, error) {
 	path := filepath.Join(storyDir(projectDir, storyID), filename)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/harmonica"
@@ -136,9 +137,11 @@ type Model struct {
 	memoryRetrieval  *MemoryRetrievalMsg // last retrieval results for display
 	confirmTracker   *memory.ConfirmationTracker
 
-	// Stuck alert (shown as status bar)
+	// Stuck alert (shown as status bar) + hint input
 	stuckAlert    *runner.StuckInfo
 	stuckAlertAt  time.Time
+	hintInput     textarea.Model
+	hintActive    bool // true when user is typing a hint
 
 	// Push notifications
 	notifier *notify.Notifier
@@ -170,6 +173,12 @@ func NewModel(cfg *config.Config, version string) *Model {
 		initialContent = summary + "\n\n"
 	}
 
+	hi := textarea.New()
+	hi.Placeholder = "Type a hint for Claude..."
+	hi.CharLimit = 500
+	hi.SetHeight(1)
+	hi.ShowLineNumbers = false
+
 	return &Model{
 		cfg:            cfg,
 		version:        version,
@@ -188,6 +197,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		confirmTracker: memory.NewConfirmationTracker(),
 		notifier:       n,
 		statusServer:   ss,
+		hintInput:      hi,
 	}
 }
 
@@ -390,6 +400,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Hint input mode: capture all keys
+		if m.hintActive {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.hintActive = false
+				m.hintInput.Blur()
+				m.hintInput.Reset()
+				return m, nil
+			case tea.KeyEnter:
+				hint := strings.TrimSpace(m.hintInput.Value())
+				if hint != "" && m.stuckAlert != nil {
+					storyID := m.stuckAlert.StoryID
+					_ = storystate.SaveHint(m.cfg.ProjectDir, storyID, hint)
+					m.claudeContent += fmt.Sprintf("\n── Hint injected: %s ──\n", hint)
+					m.claudeVP.SetContent(m.claudeContent)
+					m.claudeVP.GotoBottom()
+					m.prevClaudeLen = len(m.claudeContent)
+				}
+				m.hintActive = false
+				m.hintInput.Blur()
+				m.hintInput.Reset()
+				m.stuckAlert = nil
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.hintInput, cmd = m.hintInput.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// 'i' to enter hint mode when stuck bar is showing
+		if msg.String() == "i" && m.stuckAlert != nil {
+			m.hintActive = true
+			m.hintInput.SetWidth(m.width - 4)
+			m.hintInput.Focus()
+			return m, m.hintInput.Focus()
+		}
+
 		switch {
 		case msg.String() == "ctrl+c":
 			if m.coord != nil {
@@ -1662,14 +1710,18 @@ func (m *Model) View() string {
 		return m.renderResumePrompt()
 	}
 
-	// Layout: header(3) + top panels + claude activity + [status bar(1)] + footer(1)
+	// Layout: header(3) + top panels + claude activity + [status bar(1)] + [hint input(3)] + footer(1)
 	headerHeight := 3
 	footerHeight := 1
 	statusBarHeight := 0
 	if m.stuckAlert != nil {
 		statusBarHeight = 1
 	}
-	available := m.height - headerHeight - footerHeight - statusBarHeight
+	hintHeight := 0
+	if m.hintActive {
+		hintHeight = 3
+	}
+	available := m.height - headerHeight - footerHeight - statusBarHeight - hintHeight
 	if available < 10 {
 		available = 10
 	}
@@ -1770,7 +1822,10 @@ func (m *Model) View() string {
 
 	parts := []string{header, topRow, claudePanel}
 	if m.stuckAlert != nil {
-		parts = append(parts, renderStuckBar(m.stuckAlert, m.width))
+		parts = append(parts, renderStuckBar(m.stuckAlert, m.width, m.hintActive))
+	}
+	if m.hintActive {
+		parts = append(parts, renderHintInput(m.hintInput, m.width))
 	}
 	parts = append(parts, footer)
 
@@ -1851,7 +1906,7 @@ func clampLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderStuckBar(info *runner.StuckInfo, width int) string {
+func renderStuckBar(info *runner.StuckInfo, width int, hintActive bool) string {
 	icon := " ⚠ STUCK "
 	detail := fmt.Sprintf(" %s — %s (%dx) ", info.StoryID, info.Pattern, info.Count)
 	if len(info.Commands) > 0 {
@@ -1861,13 +1916,23 @@ func renderStuckBar(info *runner.StuckInfo, width int) string {
 		}
 		detail += "→ " + cmd + " "
 	}
-	content := styleStuckBar.Render(icon) + styleStuckBarDetail.Render(detail)
+	hint := ""
+	if !hintActive {
+		hint = " [i: inject hint] "
+	}
+	content := styleStuckBar.Render(icon) + styleStuckBarDetail.Render(detail+hint)
 	// Pad to full width with the danger background
 	contentWidth := lipgloss.Width(content)
 	if contentWidth < width {
 		content += styleStuckBarDetail.Render(strings.Repeat(" ", width-contentWidth))
 	}
 	return content
+}
+
+func renderHintInput(ti textarea.Model, width int) string {
+	label := styleStuckBar.Render(" HINT ")
+	esc := styleFooter.Render(" esc: cancel  enter: submit")
+	return label + " " + ti.View() + esc
 }
 
 func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool, review bool, qualityPrompt bool, resumePrompt bool, paused bool) string {

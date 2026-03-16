@@ -21,7 +21,7 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - **Run history** — `ralph history` shows recent runs with date, stories, cost, and duration
 - **Push notifications** — ntfy.sh notifications on story complete/fail/stuck and run done; zero accounts needed
 - **Remote status page** — mobile-friendly HTTP status page with SSE live updates; JSON API at `/api/status`
-- **Stuck detection** — detects tool-call loops, cancels the process, and inserts a targeted fix story
+- **Stuck detection + hint injection** — detects tool-call loops, shows a status bar with notification, lets you inject a hint for the next iteration, then inserts a targeted fix story
 - **Automatic archiving** — previous runs archived to `.ralph/archive/` when you start a new feature
 
 ## Prerequisites
@@ -195,8 +195,10 @@ Examples:
 | `Tab` | Switch active panel |
 | `j/k` | Scroll active panel |
 | `PgUp/PgDn` | Page scroll |
+| `[/]` | Cycle context panel tabs |
 | `1-9` | Switch worker view (parallel mode) |
 | `Enter` | Start execution (review phase only) |
+| `i` | Inject hint (when stuck bar is showing) |
 
 ## Configuration
 
@@ -333,14 +335,18 @@ Each iteration is a fresh Claude Code instance. Memory persists via:
 - **Story state** -- structured state.json, plan.md, decisions.md per story
 - **Semantic memory** -- ChromaDB vector retrieval of relevant patterns, errors, and decisions from past runs
 
-### Stuck Detection
+### Stuck Detection + Hint Injection
 
 If Claude gets stuck in a loop (repeatedly running the same command or editing the same file), Ralph:
 
 1. Detects the pattern via tool call analysis
-2. Cancels the current Claude process
-3. Generates a targeted "fix story" and inserts it before the stuck story
-4. Continues with the fix story in the next iteration
+2. Shows a red status bar in the TUI with details (story, pattern, offending command)
+3. Sends a macOS/terminal notification so you know even when not watching the TUI
+4. Cancels the current Claude process
+5. Generates a targeted "fix story" and inserts it before the stuck story
+6. Continues with the fix story in the next iteration
+
+When the stuck bar is showing, press `i` to inject a hint — a one-liner that gets included in the next iteration's prompt. This lets you nudge Claude in the right direction when you can see what it's doing wrong (e.g. "use the existing `fetchUser` helper, don't create a new one"). The hint is consumed after one use.
 
 ### Archiving
 

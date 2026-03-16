@@ -207,6 +207,52 @@ func TestSaveAllStatusValues(t *testing.T) {
 	}
 }
 
+func TestHintRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	storyID := "HINT-001"
+
+	// No hint initially
+	hint, err := LoadHint(dir, storyID)
+	if err != nil {
+		t.Fatalf("LoadHint() error: %v", err)
+	}
+	if hint != "" {
+		t.Errorf("expected empty hint, got %q", hint)
+	}
+
+	// Save a hint
+	hintText := "Use the existing fetchUser helper instead of creating a new one"
+	if err := SaveHint(dir, storyID, hintText); err != nil {
+		t.Fatalf("SaveHint() error: %v", err)
+	}
+
+	// Load it back
+	hint, err = LoadHint(dir, storyID)
+	if err != nil {
+		t.Fatalf("LoadHint() error: %v", err)
+	}
+	if hint != hintText {
+		t.Errorf("LoadHint() got %q, want %q", hint, hintText)
+	}
+
+	// Clear it
+	ClearHint(dir, storyID)
+
+	hint, err = LoadHint(dir, storyID)
+	if err != nil {
+		t.Fatalf("LoadHint() after clear error: %v", err)
+	}
+	if hint != "" {
+		t.Errorf("expected empty hint after clear, got %q", hint)
+	}
+}
+
+func TestClearHintNoopWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	// Should not panic or error when no hint exists
+	ClearHint(dir, "NONEXISTENT")
+}
+
 func TestSubtasksAndErrorsSerialization(t *testing.T) {
 	dir := t.TempDir()
 	state := StoryState{

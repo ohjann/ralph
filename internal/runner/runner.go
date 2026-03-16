@@ -192,6 +192,15 @@ func buildStoryStateContext(projectDir, storyID string) string {
 		b.WriteString(decisions + "\n")
 	}
 
+	// User hint (injected from TUI when stuck)
+	if hint, err := storystate.LoadHint(projectDir, storyID); err == nil && hint != "" {
+		b.WriteString("\n### User Hint\n")
+		b.WriteString("⚠ The user provided the following guidance after observing your previous attempt:\n")
+		b.WriteString(hint + "\n")
+		// Consume the hint so it's only used once
+		storystate.ClearHint(projectDir, storyID)
+	}
+
 	return b.String()
 }
 
