@@ -5,6 +5,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/quality"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/runner"
 )
 
@@ -59,6 +60,7 @@ type claudeDoneMsg struct {
 	TokenUsage     *costs.TokenUsage // accumulated token usage from streaming
 	TotalFound     int               // total retrieval results before token budget trim
 	MaxTokens      int               // token budget used for retrieval
+	Role           roles.Role        // which role just completed (architect/implementer)
 }
 type judgeDoneMsg struct {
 	Result judge.Result

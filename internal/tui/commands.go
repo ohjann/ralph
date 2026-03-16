@@ -5,21 +5,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eoghanhynes/ralph/internal/archive"
 	"github.com/eoghanhynes/ralph/internal/autofix"
-	"github.com/eoghanhynes/ralph/internal/debuglog"
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/coordinator"
+	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/dag"
+	"github.com/eoghanhynes/ralph/internal/debuglog"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/quality"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/eoghanhynes/ralph/internal/storystate"
 	"github.com/eoghanhynes/ralph/internal/worker"
 )
 
@@ -192,6 +196,52 @@ func findNextStoryCmd(prdPath string) tea.Cmd {
 	}
 }
 
+// needsArchitect determines whether the architect phase should run for a story.
+// It returns false (skip architect) when:
+//   - The story is a FIX- story
+//   - The story description is too short (< 50 words)
+//   - A plan already exists from a previous iteration
+func needsArchitect(projectDir, storyID string, story *prd.UserStory) bool {
+	if story == nil {
+		return false
+	}
+
+	// FIX- stories always skip architect
+	if strings.HasPrefix(storyID, "FIX-") {
+		return false
+	}
+
+	// If a plan already exists, skip architect (subsequent iteration)
+	plan, err := storystate.LoadPlan(projectDir, storyID)
+	if err == nil && len(strings.TrimSpace(plan)) >= 50 {
+		return false
+	}
+
+	// Use the roles package to check word count threshold
+	wordCount := len(strings.Fields(story.Description))
+	return !roles.ShouldSkipArchitect(storyID, wordCount)
+}
+
+// combineTokenUsage merges two token usage values, summing all fields.
+func combineTokenUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &costs.TokenUsage{
+		InputTokens:  a.InputTokens + b.InputTokens,
+		OutputTokens: a.OutputTokens + b.OutputTokens,
+		CacheRead:    a.CacheRead + b.CacheRead,
+		CacheWrite:   a.CacheWrite + b.CacheWrite,
+		Model:        b.Model, // use the later model (implementer)
+		Provider:     b.Provider,
+		NumTurns:     a.NumTurns + b.NumTurns,
+		DurationMS:   a.DurationMS + b.DurationMS,
+	}
+}
+
 func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, iteration int, chromaClient *memory.ChromaClient, embedder memory.Embedder) tea.Cmd {
 	return func() tea.Msg {
 		p, err := prd.Load(cfg.PRDFile)
@@ -199,41 +249,98 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			return claudeDoneMsg{Err: fmt.Errorf("loading PRD: %w", err)}
 		}
 
-		var opts []runner.BuildPromptOpts
+		story := p.FindStory(storyID)
+
+		// Determine if we need the architect phase
+		runArchitect := needsArchitect(cfg.ProjectDir, storyID, story)
+
+		var totalUsage *costs.TokenUsage
+
+		// --- Architect phase ---
+		if runArchitect {
+			debuglog.Log("runClaudeCmd: running architect phase for story=%s", storyID)
+
+			architectOpts := []runner.BuildPromptOpts{{Role: roles.RoleArchitect}}
+			prompt, _, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, architectOpts...)
+			if err != nil {
+				return claudeDoneMsg{Err: fmt.Errorf("architect prompt: %w", err), Role: roles.RoleArchitect}
+			}
+
+			logPath := runner.LogFilePath(cfg.LogDir, iteration) + ".architect"
+			usage, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
+				Iteration: iteration,
+				StoryID:   storyID,
+				Role:      roles.RoleArchitect,
+			})
+			totalUsage = usage
+
+			if err != nil {
+				return claudeDoneMsg{Err: fmt.Errorf("architect failed: %w", err), TokenUsage: totalUsage, Role: roles.RoleArchitect}
+			}
+
+			// Validate that plan.md was created and is non-empty (>= 50 bytes)
+			planContent, planErr := storystate.LoadPlan(cfg.ProjectDir, storyID)
+			if planErr != nil || len(strings.TrimSpace(planContent)) < 50 {
+				return claudeDoneMsg{
+					Err:        fmt.Errorf("architect did not produce a valid plan (plan.md missing or < 50 bytes), retrying"),
+					TokenUsage: totalUsage,
+					Role:       roles.RoleArchitect,
+				}
+			}
+
+			debuglog.Log("runClaudeCmd: architect phase complete, plan validated (%d bytes)", len(planContent))
+		}
+
+		// --- Implementer phase ---
+		debuglog.Log("runClaudeCmd: running implementer phase for story=%s", storyID)
+
+		// Determine the role for the implementer run
+		implRole := roles.RoleImplementer
+		// FIX- stories skip architect and use implementer directly
+		// (role is still set for prompt selection)
+
+		var implOpts []runner.BuildPromptOpts
 		if chromaClient != nil && embedder != nil && !cfg.Memory.Disabled {
 			retriever := memory.NewRetriever(chromaClient, embedder)
 			if retriever != nil {
-				opts = append(opts, runner.BuildPromptOpts{
+				implOpts = append(implOpts, runner.BuildPromptOpts{
 					Memory: retriever,
 					MemoryOpts: memory.RetrievalOptions{
 						TopK:      cfg.Memory.TopK,
 						MinScore:  cfg.Memory.MinScore,
 						MaxTokens: cfg.Memory.MaxTokens,
 					},
+					Role: implRole,
 				})
 			}
 		}
+		if len(implOpts) == 0 {
+			implOpts = append(implOpts, runner.BuildPromptOpts{Role: implRole})
+		}
 
-		prompt, retrieval, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, opts...)
+		prompt, retrieval, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, implOpts...)
 		if err != nil {
-			return claudeDoneMsg{Err: err}
+			return claudeDoneMsg{Err: err, TokenUsage: totalUsage, Role: implRole}
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
 		usage, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
 			Iteration: iteration,
 			StoryID:   storyID,
+			Role:      implRole,
 		})
 
+		totalUsage = combineTokenUsage(totalUsage, usage)
 		completeSignal := runner.LogContainsComplete(logPath)
 
 		return claudeDoneMsg{
 			Err:            err,
 			CompleteSignal: completeSignal,
 			DocRefs:        retrieval.DocRefs,
-			TokenUsage:     usage,
+			TokenUsage:     totalUsage,
 			TotalFound:     retrieval.TotalFound,
 			MaxTokens:      retrieval.MaxTokens,
+			Role:           implRole,
 		}
 	}
 }
