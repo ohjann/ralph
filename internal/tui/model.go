@@ -73,8 +73,10 @@ type Model struct {
 	costsContent string
 
 	// Story data for the stories panel
-	storyDisplayInfos []StoryDisplayInfo
-	animFrame         int // animation frame for spinners
+	storyDisplayInfos  []StoryDisplayInfo
+	animFrame          int    // animation frame for spinners
+	storiesSelectedIdx int    // cursor position in stories list
+	storiesExpandedID  string // ID of currently expanded story (empty = none)
 
 	// Context panel mode
 	ctxMode          contextMode
@@ -486,7 +488,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.String() == "j" || msg.String() == "down":
 			switch m.activePanel {
 			case panelStories:
-				m.storiesVP.LineDown(1)
+				if len(m.storyDisplayInfos) > 0 && m.storiesSelectedIdx < len(m.storyDisplayInfos)-1 {
+					m.storiesSelectedIdx++
+				}
 			case panelContext:
 				m.contextVP.LineDown(1)
 			case panelClaude:
@@ -496,13 +500,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.String() == "k" || msg.String() == "up":
 			switch m.activePanel {
 			case panelStories:
-				m.storiesVP.LineUp(1)
+				if m.storiesSelectedIdx > 0 {
+					m.storiesSelectedIdx--
+				}
 			case panelContext:
 				m.contextVP.LineUp(1)
 			case panelClaude:
 				m.claudeVP.LineUp(1)
 			}
 			return m, nil
+		case (msg.String() == "enter" || msg.String() == "right" || msg.String() == "l") && m.activePanel == panelStories:
+			if len(m.storyDisplayInfos) > 0 && m.storiesSelectedIdx < len(m.storyDisplayInfos) {
+				storyID := m.storyDisplayInfos[m.storiesSelectedIdx].ID
+				if m.storiesExpandedID == storyID {
+					m.storiesExpandedID = ""
+				} else {
+					m.storiesExpandedID = storyID
+				}
+			}
+			return m, nil
+		case msg.String() == "left" || msg.String() == "h":
+			if m.activePanel == panelStories && m.storiesExpandedID != "" {
+				m.storiesExpandedID = ""
+				return m, nil
+			}
 		case msg.String() == "pgdown":
 			switch m.activePanel {
 			case panelStories:
@@ -1651,6 +1672,9 @@ func (m *Model) View() string {
 		storiesWidth,
 		topHeight,
 		m.animFrame,
+		m.storiesSelectedIdx,
+		m.storiesExpandedID,
+		m.cfg.PRDFile,
 	)
 
 	// Context panel

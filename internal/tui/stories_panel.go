@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/storystate"
 	"github.com/eoghanhynes/ralph/internal/worker"
 )
 
@@ -29,7 +31,7 @@ func newStoriesViewport(width, height int) viewport.Model {
 	return vp
 }
 
-func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active bool, width, height int, animFrame int) string {
+func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active bool, width, height int, animFrame int, selectedIdx int, expandedID string, prdFile string) string {
 	icon := styleClaudeSparkle.Render("◆")
 	title := fmt.Sprintf("%s %s", icon, stylePanelTitle.Render("Stories"))
 
@@ -44,7 +46,8 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	vp.Width = contentW
 	vp.Height = vpH
 
-	content := renderStoryList(stories, contentW, animFrame)
+	projectDir := filepath.Dir(prdFile)
+	content := renderStoryList(stories, contentW, animFrame, active, selectedIdx, expandedID, projectDir)
 	prevOffset := vp.YOffset
 	vp.SetContent(content)
 	vp.SetYOffset(prevOffset)
@@ -55,7 +58,7 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	return style.MaxHeight(height).Render(body)
 }
 
-func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int) string {
+func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panelActive bool, selectedIdx int, expandedID string, projectDir string) string {
 	if len(stories) == 0 {
 		return styleMuted.Render("  No stories loaded")
 	}
@@ -78,6 +81,8 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int) strin
 	miniBar := renderMiniProgress(passedCount, totalCount, width-2)
 	sb.WriteString(miniBar)
 	sb.WriteString("\n")
+
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("#313244")) // Surface0
 
 	for i, s := range stories {
 		var statusIcon string
@@ -128,13 +133,94 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int) strin
 			line += " " + styleMuted.Render(formatDuration(elapsed))
 		}
 
+		// Highlight selected row when panel is active
+		if panelActive && i == selectedIdx {
+			// Cursor indicator
+			line = "▸" + line[1:]
+			line = selectedStyle.Width(width).Render(line)
+		}
+
 		sb.WriteString(line)
-		if i < len(stories)-1 {
+		sb.WriteString("\n")
+
+		// Render expanded details if this story is expanded
+		if s.ID == expandedID {
+			sb.WriteString(renderStoryDetails(s.ID, projectDir, width))
 			sb.WriteString("\n")
 		}
 	}
 
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// renderStoryDetails renders inline details for an expanded story.
+func renderStoryDetails(storyID, projectDir string, width int) string {
+	state, err := storystate.Load(projectDir, storyID)
+	if err != nil || state.StoryID == "" {
+		return styleMuted.Render("    No state data available")
+	}
+
+	var sb strings.Builder
+	indent := "    "
+
+	// Iteration count
+	sb.WriteString(indent)
+	sb.WriteString(styleMuted.Render(fmt.Sprintf("Iterations: %d", state.IterationCount)))
+	sb.WriteString("\n")
+
+	// Status
+	sb.WriteString(indent)
+	sb.WriteString(styleMuted.Render(fmt.Sprintf("Status: %s", state.Status)))
+	sb.WriteString("\n")
+
+	// Subtask progress
+	if len(state.Subtasks) > 0 {
+		done := 0
+		for _, st := range state.Subtasks {
+			if st.Done {
+				done++
+			}
+		}
+		sb.WriteString(indent)
+		sb.WriteString(styleMuted.Render(fmt.Sprintf("Subtasks: %d/%d done", done, len(state.Subtasks))))
+		sb.WriteString("\n")
+		for _, st := range state.Subtasks {
+			check := "○"
+			if st.Done {
+				check = "✓"
+			}
+			desc := truncate(st.Description, width-8)
+			sb.WriteString(indent + "  ")
+			sb.WriteString(styleMuted.Render(fmt.Sprintf("%s %s", check, desc)))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Files touched
+	if len(state.FilesTouched) > 0 {
+		sb.WriteString(indent)
+		sb.WriteString(styleMuted.Render(fmt.Sprintf("Files: %d", len(state.FilesTouched))))
+		sb.WriteString("\n")
+		for _, f := range state.FilesTouched {
+			sb.WriteString(indent + "  ")
+			sb.WriteString(styleMuted.Render(truncate(f, width-8)))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Judge feedback
+	if len(state.JudgeFeedback) > 0 {
+		sb.WriteString(indent)
+		sb.WriteString(styleMuted.Render(fmt.Sprintf("Judge feedback: %d entries", len(state.JudgeFeedback))))
+		sb.WriteString("\n")
+		for _, fb := range state.JudgeFeedback {
+			sb.WriteString(indent + "  ")
+			sb.WriteString(styleMuted.Render(truncate(fb, width-8)))
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // renderMiniProgress renders a compact colored progress bar.
