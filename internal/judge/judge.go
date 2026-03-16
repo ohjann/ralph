@@ -233,29 +233,48 @@ func FormatResult(storyID string, r Result) string {
 	}
 	sb.WriteString(fmt.Sprintf("── Judge: %s ── %s ──\n", storyID, verdict))
 
-	if r.Reason != "" {
+	if r.Reason != "" && r.Passed {
 		sb.WriteString(fmt.Sprintf("  Reason: %s\n", r.Reason))
 	}
 
 	if len(r.CriteriaMet) > 0 {
 		sb.WriteString("  Criteria met:\n")
 		for _, c := range r.CriteriaMet {
-			sb.WriteString(fmt.Sprintf("    + %s\n", c))
+			sb.WriteString(fmt.Sprintf("    ✓ %s\n", c))
 		}
 	}
 
 	if len(r.CriteriaFailed) > 0 {
 		sb.WriteString("  Criteria failed:\n")
 		for _, c := range r.CriteriaFailed {
-			sb.WriteString(fmt.Sprintf("    - %s\n", c))
+			sb.WriteString(fmt.Sprintf("    ✗ %s\n", c))
+		}
+		if r.Reason != "" {
+			sb.WriteString("      ┆ Reason: ")
+			sb.WriteString(indentMultiline(r.Reason, "      ┆ "))
+			sb.WriteString("\n")
+		}
+		if r.Suggestion != "" {
+			sb.WriteString("      ┆ Suggestion: ")
+			sb.WriteString(indentMultiline(r.Suggestion, "      ┆ "))
+			sb.WriteString("\n")
 		}
 	}
 
-	if r.Suggestion != "" && !r.Passed {
-		sb.WriteString(fmt.Sprintf("  Suggestion: %s\n", r.Suggestion))
-	}
-
 	return sb.String()
+}
+
+// indentMultiline indents continuation lines of a multi-line string.
+// The first line is returned as-is; subsequent lines are prefixed with indent.
+func indentMultiline(s, indent string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= 1 {
+		return s
+	}
+	for i := 1; i < len(lines); i++ {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func writeFeedback(projectDir, storyID string, v *Verdict) {
