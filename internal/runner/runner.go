@@ -299,7 +299,7 @@ func ReadActivityContent(path string) string {
 		return ""
 	}
 	content := string(data)
-	const maxSize = 64 * 1024
+	const maxSize = 256 * 1024
 	if len(content) > maxSize {
 		content = content[len(content)-maxSize:]
 		if idx := strings.Index(content, "\n"); idx >= 0 {
