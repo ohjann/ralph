@@ -20,17 +20,22 @@ type RetrievalOptions struct {
 	Disabled  bool    // If true, return empty string immediately
 }
 
-// DocRef identifies a document in a specific collection.
+// DocRef identifies a document in a specific collection, with optional
+// retrieval metadata for TUI display.
 type DocRef struct {
 	Collection string
 	DocID      string
+	Score      float64 // combined relevance score (0–1)
+	Content    string  // content preview for TUI display
 }
 
 // RetrievalResult holds the formatted markdown and the document references
 // that contributed to it, enabling confirmation tracking.
 type RetrievalResult struct {
-	Text    string
-	DocRefs []DocRef
+	Text       string
+	DocRefs    []DocRef
+	TotalFound int // total results that passed MinScore (before token budget trim)
+	MaxTokens  int // token budget used for selection
 }
 
 // DefaultRetrievalOptions returns options derived from the default config.
@@ -185,12 +190,16 @@ func RetrieveContext(
 		docRefs[i] = DocRef{
 			Collection: r.collection,
 			DocID:      r.result.Document.ID,
+			Score:      r.combined,
+			Content:    r.result.Document.Content,
 		}
 	}
 
 	return RetrievalResult{
-		Text:    formatMarkdown(selected),
-		DocRefs: docRefs,
+		Text:       formatMarkdown(selected),
+		DocRefs:    docRefs,
+		TotalFound: len(ranked),
+		MaxTokens:  opts.MaxTokens,
 	}, nil
 }
 

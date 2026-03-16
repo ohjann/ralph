@@ -269,6 +269,35 @@ func renderWorktreeCompact(content string) string {
 	return sb.String()
 }
 
+// renderMemoryWithRetrieval combines memory stats content with retrieval results.
+func renderMemoryWithRetrieval(statsContent string, retrieval *MemoryRetrievalMsg) string {
+	if retrieval == nil || len(retrieval.DocRefs) == 0 {
+		return statsContent
+	}
+
+	var sb strings.Builder
+	sb.WriteString(statsContent)
+	sb.WriteString("\n  Retrieved for " + retrieval.StoryID + "\n")
+	sb.WriteString("  ─────────────────────\n")
+
+	for _, ref := range retrieval.DocRefs {
+		preview := ref.Content
+		if len(preview) > 80 {
+			preview = preview[:80] + "…"
+		}
+		// Replace newlines in preview for single-line display
+		preview = strings.ReplaceAll(preview, "\n", " ")
+		sb.WriteString(fmt.Sprintf("  %.2f  %-20s %s\n", ref.Score, ref.Collection, preview))
+	}
+
+	if retrieval.TotalFound > len(retrieval.DocRefs) {
+		remaining := retrieval.TotalFound - len(retrieval.DocRefs)
+		sb.WriteString(fmt.Sprintf("\n  … %d more (%s token budget)\n", remaining, formatTokens(retrieval.MaxTokens)))
+	}
+
+	return sb.String()
+}
+
 // formatTokens formats a token count with K/M suffixes.
 func formatTokens(n int) string {
 	switch {

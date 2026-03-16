@@ -57,6 +57,8 @@ type claudeDoneMsg struct {
 	CompleteSignal bool              // <promise>COMPLETE</promise> found
 	DocRefs        []memory.DocRef   // retrieved doc refs for confirmation tracking
 	TokenUsage     *costs.TokenUsage // accumulated token usage from streaming
+	TotalFound     int               // total retrieval results before token budget trim
+	MaxTokens      int               // token budget used for retrieval
 }
 type judgeDoneMsg struct {
 	Result judge.Result
@@ -99,6 +101,14 @@ type pipelineEmbedDoneMsg struct {
 }
 type memoryStatsMsg struct {
 	Content string
+}
+
+// MemoryRetrievalMsg carries retrieved memory DocRefs from BuildPrompt to the TUI.
+type MemoryRetrievalMsg struct {
+	StoryID    string
+	DocRefs    []memory.DocRef
+	TotalFound int // total results before token budget trim
+	MaxTokens  int // token budget used
 }
 
 // Cost tracking

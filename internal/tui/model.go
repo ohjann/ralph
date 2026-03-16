@@ -130,8 +130,9 @@ type Model struct {
 	memorySidecar  *memory.Sidecar
 	chromaClient   *memory.ChromaClient
 	memoryEmbedder memory.Embedder
-	memoryContent  string // rendered content for the memory context panel tab
-	confirmTracker *memory.ConfirmationTracker
+	memoryContent    string // rendered content for the memory context panel tab
+	memoryRetrieval  *MemoryRetrievalMsg // last retrieval results for display
+	confirmTracker   *memory.ConfirmationTracker
 
 	// Push notifications
 	notifier *notify.Notifier
@@ -822,7 +823,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case memoryStatsMsg:
-		m.memoryContent = msg.Content
+		m.memoryContent = renderMemoryWithRetrieval(msg.Content, m.memoryRetrieval)
 
 	case costUpdateMsg:
 		if m.runCosting != nil {
@@ -907,6 +908,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, func() tea.Msg {
 				return costUpdateMsg{Usage: *msg.TokenUsage, StoryID: m.currentStoryID}
 			})
+		}
+		// Capture retrieval data for memory panel display
+		if len(msg.DocRefs) > 0 && m.currentStoryID != "" {
+			m.memoryRetrieval = &MemoryRetrievalMsg{
+				StoryID:    m.currentStoryID,
+				DocRefs:    msg.DocRefs,
+				TotalFound: msg.TotalFound,
+				MaxTokens:  msg.MaxTokens,
+			}
+			m.memoryContent = renderMemoryWithRetrieval(m.memoryContent, m.memoryRetrieval)
 		}
 		m.updateStatusPage()
 

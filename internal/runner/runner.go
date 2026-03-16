@@ -35,10 +35,10 @@ type BuildPromptOpts struct {
 
 // BuildPrompt reads ralph-prompt.md, appends PRD context, story state, iteration constraint,
 // judge feedback, event context, and semantic memory into the prompt.
-func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (string, []memory.DocRef, error) {
+func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (string, memory.RetrievalResult, error) {
 	base, err := os.ReadFile(filepath.Join(ralphHome, "ralph-prompt.md"))
 	if err != nil {
-		return "", nil, fmt.Errorf("reading ralph-prompt.md: %w", err)
+		return "", memory.RetrievalResult{}, fmt.Errorf("reading ralph-prompt.md: %w", err)
 	}
 
 	prompt := string(base)
@@ -72,7 +72,7 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 	}
 
 	// Inject semantic memory context (additive, after event context)
-	var docRefs []memory.DocRef
+	var retrieval memory.RetrievalResult
 	if len(opts) > 0 && opts[0].Memory != nil && story != nil {
 		memCtx, err := opts[0].Memory.RetrieveContext(
 			context.Background(),
@@ -84,14 +84,14 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 		if err != nil {
 			log.Printf("warning: semantic memory retrieval failed: %v", err)
 		} else {
-			docRefs = memCtx.DocRefs
+			retrieval = memCtx
 			if memCtx.Text != "" {
 				prompt += "\n\n---\n" + memCtx.Text
 			}
 		}
 	}
 
-	return prompt, docRefs, nil
+	return prompt, retrieval, nil
 }
 
 // buildPRDContext generates the YOUR STORY, PROJECT CONTEXT, and OTHER STORIES sections.
