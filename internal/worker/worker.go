@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/eoghanhynes/ralph/internal/storystate"
 	"github.com/eoghanhynes/ralph/internal/workspace"
 )
 
@@ -67,6 +70,7 @@ type WorkerUpdate struct {
 	WorkerID    WorkerID
 	StoryID     string
 	State       WorkerState
+	Role        roles.Role // current agent role for TUI display
 	Err         error
 	Passed      bool
 	ChangeID    string // jj change_id of committed work, for rebase
@@ -76,16 +80,84 @@ type WorkerUpdate struct {
 	TokenUsage  *costs.TokenUsage // token/turn usage from Claude run
 }
 
+// shouldRunArchitect determines if the architect agent should run before the implementer.
+// Returns true when this is the first iteration, the story doesn't match skip criteria,
+// and no plan already exists in the workspace.
+func shouldRunArchitect(storyID string, iteration int, workspaceDir string, p *prd.PRD) bool {
+	// Only on first iteration
+	if iteration != 1 {
+		return false
+	}
+
+	// FIX- stories skip architect
+	if strings.HasPrefix(storyID, "FIX-") {
+		return false
+	}
+
+	// Check description word count via ShouldSkipArchitect
+	descWordCount := 0
+	if p != nil {
+		if story := p.FindStory(storyID); story != nil {
+			descWordCount = len(strings.Fields(story.Description))
+		}
+	}
+	if roles.ShouldSkipArchitect(storyID, descWordCount) {
+		return false
+	}
+
+	// Skip if plan already exists
+	plan, _ := storystate.LoadPlan(workspaceDir, storyID)
+	if strings.TrimSpace(plan) != "" {
+		return false
+	}
+
+	return true
+}
+
+// accumulateUsage merges token usage from two runs, summing token counts.
+// If either is nil, the other is returned. Duration and turns are summed.
+func accumulateUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &costs.TokenUsage{
+		InputTokens:  a.InputTokens + b.InputTokens,
+		OutputTokens: a.OutputTokens + b.OutputTokens,
+		CacheRead:    a.CacheRead + b.CacheRead,
+		CacheWrite:   a.CacheWrite + b.CacheWrite,
+		Model:        a.Model, // use first model (architect)
+		Provider:     a.Provider,
+		NumTurns:     a.NumTurns + b.NumTurns,
+		DurationMS:   a.DurationMS + b.DurationMS,
+	}
+}
+
+// appendParallelMode adds the parallel mode stop condition to a prompt.
+func appendParallelMode(prompt, storyID string) string {
+	return prompt + fmt.Sprintf(`
+
+---
+## PARALLEL MODE
+You are running as a parallel worker. Other workers are handling other stories simultaneously.
+You are ONLY responsible for story **%s**. After completing it, stop immediately.
+Do NOT check if all stories are complete. Do NOT emit the COMPLETE signal.
+Just implement your story, commit, update progress.md, and stop.`, storyID)
+}
+
 // Run executes the full worker lifecycle in the workspace.
 func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	var claudeUsage *costs.TokenUsage // captured from RunClaude, forwarded in updates
 
-	send := func(state WorkerState, err error, passed bool, changeID string) {
+	send := func(state WorkerState, role roles.Role, err error, passed bool, changeID string) {
 		w.State = state
 		updateCh <- WorkerUpdate{
 			WorkerID:   w.ID,
 			StoryID:    w.StoryID,
 			State:      state,
+			Role:       role,
 			Err:        err,
 			Passed:     passed,
 			ChangeID:   changeID,
@@ -105,10 +177,10 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	}
 
 	// 1. Create workspace
-	send(WorkerSetup, nil, false, "")
+	send(WorkerSetup, "", nil, false, "")
 	ws, err := workspace.Create(w.Ctx, cfg.ProjectDir, w.StoryID, cfg.WorkspaceBase)
 	if err != nil {
-		send(WorkerFailed, fmt.Errorf("workspace create: %w", err), false, "")
+		send(WorkerFailed, "", fmt.Errorf("workspace create: %w", err), false, "")
 		return
 	}
 	w.Workspace = ws.Dir
@@ -117,7 +189,7 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 
 	// Copy state files into workspace
 	if err := workspace.CopyState(cfg.ProjectDir, ws.Dir, w.StoryID); err != nil {
-		send(WorkerFailed, fmt.Errorf("copy state: %w", err), false, "")
+		send(WorkerFailed, "", fmt.Errorf("copy state: %w", err), false, "")
 		return
 	}
 
@@ -125,15 +197,15 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	wsLogDir := filepath.Join(ws.Dir, ".ralph", "logs")
 	w.LogDir = wsLogDir
 
-	// 2. Build prompt and run Claude
-	send(WorkerRunning, nil, false, "")
+	// Load PRD for prompt building
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 
-	var buildOpts []runner.BuildPromptOpts
+	// Build memory opts (shared between architect and implementer)
+	var memoryOpts []runner.BuildPromptOpts
 	if w.ChromaClient != nil && w.Embedder != nil && !cfg.Memory.Disabled {
 		retriever := memory.NewRetriever(w.ChromaClient, w.Embedder)
 		if retriever != nil {
-			buildOpts = append(buildOpts, runner.BuildPromptOpts{
+			memoryOpts = append(memoryOpts, runner.BuildPromptOpts{
 				Memory: retriever,
 				MemoryOpts: memory.RetrievalOptions{
 					TopK:      cfg.Memory.TopK,
@@ -144,31 +216,77 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		}
 	}
 
-	prompt, _, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, buildOpts...)
-	if err != nil {
-		send(WorkerFailed, fmt.Errorf("build prompt: %w", err), false, "")
-		return
+	// 2. Architect phase: run architect agent if applicable
+	if shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
+		send(WorkerRunning, roles.RoleArchitect, nil, false, "")
+
+		archOpts := makeBuildOpts(memoryOpts, roles.RoleArchitect)
+		archPrompt, _, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, archOpts...)
+		if err != nil {
+			send(WorkerFailed, roles.RoleArchitect, fmt.Errorf("build architect prompt: %w", err), false, "")
+			return
+		}
+		archPrompt = appendParallelMode(archPrompt, w.StoryID)
+
+		archLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect"
+		archUsage, err := runner.RunClaude(w.Ctx, ws.Dir, archPrompt, archLogPath, runner.RunClaudeOpts{
+			Iteration: w.Iteration,
+			StoryID:   w.StoryID,
+			Role:      roles.RoleArchitect,
+		})
+		claudeUsage = archUsage
+		if err != nil {
+			if w.Ctx.Err() != nil {
+				send(WorkerFailed, roles.RoleArchitect, w.Ctx.Err(), false, "")
+				return
+			}
+			var usageErr *runner.UsageLimitError
+			if errors.As(err, &usageErr) {
+				w.State = WorkerFailed
+				updateCh <- WorkerUpdate{
+					WorkerID:   w.ID,
+					StoryID:    w.StoryID,
+					State:      WorkerFailed,
+					Role:       roles.RoleArchitect,
+					Err:        err,
+					UsageLimit: true,
+					TokenUsage: claudeUsage,
+				}
+				return
+			}
+			sendRetryable(fmt.Errorf("architect run: %w", err))
+			return
+		}
+
+		// Validate that the architect produced a plan
+		plan, _ := storystate.LoadPlan(ws.Dir, w.StoryID)
+		if strings.TrimSpace(plan) == "" {
+			send(WorkerFailed, roles.RoleArchitect, fmt.Errorf("architect produced no plan for %s", w.StoryID), false, "")
+			return
+		}
 	}
 
-	// In parallel mode, override the stop condition — this worker only handles one story
-	prompt += fmt.Sprintf(`
+	// 3. Build prompt and run implementer
+	send(WorkerRunning, roles.RoleImplementer, nil, false, "")
 
----
-## PARALLEL MODE
-You are running as a parallel worker. Other workers are handling other stories simultaneously.
-You are ONLY responsible for story **%s**. After completing it, stop immediately.
-Do NOT check if all stories are complete. Do NOT emit the COMPLETE signal.
-Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
+	implOpts := makeBuildOpts(memoryOpts, roles.RoleImplementer)
+	prompt, _, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, implOpts...)
+	if err != nil {
+		send(WorkerFailed, roles.RoleImplementer, fmt.Errorf("build prompt: %w", err), false, "")
+		return
+	}
+	prompt = appendParallelMode(prompt, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
 	usage, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
 		Iteration: w.Iteration,
 		StoryID:   w.StoryID,
+		Role:      roles.RoleImplementer,
 	})
-	claudeUsage = usage // make available to send() helper
+	claudeUsage = accumulateUsage(claudeUsage, usage) // accumulate architect + implementer usage
 	if err != nil {
 		if w.Ctx.Err() != nil {
-			send(WorkerFailed, w.Ctx.Err(), false, "")
+			send(WorkerFailed, roles.RoleImplementer, w.Ctx.Err(), false, "")
 			return
 		}
 		// Usage limit — signal to pause, don't retry automatically
@@ -179,6 +297,7 @@ Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
 				WorkerID:   w.ID,
 				StoryID:    w.StoryID,
 				State:      WorkerFailed,
+				Role:       roles.RoleImplementer,
 				Err:        err,
 				UsageLimit: true,
 				TokenUsage: claudeUsage,
@@ -190,31 +309,31 @@ Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
 		return
 	}
 
-	// 3. Mark story as passed in workspace prd.json
+	// 4. Mark story as passed in workspace prd.json
 	// The system owns the passes field — the agent no longer sets it.
 	// If the judge is enabled, it will revert passes to false on failure.
 	p, err := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 	if err != nil {
-		send(WorkerFailed, fmt.Errorf("load prd: %w", err), false, "")
+		send(WorkerFailed, "", fmt.Errorf("load prd: %w", err), false, "")
 		return
 	}
 	p.SetPasses(w.StoryID, true)
 	if err := prd.Save(filepath.Join(ws.Dir, "prd.json"), p); err != nil {
-		send(WorkerFailed, fmt.Errorf("save prd: %w", err), false, "")
+		send(WorkerFailed, "", fmt.Errorf("save prd: %w", err), false, "")
 		return
 	}
 	passed := true
 
-	// 4. Commit workspace changes
+	// 5. Commit workspace changes
 	changeID, err := workspace.CommitWorkspace(w.Ctx, ws.Dir, w.StoryID, w.StoryTitle, w.BaseChangeID)
 	if err != nil {
-		send(WorkerFailed, fmt.Errorf("commit workspace: %w", err), false, "")
+		send(WorkerFailed, "", fmt.Errorf("commit workspace: %w", err), false, "")
 		return
 	}
 
-	// 5. Run judge if enabled and story passed
+	// 6. Run judge if enabled and story passed
 	if cfg.JudgeEnabled && passed {
-		send(WorkerJudging, nil, false, changeID)
+		send(WorkerJudging, "", nil, false, changeID)
 
 		// Capture revs for judge: diff from base to squashed commit
 		preRevs := []judge.DirRev{{Dir: ws.Dir, Rev: w.BaseChangeID, ToRev: changeID}}
@@ -236,6 +355,17 @@ Just implement your story, commit, update progress.md, and stop.`, w.StoryID)
 		return
 	}
 
-	// 6. Send done
-	send(WorkerDone, nil, passed, changeID)
+	// 7. Send done
+	send(WorkerDone, "", nil, passed, changeID)
+}
+
+// makeBuildOpts creates BuildPromptOpts with the given role, merging with any memory opts.
+func makeBuildOpts(memoryOpts []runner.BuildPromptOpts, role roles.Role) []runner.BuildPromptOpts {
+	if len(memoryOpts) > 0 {
+		opts := make([]runner.BuildPromptOpts, len(memoryOpts))
+		copy(opts, memoryOpts)
+		opts[0].Role = role
+		return opts
+	}
+	return []runner.BuildPromptOpts{{Role: role}}
 }
