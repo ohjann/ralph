@@ -23,6 +23,7 @@ type StoryDisplayInfo struct {
 	WorkerID       worker.WorkerID
 	StartTime      time.Time
 	IterationCount int
+	Role           string // current agent role (architect/implementer/debugger)
 }
 
 func newStoriesViewport(width, height int) viewport.Model {
@@ -116,7 +117,10 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 			titleStyle(truncate(s.Title, width-len(s.ID)-15)),
 		)
 
-		// Iteration count for running stories
+		// Role and iteration count for running stories
+		if s.Running && s.Role != "" {
+			line += " " + styleMuted.Render(fmt.Sprintf("(%s)", s.Role))
+		}
 		if s.Running && s.IterationCount > 0 {
 			line += " " + styleMuted.Render(fmt.Sprintf("(iter %d)", s.IterationCount))
 		}
@@ -262,18 +266,21 @@ func truncate(s string, maxLen int) string {
 
 // BuildStoryDisplayInfos creates display info from the model state.
 // sequentialIteration is the current iteration count for sequential (non-parallel) mode.
+// currentRole is the agent role for the current story in serial mode.
 func BuildStoryDisplayInfos(stories []prd.UserStory, currentStoryID string, coord interface {
 	Workers() map[worker.WorkerID]*worker.Worker
-}, phase phase, sequentialIteration int) []StoryDisplayInfo {
+}, phase phase, sequentialIteration int, currentRole string) []StoryDisplayInfo {
 	// Build worker assignments map
 	workerAssignments := make(map[string]worker.WorkerID)
 	workerIterations := make(map[string]int)
+	workerRoles := make(map[string]string)
 	workerStartTimes := make(map[string]time.Time)
 	if coord != nil {
 		for wID, w := range coord.Workers() {
 			if w.State == worker.WorkerRunning || w.State == worker.WorkerSetup || w.State == worker.WorkerJudging {
 				workerAssignments[w.StoryID] = wID
 				workerIterations[w.StoryID] = w.Iteration
+				workerRoles[w.StoryID] = string(w.Role)
 			}
 		}
 	}
@@ -292,9 +299,11 @@ func BuildStoryDisplayInfos(stories []prd.UserStory, currentStoryID string, coor
 			info.Running = true
 			info.WorkerID = wID
 			info.IterationCount = workerIterations[s.ID]
+			info.Role = workerRoles[s.ID]
 		} else if s.ID == currentStoryID && (phase == phaseClaudeRun || phase == phaseJudgeRun) {
 			info.Running = true
 			info.IterationCount = sequentialIteration
+			info.Role = currentRole
 		}
 
 		infos = append(infos, info)

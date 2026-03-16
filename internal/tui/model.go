@@ -29,6 +29,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/quality"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/runner"
 	"github.com/eoghanhynes/ralph/internal/storystate"
 	"github.com/eoghanhynes/ralph/internal/worker"
@@ -51,8 +52,9 @@ type Model struct {
 	// State
 	phase            phase
 	iteration        int
-	currentStoryID   string
+	currentStoryID    string
 	currentStoryTitle string
+	currentRole       roles.Role
 	preRevs          []judge.DirRev
 	completedStories int
 	totalStories     int
@@ -693,7 +695,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.coord != nil {
 				coordIface = m.coord
 			}
-			m.storyDisplayInfos = BuildStoryDisplayInfos(p.UserStories, m.currentStoryID, coordIface, m.phase, m.iteration)
+			m.storyDisplayInfos = BuildStoryDisplayInfos(p.UserStories, m.currentStoryID, coordIface, m.phase, m.iteration, string(m.currentRole))
 		}
 
 		// Auto-select context mode based on phase (skip if user manually switched)
@@ -929,6 +931,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.iteration++
 		m.currentStoryID = msg.StoryID
 		m.currentStoryTitle = msg.StoryTitle
+		// Determine starting role for display
+		if p, err := prd.Load(m.cfg.PRDFile); err == nil {
+			story := p.FindStory(msg.StoryID)
+			if needsArchitect(m.cfg.ProjectDir, msg.StoryID, story) {
+				m.currentRole = roles.RoleArchitect
+			} else {
+				m.currentRole = roles.RoleImplementer
+			}
+		} else {
+			m.currentRole = roles.RoleImplementer
+		}
 		m.phase = phaseClaudeRun
 		m.updateStatusPage()
 		m.claudeContent = ""
@@ -952,6 +965,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, runClaudeCmd(m.ctx, m.cfg, msg.StoryID, m.iteration, m.chromaClient, m.memoryEmbedder))
 
 	case claudeDoneMsg:
+		m.currentRole = msg.Role
 		debuglog.Log("claudeDone: story=%s err=%v completeSignal=%v", m.currentStoryID, msg.Err, msg.CompleteSignal)
 		if msg.Err != nil {
 			// Context cancelled = user quit
@@ -1803,7 +1817,11 @@ func (m *Model) View() string {
 			if id == m.activeWorkerView {
 				marker = "▸"
 			}
-			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s[%s]", marker, tabIdx+1, w.StoryID, w.State))
+			roleStr := ""
+			if w.Role != "" {
+				roleStr = " " + string(w.Role)
+			}
+			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s%s[%s]", marker, tabIdx+1, w.StoryID, roleStr, w.State))
 		}
 		workerTabStr = strings.Join(tabParts, " │ ")
 	}

@@ -55,9 +55,10 @@ type Worker struct {
 	StoryID        string
 	StoryTitle     string
 	State          WorkerState
-	Workspace      string // path to workspace dir
-	WorkspaceName  string // jj workspace name (for forget)
-	BaseChangeID   string // jj change ID of the commit the workspace branched from
+	Role           roles.Role // current agent role (architect/implementer/debugger)
+	Workspace      string     // path to workspace dir
+	WorkspaceName  string     // jj workspace name (for forget)
+	BaseChangeID   string     // jj change ID of the commit the workspace branched from
 	LogDir         string
 	Iteration      int
 	Ctx            context.Context

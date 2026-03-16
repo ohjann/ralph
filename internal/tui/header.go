@@ -128,6 +128,9 @@ func renderCurrentTask(m *Model) string {
 	default:
 		if m.currentStoryID != "" {
 			s := styleStoryID.Render(m.currentStoryID)
+			if m.currentRole != "" {
+				s += " " + styleMuted.Render("·") + " " + lipgloss.NewStyle().Foreground(colorTeal).Render(string(m.currentRole))
+			}
 			if m.currentStoryTitle != "" {
 				s += " " + styleStoryTitle.Render(m.currentStoryTitle)
 			}

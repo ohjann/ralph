@@ -195,6 +195,7 @@ func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) bool {
 
 	if w, ok := c.workers[u.WorkerID]; ok {
 		w.State = u.State
+		w.Role = u.Role
 	}
 
 	shouldRetry := false
