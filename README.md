@@ -156,9 +156,9 @@ Options:
   --ntfy-server <url>             Self-hosted ntfy server URL (default: https://ntfy.sh)
   --status-port <port>            Start remote status page on given port (disabled by default)
   --enable-monitoring             Enable ntfy + status page using .ralph/.env config
-  --memory-max-tokens <n>         Max tokens for injected memory context (default: 2000)
-  --memory-top-k <n>              Results per memory collection (default: 5)
-  --memory-min-score <float>      Memory similarity threshold (default: 0.7)
+  --memory-max-tokens <n>         Max tokens for injected memory context (default: 8000)
+  --memory-top-k <n>              Results per memory collection (default: 15)
+  --memory-min-score <float>      Memory similarity threshold (default: 0.6)
   --memory-disable                Skip ChromaDB startup
   --memory-port <port>            ChromaDB sidecar port (default: 9876)
   --idle                          Launch TUI without executing (display only)

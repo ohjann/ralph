@@ -10,9 +10,9 @@ import (
 
 // MemoryConfig holds configuration for the semantic memory system.
 type MemoryConfig struct {
-	TopK      int     // --memory-top-k: number of results to retrieve (default 5)
-	MinScore  float64 // --memory-min-score: minimum similarity score (default 0.7)
-	MaxTokens int     // --memory-max-tokens: max tokens for memory context (default 2000)
+	TopK      int     // --memory-top-k: number of results to retrieve (default 15)
+	MinScore  float64 // --memory-min-score: minimum similarity score (default 0.6)
+	MaxTokens int     // --memory-max-tokens: max tokens for memory context (default 8000)
 	Disabled  bool    // --memory-disable: skip ChromaDB sidecar startup entirely
 	Port      int     // --memory-port: ChromaDB sidecar port (default 9876)
 }
@@ -20,9 +20,9 @@ type MemoryConfig struct {
 // DefaultMemoryConfig returns the default memory configuration values.
 func DefaultMemoryConfig() MemoryConfig {
 	return MemoryConfig{
-		TopK:      5,
-		MinScore:  0.7,
-		MaxTokens: 2000,
+		TopK:      15,
+		MinScore:  0.6,
+		MaxTokens: 8000,
 		Port:      9876,
 	}
 }
@@ -591,9 +591,9 @@ Options:
   --no-quality-review             Disable final quality review (enabled by default)
   --quality-workers <n>           Parallel quality reviewers (default: 3)
   --quality-max-iterations <n>    Max review-fix cycles (default: 2)
-  --memory-top-k <n>             Number of memory results to retrieve (default: 5)
-  --memory-min-score <f>         Minimum similarity score for memory retrieval (default: 0.7)
-  --memory-max-tokens <n>        Max tokens for memory context (default: 2000)
+  --memory-top-k <n>             Number of memory results to retrieve (default: 15)
+  --memory-min-score <f>         Minimum similarity score for memory retrieval (default: 0.6)
+  --memory-max-tokens <n>        Max tokens for memory context (default: 8000)
   --memory-disable               Disable semantic memory (skip ChromaDB sidecar)
   --memory-port <n>              ChromaDB sidecar port (default: 9876)
   --status-port <port>           Start remote status page on given port (disabled by default)
