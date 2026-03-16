@@ -18,6 +18,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/events"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/storystate"
 )
 
@@ -31,14 +32,26 @@ type MemoryRetriever interface {
 type BuildPromptOpts struct {
 	Memory     MemoryRetriever
 	MemoryOpts memory.RetrievalOptions
+	Role       roles.Role
 }
 
 // BuildPrompt reads ralph-prompt.md, appends PRD context, story state, iteration constraint,
 // judge feedback, event context, and semantic memory into the prompt.
 func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (string, memory.RetrievalResult, error) {
-	base, err := os.ReadFile(filepath.Join(ralphHome, "ralph-prompt.md"))
+	// Determine which prompt template to load based on role
+	var role roles.Role
+	if len(opts) > 0 {
+		role = opts[0].Role
+	}
+
+	promptFile := "ralph-prompt.md"
+	if role != "" {
+		promptFile = roles.DefaultConfig(role).PromptFile
+	}
+
+	base, err := os.ReadFile(filepath.Join(ralphHome, promptFile))
 	if err != nil {
-		return "", memory.RetrievalResult{}, fmt.Errorf("reading ralph-prompt.md: %w", err)
+		return "", memory.RetrievalResult{}, fmt.Errorf("reading %s: %w", promptFile, err)
 	}
 
 	prompt := string(base)
@@ -51,12 +64,20 @@ func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...Buil
 		prompt += buildStoryStateContext(projectDir, storyID)
 	}
 
-	prompt += fmt.Sprintf(`
+	// Architect role plans freely — skip the iteration constraint
+	if role != roles.RoleArchitect {
+		prompt += fmt.Sprintf(`
 
 ---
 ## THIS ITERATION
 You MUST only work on story **%s**. Do NOT implement any other story. After completing %s, stop immediately.
 If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where it left off.`, storyID, storyID, storyID)
+	}
+
+	// Debugger role: inject most recent stuck detection info
+	if role == roles.RoleDebugger {
+		prompt += buildDebuggerStuckContext(projectDir, storyID)
+	}
 
 	// Inject judge feedback if present
 	feedbackPath := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-feedback-%s.md", storyID))
@@ -204,10 +225,58 @@ func buildStoryStateContext(projectDir, storyID string) string {
 	return b.String()
 }
 
+// buildDebuggerStuckContext finds the most recent stuck-*.json file for the
+// story and formats it as context for the debugger role.
+func buildDebuggerStuckContext(projectDir, storyID string) string {
+	ralphDir := filepath.Join(projectDir, ".ralph")
+	entries, err := os.ReadDir(ralphDir)
+	if err != nil {
+		return ""
+	}
+
+	// Find the highest-numbered stuck-*.json file
+	var latest *StuckInfo
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "stuck-") || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(ralphDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var info StuckInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			continue
+		}
+		// Filter by story ID if set, or take any
+		if info.StoryID != "" && info.StoryID != storyID {
+			continue
+		}
+		if latest == nil || info.Iteration > latest.Iteration {
+			latest = &info
+		}
+	}
+
+	if latest == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\n---\n## STUCK DETECTION INFO\n")
+	b.WriteString(fmt.Sprintf("- **Pattern:** %s\n", latest.Pattern))
+	b.WriteString(fmt.Sprintf("- **Iteration:** %d\n", latest.Iteration))
+	b.WriteString(fmt.Sprintf("- **Repeat count:** %d\n", latest.Count))
+	if len(latest.Commands) > 0 {
+		b.WriteString(fmt.Sprintf("- **Repeated commands:** %s\n", strings.Join(latest.Commands, ", ")))
+	}
+	return b.String()
+}
+
 // RunClaudeOpts contains optional parameters for RunClaude.
 type RunClaudeOpts struct {
 	Iteration int
 	StoryID   string
+	Role      roles.Role
 }
 
 // RunClaude executes claude with streaming JSON output, parsing events into

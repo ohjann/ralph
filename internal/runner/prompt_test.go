@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/storystate"
 )
 
@@ -152,5 +154,157 @@ func TestBuildPromptNilPRDNoCrash(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "base") {
 		t.Error("prompt should contain base content")
+	}
+}
+
+func TestBuildPromptWithArchitectRoleLoadsRolePrompt(t *testing.T) {
+	ralphHome := t.TempDir()
+	dir := t.TempDir()
+
+	// Create prompts directory and architect.md
+	promptsDir := filepath.Join(ralphHome, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "architect.md"), []byte("architect prompt template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Also create ralph-prompt.md to prove it's NOT loaded
+	if err := os.WriteFile(filepath.Join(ralphHome, "ralph-prompt.md"), []byte("default prompt template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, _, err := BuildPrompt(ralphHome, dir, "TEST-010", nil, BuildPromptOpts{
+		Role: roles.RoleArchitect,
+	})
+	if err != nil {
+		t.Fatalf("BuildPrompt with architect role: %v", err)
+	}
+	if !strings.Contains(prompt, "architect prompt template") {
+		t.Error("expected architect prompt template content")
+	}
+	if strings.Contains(prompt, "default prompt template") {
+		t.Error("should NOT contain default ralph-prompt.md content")
+	}
+}
+
+func TestBuildPromptArchitectSkipsIterationConstraint(t *testing.T) {
+	ralphHome := t.TempDir()
+	dir := t.TempDir()
+
+	promptsDir := filepath.Join(ralphHome, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "architect.md"), []byte("architect base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, _, err := BuildPrompt(ralphHome, dir, "TEST-011", nil, BuildPromptOpts{
+		Role: roles.RoleArchitect,
+	})
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	if strings.Contains(prompt, "THIS ITERATION") {
+		t.Error("architect role should NOT have THIS ITERATION constraint")
+	}
+}
+
+func TestBuildPromptEmptyRoleUsesDefault(t *testing.T) {
+	ralphHome := t.TempDir()
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(ralphHome, "ralph-prompt.md"), []byte("default prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty role — should behave exactly as before
+	prompt, _, err := BuildPrompt(ralphHome, dir, "TEST-012", nil, BuildPromptOpts{})
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "default prompt") {
+		t.Error("empty role should load ralph-prompt.md")
+	}
+	if strings.Contains(prompt, "STUCK DETECTION") {
+		t.Error("should not contain stuck detection for non-debugger role")
+	}
+}
+
+func TestBuildPromptDebuggerInjectsStuckInfo(t *testing.T) {
+	ralphHome := t.TempDir()
+	dir := t.TempDir()
+
+	promptsDir := filepath.Join(ralphHome, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "debugger.md"), []byte("debugger base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create stuck info file
+	ralphDir := filepath.Join(dir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stuckInfo := StuckInfo{
+		Pattern:   "repeated_bash_command",
+		Commands:  []string{"make test"},
+		Count:     5,
+		Iteration: 3,
+		StoryID:   "TEST-013",
+	}
+	data, _ := json.Marshal(stuckInfo)
+	if err := os.WriteFile(filepath.Join(ralphDir, "stuck-3.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, _, err := BuildPrompt(ralphHome, dir, "TEST-013", nil, BuildPromptOpts{
+		Role: roles.RoleDebugger,
+	})
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "STUCK DETECTION INFO") {
+		t.Error("debugger role should include stuck detection info")
+	}
+	if !strings.Contains(prompt, "repeated_bash_command") {
+		t.Error("should contain the stuck pattern")
+	}
+	if !strings.Contains(prompt, "make test") {
+		t.Error("should contain the repeated command")
+	}
+}
+
+func TestBuildPromptImplementerHasIterationConstraint(t *testing.T) {
+	ralphHome := t.TempDir()
+	dir := t.TempDir()
+
+	promptsDir := filepath.Join(ralphHome, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "implementer.md"), []byte("implementer base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &prd.PRD{
+		Project:    "test",
+		BranchName: "test-branch",
+		UserStories: []prd.UserStory{
+			{ID: "TEST-014", Title: "Test story", Priority: 1},
+		},
+	}
+
+	prompt, _, err := BuildPrompt(ralphHome, dir, "TEST-014", p, BuildPromptOpts{
+		Role: roles.RoleImplementer,
+	})
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "THIS ITERATION") {
+		t.Error("implementer role should have THIS ITERATION constraint")
 	}
 }
