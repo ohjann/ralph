@@ -240,15 +240,111 @@ func (m *Model) updateStatusPage() {
 func (m *Model) buildStatusState() statuspage.StatusState {
 	state := statuspage.StatusState{
 		Phase:     phaseToString(m.phase),
+		PhaseIcon: phaseIcon(m.phase),
 		TotalCost: m.runCosting.TotalCost,
+		Running:   isLoopActive(m.phase),
+		Version:   m.version,
 	}
 
 	elapsed := time.Since(m.startTime).Truncate(time.Second)
 	state.RunDuration = formatDuration(elapsed)
 
+	// Cost display (mirrors header logic)
+	if m.rateLimitInfo != nil && !m.rateLimitInfo.ResetsAt.IsZero() {
+		remaining := time.Until(m.rateLimitInfo.ResetsAt)
+		if remaining < 0 {
+			remaining = 0
+		}
+		state.CostDisplay = fmt.Sprintf("Resets in %s", formatDuration(remaining.Truncate(time.Second)))
+	} else if m.runCosting.TotalInputTokens > 0 || m.runCosting.TotalOutputTokens > 0 {
+		state.CostDisplay = fmt.Sprintf("$%.2f", m.runCosting.TotalCost)
+		state.HasTokenData = true
+	} else {
+		totalIters := len(m.runCosting.Stories)
+		if totalIters > 0 {
+			state.CostDisplay = fmt.Sprintf("%d stories tracked", totalIters)
+		} else {
+			state.CostDisplay = "—"
+		}
+	}
+
+	// Badges
+	if m.cfg.JudgeEnabled {
+		state.Badges = append(state.Badges, statuspage.Badge{Label: "Judge", Icon: "⚖"})
+	}
+	if m.cfg.QualityReview {
+		state.Badges = append(state.Badges, statuspage.Badge{Label: "Quality", Icon: "◇"})
+	}
+	if m.cfg.Workers > 1 {
+		state.Badges = append(state.Badges, statuspage.Badge{
+			Label: fmt.Sprintf("%d Workers", m.cfg.Workers), Icon: "⫘"})
+	}
+	if m.cfg.NotifyTopic != "" {
+		state.Badges = append(state.Badges, statuspage.Badge{Label: "ntfy", Icon: "🔔"})
+	}
+
+	// Context panel content (all tabs)
+	state.ProgressContent = m.progressContent
+	state.WorktreeContent = m.worktreeContent
+	state.JudgeContent = m.judgeContent
+	state.QualityContent = m.qualityContent
+	state.MemoryContent = m.memoryContent
+	state.CostsContent = m.costsContent
+
+	// Claude activity (last portion to keep payload reasonable)
+	if m.claudeContent != "" {
+		activity := m.claudeContent
+		if len(activity) > 4000 {
+			activity = activity[len(activity)-4000:]
+		}
+		state.ClaudeActivity = activity
+	}
+
+	// Stuck alert
+	if m.stuckAlert != nil {
+		state.StuckAlert = fmt.Sprintf("⚠ STUCK: %s — %s (%dx)",
+			m.stuckAlert.StoryID, m.stuckAlert.Pattern, m.stuckAlert.Count)
+	}
+
+	// Rate limit
+	if m.rateLimitInfo != nil && !m.rateLimitInfo.ResetsAt.IsZero() {
+		remaining := time.Until(m.rateLimitInfo.ResetsAt)
+		if remaining < 0 {
+			remaining = 0
+		}
+		windowLabel := m.rateLimitInfo.RateLimitType
+		switch windowLabel {
+		case "five_hour":
+			windowLabel = "5-hour window"
+		case "daily":
+			windowLabel = "daily window"
+		}
+		state.RateLimit = statuspage.RateLimitStatus{
+			HasLimit: true,
+			Window:   windowLabel,
+			Status:   m.rateLimitInfo.Status,
+			ResetsIn: formatDuration(remaining.Truncate(time.Second)),
+		}
+	}
+
+	// Build worker assignments for parallel mode
+	workerAssignments := make(map[string]int)
+	workerIterations := make(map[string]int)
+	workerRoles := make(map[string]string)
+	if m.coord != nil {
+		for wID, w := range m.coord.Workers() {
+			if w.State == worker.WorkerRunning || w.State == worker.WorkerSetup || w.State == worker.WorkerJudging {
+				workerAssignments[w.StoryID] = int(wID)
+				workerIterations[w.StoryID] = w.Iteration
+				workerRoles[w.StoryID] = string(w.Role)
+			}
+		}
+	}
+
 	// Load PRD for story data and project name
 	if p, err := prd.Load(m.cfg.PRDFile); err == nil {
 		state.PRDName = p.Project
+		state.Total = len(p.UserStories)
 		for _, s := range p.UserStories {
 			ss := statuspage.StoryStatus{
 				ID:    s.ID,
@@ -256,8 +352,11 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 			}
 			if s.Passes {
 				ss.Status = "done"
+				state.Completed++
 			} else if s.ID == m.currentStoryID && m.phase == phaseClaudeRun {
 				ss.Status = "running"
+				ss.Iteration = m.iteration
+				ss.Role = string(m.currentRole)
 			} else {
 				ss.Status = "queued"
 			}
@@ -266,6 +365,9 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 			if m.coord != nil {
 				if m.coord.IsInProgress(s.ID) {
 					ss.Status = "running"
+					ss.WorkerID = workerAssignments[s.ID]
+					ss.Iteration = workerIterations[s.ID]
+					ss.Role = workerRoles[s.ID]
 				} else if m.coord.IsFailed(s.ID) {
 					ss.Status = "failed"
 				}
@@ -278,7 +380,45 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 		}
 	}
 
+	state.AllComplete = state.Completed == state.Total && state.Total > 0
+
 	return state
+}
+
+// phaseIcon returns a unicode icon for the phase.
+func phaseIcon(p phase) string {
+	switch p {
+	case phaseInit:
+		return "◌"
+	case phaseIterating:
+		return "✦"
+	case phaseClaudeRun:
+		return "⚡"
+	case phaseJudgeRun:
+		return "⚖"
+	case phasePlanning:
+		return "✦"
+	case phaseReview:
+		return "◇"
+	case phaseDone:
+		return "✓"
+	case phaseIdle:
+		return "◇"
+	case phaseDagAnalysis:
+		return "◌"
+	case phaseParallel:
+		return "⚡"
+	case phaseQualityReview:
+		return "⚖"
+	case phaseQualityFix:
+		return "⚡"
+	case phaseQualityPrompt:
+		return "◇"
+	case phasePaused:
+		return "⏸"
+	default:
+		return ""
+	}
 }
 
 // phaseToString converts a phase to a human-readable string for the status page.
@@ -684,6 +824,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fastTickMsg:
 		cmds = append(cmds, fastTickCmd())
 		cmds = append(cmds, pollProgressCmd(m.cfg.ProgressFile))
+		m.updateStatusPage()
 
 		// Advance animation frame
 		m.animFrame++

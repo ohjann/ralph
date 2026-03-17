@@ -17,18 +17,51 @@ type StoryStatus struct {
 	Status    string  `json:"status"` // queued, running, done, failed, stuck
 	Cost      float64 `json:"cost"`
 	Iteration int     `json:"iteration,omitempty"`
-	Role      string  `json:"role,omitempty"` // e.g. "implementer", "architect"
-	Detail    string  `json:"detail,omitempty"`
+	Role      string  `json:"role,omitempty"`   // e.g. "implementer", "architect"
+	Detail    string  `json:"detail,omitempty"` // custom detail text
+	WorkerID  int     `json:"worker_id,omitempty"`
+}
+
+// Badge represents an enabled feature badge.
+type Badge struct {
+	Label string `json:"label"`
+	Icon  string `json:"icon"`
+}
+
+// RateLimitStatus holds rate limit info for the status page.
+type RateLimitStatus struct {
+	Window    string `json:"window,omitempty"`
+	Status    string `json:"status,omitempty"`
+	ResetsIn  string `json:"resets_in,omitempty"`
+	HasLimit  bool   `json:"has_limit"`
 }
 
 // StatusState mirrors what the TUI shows: phase, story statuses, costs, iteration info.
 type StatusState struct {
-	PRDName     string        `json:"prd_name"`
-	Phase       string        `json:"phase"`
-	RunDuration string        `json:"run_duration"`
-	Stories     []StoryStatus `json:"stories"`
-	TotalCost   float64       `json:"total_cost"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	PRDName         string          `json:"prd_name"`
+	Phase           string          `json:"phase"`
+	PhaseIcon       string          `json:"phase_icon"`
+	RunDuration     string          `json:"run_duration"`
+	Stories         []StoryStatus   `json:"stories"`
+	TotalCost       float64         `json:"total_cost"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	Completed       int             `json:"completed"`
+	Total           int             `json:"total"`
+	AllComplete     bool            `json:"all_complete"`
+	Running         bool            `json:"running"`
+	Badges          []Badge         `json:"badges,omitempty"`
+	ProgressContent string          `json:"progress_content,omitempty"`
+	WorktreeContent string          `json:"worktree_content,omitempty"`
+	JudgeContent    string          `json:"judge_content,omitempty"`
+	QualityContent  string          `json:"quality_content,omitempty"`
+	MemoryContent   string          `json:"memory_content,omitempty"`
+	CostsContent    string          `json:"costs_content,omitempty"`
+	ClaudeActivity  string          `json:"claude_activity,omitempty"`
+	StuckAlert      string          `json:"stuck_alert,omitempty"`
+	RateLimit       RateLimitStatus `json:"rate_limit"`
+	Version         string          `json:"version,omitempty"`
+	HasTokenData    bool            `json:"has_token_data"`
+	CostDisplay     string          `json:"cost_display,omitempty"`
 }
 
 type sseClient struct {
@@ -189,151 +222,1249 @@ func (s *StatusServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, renderHTML(state))
 }
 
-func statusEmoji(status string) string {
-	switch status {
-	case "done":
-		return "&#x2705;"
-	case "failed":
-		return "&#x274C;"
-	case "running":
-		return "&#x2699;&#xFE0F;"
-	case "stuck":
-		return "&#x274C;"
-	case "queued":
-		return "&#x23F3;"
-	default:
-		return "&#x2B55;"
-	}
-}
-
 func renderHTML(state StatusState) string {
+	// Server-render initial story rows
 	storiesHTML := ""
-	doneCount := 0
-	failedCount := 0
-	runningCount := 0
 	for _, st := range state.Stories {
-		switch st.Status {
-		case "done":
-			doneCount++
-		case "failed", "stuck":
-			failedCount++
-		case "running":
-			runningCount++
-		}
-		costStr := "&mdash;"
-		if st.Cost > 0 {
-			costStr = fmt.Sprintf("$%.2f", st.Cost)
-		}
-		detail := ""
-		if st.Detail != "" {
-			detail = fmt.Sprintf(`<span class="detail">(%s)</span>`, st.Detail)
-		} else if st.Iteration > 0 && st.Role != "" {
-			detail = fmt.Sprintf(`<span class="detail">(iter %d, %s)</span>`, st.Iteration, st.Role)
-		}
-		storiesHTML += fmt.Sprintf(
-			`<div class="story %s"><span class="emoji">%s</span><span class="id">%s</span><span class="status">%s</span><span class="cost">%s</span>%s</div>`,
-			st.Status, statusEmoji(st.Status), st.ID, st.Status, costStr, detail,
-		)
+		storiesHTML += renderStoryRow(st)
 	}
 
-	summary := fmt.Sprintf("%d/%d complete", doneCount, len(state.Stories))
-	if failedCount > 0 {
-		summary += fmt.Sprintf(" | %d failed", failedCount)
-	}
-	if runningCount > 0 {
-		summary += fmt.Sprintf(" | %d in progress", runningCount)
+	initialCtx := renderInitialCtxContent(state.ProgressContent)
+
+	claudeContent := ""
+	if state.ClaudeActivity != "" {
+		claudeContent = escapeHTML(state.ClaudeActivity)
+	} else {
+		claudeContent = `<span class="claude-empty">Monitoring...</span>`
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ralph &mdash; %s</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1e1e2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>ralph %s %s</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,sans-serif;
-background:#0d1117;color:#c9d1d9;padding:16px;max-width:600px;margin:0 auto;
-font-size:16px;line-height:1.5}
-h1{font-size:1.3em;color:#58a6ff;margin-bottom:4px}
-.meta{color:#8b949e;font-size:0.9em;margin-bottom:16px;border-bottom:1px solid #21262d;padding-bottom:12px}
-.meta span{display:inline-block;margin-right:16px}
-.summary{font-size:1em;margin-bottom:12px;color:#c9d1d9}
-.cost-total{font-size:1.1em;color:#3fb950;font-weight:600;margin-bottom:16px}
-.story{display:grid;grid-template-columns:28px 90px 70px 60px 1fr;align-items:center;
-padding:8px 4px;border-bottom:1px solid #21262d;font-size:0.88em;gap:4px}
-.story .emoji{text-align:center}
-.story .id{font-weight:600;color:#58a6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.story.done .status{color:#3fb950}
-.story.failed .status,.story.stuck .status{color:#f85149}
-.story.running .status{color:#d29922}
-.story.queued .status{color:#8b949e}
-.story .cost{text-align:right;color:#8b949e}
-.story .detail{color:#8b949e;font-size:0.85em}
-.live-dot{display:inline-block;width:8px;height:8px;background:#3fb950;border-radius:50%%;
-margin-right:6px;animation:pulse 2s infinite}
-@keyframes pulse{0%%,100%%{opacity:1}50%%{opacity:0.4}}
-@media(max-width:480px){
-  .story{grid-template-columns:24px 70px 60px 50px 1fr;font-size:0.82em}
-  body{padding:12px}
+:root {
+  --base: #1e1e2e;
+  --mantle: #181825;
+  --crust: #11111b;
+  --surface0: #313244;
+  --surface1: #45475a;
+  --surface2: #585b70;
+  --overlay0: #6c7086;
+  --subtext0: #a6adc8;
+  --subtext1: #bac2de;
+  --text: #cdd6f4;
+  --lavender: #b4befe;
+  --blue: #89b4fa;
+  --sky: #89dceb;
+  --teal: #94e2d5;
+  --green: #a6e3a1;
+  --yellow: #f9e2af;
+  --peach: #fab387;
+  --red: #f38ba8;
+  --flamingo: #f2cdcd;
+  --claude: #f9845c;
+  --mauve: #cba6f7;
+  --border-ch: "┊";
+  --corner-tl: "╭";
+  --corner-tr: "╮";
+  --corner-bl: "╰";
+  --corner-br: "╯";
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  font-size: clamp(13px, 3.2vw, 16px);
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
+
+body {
+  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", Menlo, Monaco, "Courier New", monospace;
+  background: var(--base);
+  color: var(--text);
+  line-height: 1.45;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow-x: hidden;
+}
+
+.shell {
+  max-width: min(96ch, 100vw - 2rem);
+  margin: 0 auto;
+  padding: 0.5rem;
+  overflow: hidden;
+}
+
+/* ── Header ────────────────────────────────── */
+
+.header {
+  margin-bottom: 0.25rem;
+}
+
+.header-line1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75ch;
+  padding: 0.25rem 0;
+}
+
+.diamond {
+  color: var(--claude);
+  font-weight: 700;
+}
+
+.diamond.running {
+  animation: diamond-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes diamond-pulse {
+  0%%, 70%%, 100%% { color: var(--claude); }
+  10%% { color: #fff; }
+  25%% { color: var(--peach); }
+}
+
+.title {
+  color: var(--yellow);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.version {
+  color: var(--overlay0);
+  font-size: 0.85em;
+}
+
+.phase-badge {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.phase-badge.done { color: var(--green); }
+.phase-badge.idle { color: var(--green); }
+.phase-badge.paused { color: var(--red); font-weight: 700; }
+
+.header-line2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 1ch;
+  padding: 0.15rem 0;
+  font-size: 0.9em;
+}
+
+.progress-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+}
+
+.bar-track {
+  display: inline-block;
+  white-space: nowrap;
+  letter-spacing: -0.05em;
+}
+
+.bar-filled { color: var(--green); }
+.bar-empty { color: var(--overlay0); }
+
+.bar-label {
+  color: var(--overlay0);
+}
+
+.elapsed {
+  color: var(--subtext1);
+}
+
+.cost-display {
+  color: var(--yellow);
+}
+
+.separator {
+  margin: 0.15rem 0 0.25rem;
+  overflow: hidden;
+}
+
+.sep-line {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.9em;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.sep-accent { color: var(--claude); font-weight: 700; }
+.sep-heavy { color: var(--claude); }
+.sep-medium { color: var(--surface2); }
+.sep-light { color: var(--surface1); }
+
+/* Pulse sweep: a bright arc radiates outward from the center ✦ */
+.separator .sweep-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at 50%% 50%%, rgba(249,132,92,0.6) 0%%, transparent 40%%);
+  mix-blend-mode: screen;
+}
+
+.separator.running {
+  position: relative;
+}
+
+.separator.running .sweep-overlay {
+  animation: arc-sweep 1.5s cubic-bezier(0.16,1,0.3,1) infinite;
+}
+
+@keyframes arc-sweep {
+  0%% {
+    opacity: 0.9;
+    transform: scaleX(0.05);
+  }
+  15%% {
+    opacity: 0.7;
+  }
+  100%% {
+    opacity: 0;
+    transform: scaleX(3);
+  }
+}
+
+/* ── Badges ────────────────────────────────── */
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.5ch;
+  font-size: 0.85em;
+}
+
+.badge {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.badge-judge { color: var(--green); }
+.badge-quality { color: var(--teal); }
+.badge-workers { color: var(--sky); }
+.badge-ntfy { color: var(--green); }
+
+/* ── Stuck Alert ───────────────────────────── */
+
+.stuck-bar {
+  background: var(--red);
+  color: var(--crust);
+  font-weight: 700;
+  padding: 0.3rem 1ch;
+  margin: 0.35rem 0;
+  display: none;
+}
+
+.stuck-bar.visible { display: block; }
+
+/* ── Panel frame ───────────────────────────── */
+
+.panel {
+  margin: 0.5rem 0;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.panel-top {
+  color: var(--surface2);
+  font-size: 0.9em;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.panel-top .corner { color: var(--surface2); }
+.panel-top .dash { color: var(--surface2); }
+.panel-top .ptitle { color: var(--blue); font-weight: 700; }
+.panel-top .picon { color: var(--claude); font-weight: 700; }
+
+.panel-body {
+  padding: 0.2rem 0;
+  position: relative;
+  margin: 0 0.25ch;
+  border-left: 1px solid var(--surface2);
+  border-right: 1px solid var(--surface2);
+  border-image: repeating-linear-gradient(
+    to bottom,
+    var(--surface2) 0, var(--surface2) 4px,
+    transparent 4px, transparent 8px
+  ) 1;
+}
+
+.panel-content {
+  padding: 0 1.5ch;
+  min-height: 2rem;
+  overflow: hidden;
+}
+
+.panel-bottom {
+  color: var(--surface2);
+  font-size: 0.9em;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ── Ornate Claude panel ───────────────────── */
+
+.panel-ornate .panel-top .dash { color: var(--surface2); }
+.panel-ornate .panel-top .star { color: var(--claude); font-weight: 700; }
+
+/* ── Stories ────────────────────────────────── */
+
+.story-row {
+  display: grid;
+  grid-template-columns: 2ch minmax(6ch, auto) 1fr;
+  gap: 0 1ch;
+  padding: 0.15rem 0;
+  align-items: baseline;
+  min-height: 1.45em;
+}
+
+.story-icon {
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.story-icon.done { color: var(--green); }
+.story-icon.running { color: var(--claude); font-weight: 700; }
+.story-icon.failed { color: var(--red); }
+.story-icon.queued { color: var(--overlay0); }
+.story-icon.stuck { color: var(--red); }
+
+.story-id {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.story-id.done { color: var(--green); }
+.story-id.running { color: var(--claude); }
+.story-id.failed { color: var(--red); }
+.story-id.queued { color: var(--overlay0); }
+.story-id.stuck { color: var(--red); }
+
+.story-title {
+  color: var(--subtext1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-title.done {
+  color: var(--overlay0);
+  text-decoration: line-through;
+}
+
+.story-title.failed, .story-title.stuck {
+  color: var(--red);
+}
+
+.story-meta {
+  grid-column: 2 / -1;
+  color: var(--overlay0);
+  font-size: 0.85em;
+  padding-left: 0;
+}
+
+.story-meta .role-tag {
+  color: var(--teal);
+}
+
+.story-meta .worker-tag {
+  color: var(--sky);
+  font-weight: 700;
+}
+
+.story-meta .iter-tag {
+  color: var(--overlay0);
+}
+
+/* Spinner for running stories */
+.spinner {
+  display: inline-block;
+}
+
+.spinner::after {
+  content: "⠋";
+  animation: braille-spin 0.8s steps(10) infinite;
+}
+
+@keyframes braille-spin {
+  0%% { content: "⠋"; }
+  10%% { content: "⠙"; }
+  20%% { content: "⠹"; }
+  30%% { content: "⠸"; }
+  40%% { content: "⠼"; }
+  50%% { content: "⠴"; }
+  60%% { content: "⠦"; }
+  70%% { content: "⠧"; }
+  80%% { content: "⠇"; }
+  90%% { content: "⠏"; }
+}
+
+/* ── Mini progress bar ─────────────────────── */
+
+.mini-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 0.15rem 0 0.35rem;
+  font-size: 0.9em;
+}
+
+.mini-bar {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  letter-spacing: -0.05em;
+}
+
+.mini-filled { color: var(--green); }
+.mini-empty { color: var(--overlay0); }
+.mini-label { color: var(--overlay0); white-space: nowrap; }
+
+/* ── Context tabs ──────────────────────────── */
+
+.ctx-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0;
+  padding: 0.15rem 0 0.35rem;
+  overflow: hidden;
+}
+
+.ctx-tab {
+  padding: 0.25rem 0.75ch;
+  min-height: 2rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--overlay0);
+  font-size: 0.9em;
+  border: none;
+  background: none;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: color 0.15s ease-out, background 0.15s ease-out;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ctx-tab.active {
+  background: var(--claude);
+  color: var(--crust);
+  font-weight: 700;
+}
+
+.ctx-tab:not(.active):hover {
+  color: var(--subtext1);
+}
+
+.ctx-tab:not(.active):active {
+  color: var(--text);
+}
+
+.ctx-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--subtext0);
+  font-size: 0.9em;
+  min-height: 3rem;
+  max-height: 40dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface1) transparent;
+}
+
+.ctx-content::-webkit-scrollbar { width: 4px; }
+.ctx-content::-webkit-scrollbar-track { background: transparent; }
+.ctx-content::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 2px; }
+
+.ctx-placeholder {
+  color: var(--overlay0);
+  font-style: italic;
+}
+
+/* ── Claude Activity panel ─────────────────── */
+
+.claude-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 0.15rem 0 0.25rem;
+}
+
+.claude-sparkle {
+  color: var(--claude);
+  font-weight: 700;
+}
+
+.claude-sparkle.running {
+  animation: sparkle-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sparkle-pulse {
+  0%%, 100%% { opacity: 1; }
+  50%% { opacity: 0.4; }
+}
+
+.claude-label {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.claude-scroll {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--subtext0);
+  font-size: 0.9em;
+  max-height: 35dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface1) transparent;
+}
+
+.claude-scroll::-webkit-scrollbar { width: 4px; }
+.claude-scroll::-webkit-scrollbar-track { background: transparent; }
+.claude-scroll::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 2px; }
+
+.claude-empty {
+  color: var(--overlay0);
+  padding: 0.5rem 0;
+}
+
+/* ── Footer ────────────────────────────────── */
+
+.footer {
+  color: var(--overlay0);
+  font-size: 0.8em;
+  padding: 0.35rem 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer .live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+}
+
+.live-dot {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  background: var(--green);
+  border-radius: 50%%;
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+
+.live-dot.disconnected {
+  background: var(--red);
+  animation: none;
+}
+
+@keyframes dot-pulse {
+  0%%, 100%% { opacity: 1; }
+  50%% { opacity: 0.3; }
+}
+
+.updated-at {
+  color: var(--surface2);
+}
+
+/* ── Rate limit ────────────────────────────── */
+
+.rate-limit-bar {
+  background: var(--surface0);
+  padding: 0.25rem 1ch;
+  margin: 0.25rem 0;
+  font-size: 0.85em;
+  display: none;
+}
+
+.rate-limit-bar.visible {
+  display: block;
+}
+
+.rate-limit-bar .rl-label { color: var(--yellow); font-weight: 700; }
+.rate-limit-bar .rl-value { color: var(--subtext0); }
+
+/* ── Responsive: collapse to single column on narrow ── */
+
+@media (max-width: 480px) {
+  html { font-size: 13px; }
+  .shell { padding: 0.35rem; }
+  .story-row {
+    grid-template-columns: 2ch auto 1fr;
+  }
+  .ctx-tab { padding: 0.1rem 0.5ch; font-size: 0.85em; }
+}
+
+@media (min-width: 768px) {
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.5rem;
+    align-items: start;
+    overflow: hidden;
+  }
+  .two-col > .panel {
+    min-width: 0;
+  }
+}
+
+/* Touch devices: larger tap targets */
+@media (pointer: coarse) {
+  .shell { padding-top: 0.75rem; }
+  .ctx-tab { min-height: 2.75rem; padding: 0.4rem 1ch; }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>
 </head>
 <body>
-<h1>Ralph &mdash; <span id="prd-name">%s</span></h1>
-<div class="meta">
-  <span>Phase: <span id="phase">%s</span></span>
-  <span>Running: <span id="duration">%s</span></span>
+<div class="shell">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-line1">
+      <span id="diamond" class="diamond%s">❖</span>
+      <span class="title">RALPH</span>
+      <span class="version" id="version">%s</span>
+      <span style="color:var(--surface2)">┃</span>
+      <span id="phase" class="phase-badge%s">%s %s</span>
+    </div>
+    <div class="header-line2">
+      <span class="progress-bar">
+        <span class="bar-track" id="bar-track">%s</span>
+        <span class="bar-label" id="bar-label">%d/%d</span>
+      </span>
+      <span style="color:var(--surface2)">│</span>
+      <span class="elapsed">⏱ <span id="elapsed">%s</span></span>
+      <span style="color:var(--surface2)">│</span>
+      <span class="cost-display" id="cost-display">%s</span>
+    </div>
+    <div class="badges" id="badges">%s</div>
+  </div>
+
+  <div class="separator%s">
+    <span class="sep-line">%s</span>
+    <div class="sweep-overlay"></div>
+  </div>
+
+  <!-- Stuck alert -->
+  <div id="stuck-bar" class="stuck-bar%s">%s</div>
+
+  <!-- Rate limit -->
+  <div id="rate-limit" class="rate-limit-bar%s">%s</div>
+
+  <!-- Two column on desktop, stacked on mobile -->
+  <div class="two-col">
+
+    <!-- Stories Panel -->
+    <div class="panel">
+      <div class="panel-top"><span class="corner">╭</span><span class="dash">─</span> <span class="picon">◆</span> <span class="ptitle">Stories</span> <span class="dash" id="stories-top-fill">%s</span><span class="corner">╮</span></div>
+      <div class="panel-body">
+        <div class="panel-content">
+          <div class="mini-progress" id="mini-progress">%s</div>
+          <div id="stories">%s</div>
+        </div>
+      </div>
+      <div class="panel-bottom"><span class="corner">╰</span><span class="dash" id="stories-bot-fill">%s</span><span class="corner">╯</span></div>
+    </div>
+
+    <!-- Context Panel -->
+    <div class="panel">
+      <div class="panel-top"><span class="corner">╭</span><span class="dash">─</span> <span class="picon">◈</span> <span class="ptitle">Context</span> <span class="dash" id="ctx-top-fill">%s</span><span class="corner">╮</span></div>
+      <div class="panel-body">
+        <div class="panel-content">
+          <div class="ctx-tabs" id="ctx-tabs">
+            <button class="ctx-tab active" data-tab="progress">◈ Progress</button>
+            <button class="ctx-tab" data-tab="worktree">⌥ Tree</button>
+            <button class="ctx-tab" data-tab="judge">⚖ Judge</button>
+            <button class="ctx-tab" data-tab="quality">◇ Quality</button>
+            <button class="ctx-tab" data-tab="memory">⧫ Memory</button>
+            <button class="ctx-tab" data-tab="usage">◎ Usage</button>
+          </div>
+          <div id="ctx-content" class="ctx-content">%s</div>
+        </div>
+      </div>
+      <div class="panel-bottom"><span class="corner">╰</span><span class="dash" id="ctx-bot-fill">%s</span><span class="corner">╯</span></div>
+    </div>
+
+  </div>
+
+  <!-- Claude Activity Panel (ornate) -->
+  <div class="panel panel-ornate">
+    <div class="panel-top"><span class="corner">╭</span><span class="dash">─</span><span class="star">✦</span><span class="dash" id="claude-top-fill">%s</span><span class="star">✦</span><span class="dash">─</span><span class="corner">╮</span></div>
+    <div class="panel-body">
+      <div class="panel-content">
+        <div class="claude-title">
+          <span id="claude-sparkle" class="claude-sparkle%s">✻</span>
+          <span class="claude-label">Claude</span>
+        </div>
+        <div id="claude-activity" class="claude-scroll">%s</div>
+      </div>
+    </div>
+    <div class="panel-bottom"><span class="corner">╰</span><span class="dash">─</span><span class="star">✦</span><span class="dash" id="claude-bot-fill">%s</span><span class="star">✦</span><span class="dash">─</span><span class="corner">╯</span></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="live-indicator"><span id="live-dot" class="live-dot"></span> <span id="conn-status">connected</span></span>
+    <span class="updated-at" id="updated-at"></span>
+  </div>
+
 </div>
-<div class="summary"><span class="live-dot"></span>Stories: <span id="summary">%s</span></div>
-<div class="cost-total">Cost: $<span id="total-cost">%.2f</span></div>
-<div id="stories" class="stories">%s</div>
+
 <script>
 (function(){
-  var statusEmoji={"done":"&#x2705;","failed":"&#x274C;","running":"&#x2699;&#xFE0F;","stuck":"&#x274C;","queued":"&#x23F3;"};
-  function esc(s){var d=document.createElement("div");d.textContent=s;return d.innerHTML}
-  function renderStories(stories){
-    var html="",done=0,failed=0,running=0;
-    for(var i=0;i<stories.length;i++){
-      var s=stories[i];
-      if(s.status==="done")done++;
-      else if(s.status==="failed"||s.status==="stuck")failed++;
-      else if(s.status==="running")running++;
-      var cost=s.cost>0?"$"+s.cost.toFixed(2):"&mdash;";
-      var detail="";
-      if(s.detail)detail='<span class="detail">('+esc(s.detail)+')</span>';
-      else if(s.iteration>0&&s.role)detail='<span class="detail">(iter '+s.iteration+', '+esc(s.role)+')</span>';
-      html+='<div class="story '+esc(s.status)+'"><span class="emoji">'+(statusEmoji[s.status]||"&#x2B55;")+'</span><span class="id">'+esc(s.id)+'</span><span class="status">'+esc(s.status)+'</span><span class="cost">'+cost+'</span>'+detail+'</div>';
-    }
-    var summary=done+"/"+stories.length+" complete";
-    if(failed>0)summary+=" | "+failed+" failed";
-    if(running>0)summary+=" | "+running+" in progress";
-    return{html:html,summary:summary};
+  "use strict";
+
+  // State
+  var currentTab = "progress";
+  var ctxData = { progress: "", worktree: "", judge: "", quality: "", memory: "", usage: "" };
+
+  // Elements
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ── Helpers ──
+  function esc(s) {
+    if (!s) return "";
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
   }
-  var es=new EventSource("/events");
-  es.onmessage=function(e){
-    try{
-      var d=JSON.parse(e.data);
-      document.getElementById("prd-name").textContent=d.prd_name;
-      document.getElementById("phase").textContent=d.phase;
-      document.getElementById("duration").textContent=d.run_duration;
-      document.getElementById("total-cost").textContent=d.total_cost.toFixed(2);
-      var r=renderStories(d.stories||[]);
-      document.getElementById("stories").innerHTML=r.html;
-      document.getElementById("summary").textContent=r.summary;
-      document.title="Ralph \u2014 "+d.prd_name;
-    }catch(err){}
-  };
+
+  function buildBar(done, total, width) {
+    if (total === 0) return { track: "", label: "0/0" };
+    var filled = Math.round((done / total) * width);
+    if (filled > width) filled = width;
+    var empty = width - filled;
+    var track = '<span class="bar-filled">' + "━".repeat(filled) + '</span>' +
+                '<span class="bar-empty">' + "─".repeat(empty) + '</span>';
+    return { track: track, label: done + "/" + total };
+  }
+
+  function buildMiniBar(done, total) {
+    if (total === 0) return "";
+    var w = Math.min(24, Math.max(8, Math.floor(window.innerWidth / 20)));
+    var filled = Math.round((done / total) * w);
+    var empty = w - filled;
+    return '<span class="mini-filled">' + "━".repeat(filled) + '</span>' +
+           '<span class="mini-empty">' + "─".repeat(empty) + '</span>' +
+           ' <span class="mini-label">' + done + '/' + total + '</span>';
+  }
+
+  function storyIcon(status) {
+    switch(status) {
+      case "done": return "✓";
+      case "running": return '<span class="spinner"></span>';
+      case "failed": return "✗";
+      case "stuck": return "✗";
+      default: return "○";
+    }
+  }
+
+  function renderStoryRow(s) {
+    var meta = "";
+    var metaParts = [];
+    if (s.role) metaParts.push('<span class="role-tag">' + esc(s.role) + '</span>');
+    if (s.iteration > 0) metaParts.push('<span class="iter-tag">iter ' + s.iteration + '</span>');
+    if (s.worker_id > 0) metaParts.push('<span class="worker-tag">W' + s.worker_id + '</span>');
+    if (metaParts.length > 0) {
+      meta = '<div class="story-meta">' + metaParts.join(" · ") + '</div>';
+    }
+
+    return '<div class="story-row">' +
+      '<span class="story-icon ' + esc(s.status) + '">' + storyIcon(s.status) + '</span>' +
+      '<span class="story-id ' + esc(s.status) + '">' + esc(s.id) + '</span>' +
+      '<span class="story-title ' + esc(s.status) + '">' + esc(s.title) + '</span>' +
+      meta +
+    '</div>';
+  }
+
+  function phaseClass(phase) {
+    var p = (phase || "").toLowerCase();
+    if (p === "complete") return " done";
+    if (p === "idle") return " idle";
+    if (p === "paused") return " paused";
+    return "";
+  }
+
+  function fillDash(n) { return "─".repeat(Math.max(0, n)); }
+
+  // ── Tab switching ──
+  var tabButtons = document.querySelectorAll(".ctx-tab");
+  for (var i = 0; i < tabButtons.length; i++) {
+    tabButtons[i].addEventListener("click", function() {
+      currentTab = this.getAttribute("data-tab");
+      for (var j = 0; j < tabButtons.length; j++) {
+        tabButtons[j].classList.toggle("active", tabButtons[j] === this);
+      }
+      showTab();
+    });
+  }
+
+  function showTab() {
+    var el = $("ctx-content");
+    var content = ctxData[currentTab] || "";
+    if (content) {
+      el.textContent = content;
+    } else {
+      el.innerHTML = '<span class="ctx-placeholder">Waiting for data...</span>';
+    }
+  }
+
+  // Fill panel dashes based on actual panel pixel widths
+  function charWidth() {
+    // Measure one monospace character
+    var m = document.createElement("span");
+    m.style.cssText = "position:absolute;visibility:hidden;font:inherit;white-space:pre";
+    m.textContent = "─";
+    document.body.appendChild(m);
+    var cw = m.getBoundingClientRect().width || 8;
+    document.body.removeChild(m);
+    return cw;
+  }
+
+  function fillPanels() {
+    var ch = charWidth();
+    // Measure each panel's actual width
+    var panels = document.querySelectorAll(".panel");
+    panels.forEach(function(panel) {
+      var pw = Math.floor(panel.getBoundingClientRect().width / ch);
+      var topFill = panel.querySelector("[id$='-top-fill']");
+      var botFill = panel.querySelector("[id$='-bot-fill']");
+      if (topFill) topFill.textContent = fillDash(Math.max(0, pw - 16));
+      if (botFill) botFill.textContent = fillDash(Math.max(0, pw - 4));
+    });
+    // Claude ornate panel uses ━
+    var claudePanel = document.querySelector(".panel-ornate");
+    if (claudePanel) {
+      var cw = Math.floor(claudePanel.getBoundingClientRect().width / ch);
+      var fill = Math.max(0, cw - 10);
+      $("claude-top-fill").textContent = "━".repeat(fill);
+      $("claude-bot-fill").textContent = "━".repeat(fill);
+    }
+  }
+  fillPanels();
+  window.addEventListener("resize", fillPanels);
+
+  // ── SSE Connection ──
+  var es;
+  var retryDelay = 1000;
+
+  function connect() {
+    es = new EventSource("/events");
+
+    es.onopen = function() {
+      retryDelay = 1000;
+      $("live-dot").classList.remove("disconnected");
+      $("conn-status").textContent = "connected";
+    };
+
+    es.onmessage = function(e) {
+      try {
+        var d = JSON.parse(e.data);
+        applyState(d);
+      } catch(err) {}
+    };
+
+    es.onerror = function() {
+      $("live-dot").classList.add("disconnected");
+      $("conn-status").textContent = "reconnecting...";
+      es.close();
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    };
+  }
+
+  function applyState(d) {
+    // Title
+    document.title = "ralph " + (d.phase || "") + " — " + (d.prd_name || "");
+
+    // Header line 1
+    var diamondEl = $("diamond");
+    if (d.running) {
+      diamondEl.classList.add("running");
+    } else {
+      diamondEl.classList.remove("running");
+    }
+    $("version").textContent = d.version || "";
+    $("phase").textContent = (d.phase_icon || "") + " " + (d.phase || "");
+    $("phase").className = "phase-badge" + phaseClass(d.phase);
+
+    // Header line 2
+    var bar = buildBar(d.completed || 0, d.total || 0, 16);
+    $("bar-track").innerHTML = bar.track;
+    $("bar-label").textContent = bar.label;
+    $("elapsed").textContent = d.run_duration || "0s";
+    $("cost-display").textContent = d.cost_display || "—";
+
+    // Badges
+    var badgesHTML = "";
+    if (d.badges) {
+      for (var i = 0; i < d.badges.length; i++) {
+        var b = d.badges[i];
+        var cls = "badge";
+        var label = b.label.toLowerCase();
+        if (label.indexOf("judge") >= 0) cls += " badge-judge";
+        else if (label.indexOf("quality") >= 0) cls += " badge-quality";
+        else if (label.indexOf("worker") >= 0) cls += " badge-workers";
+        else if (label.indexOf("ntfy") >= 0) cls += " badge-ntfy";
+        badgesHTML += '<span class="' + cls + '">' + esc(b.icon) + ' ' + esc(b.label) + '</span>';
+      }
+    }
+    $("badges").innerHTML = badgesHTML;
+
+    // Separator
+    var sep = document.querySelector(".separator");
+    if (d.running) {
+      sep.classList.add("running");
+    } else {
+      sep.classList.remove("running");
+    }
+
+    // Stuck alert
+    var stuckEl = $("stuck-bar");
+    if (d.stuck_alert) {
+      stuckEl.textContent = d.stuck_alert;
+      stuckEl.classList.add("visible");
+    } else {
+      stuckEl.classList.remove("visible");
+    }
+
+    // Rate limit
+    var rlEl = $("rate-limit");
+    if (d.rate_limit && d.rate_limit.has_limit) {
+      rlEl.innerHTML = '<span class="rl-label">Plan Usage</span> ' +
+        '<span class="rl-value">' + esc(d.rate_limit.window) + ' · ' + esc(d.rate_limit.status) +
+        (d.rate_limit.resets_in ? ' · resets in ' + esc(d.rate_limit.resets_in) : '') + '</span>';
+      rlEl.classList.add("visible");
+    } else {
+      rlEl.classList.remove("visible");
+    }
+
+    // Stories
+    var storiesHTML = "";
+    var done = 0;
+    if (d.stories) {
+      for (var i = 0; i < d.stories.length; i++) {
+        storiesHTML += renderStoryRow(d.stories[i]);
+        if (d.stories[i].status === "done") done++;
+      }
+    }
+    $("stories").innerHTML = storiesHTML;
+
+    // Mini progress
+    $("mini-progress").innerHTML = buildMiniBar(d.completed || 0, d.total || 0);
+
+    // Context tab data — all 6 tabs mirroring the TUI
+    if (d.progress_content !== undefined) ctxData.progress = d.progress_content;
+    if (d.worktree_content !== undefined) ctxData.worktree = d.worktree_content;
+    if (d.judge_content !== undefined) ctxData.judge = d.judge_content;
+    if (d.quality_content !== undefined) ctxData.quality = d.quality_content;
+    if (d.memory_content !== undefined) ctxData.memory = d.memory_content;
+    if (d.costs_content !== undefined) ctxData.usage = d.costs_content;
+    showTab();
+
+    // Claude activity
+    var claudeEl = $("claude-activity");
+    var sparkleEl = $("claude-sparkle");
+    if (d.claude_activity) {
+      claudeEl.textContent = d.claude_activity;
+      // Auto-scroll to bottom
+      claudeEl.scrollTop = claudeEl.scrollHeight;
+    } else {
+      claudeEl.innerHTML = '<span class="claude-empty">Monitoring...</span>';
+    }
+    if (d.running) {
+      sparkleEl.classList.add("running");
+    } else {
+      sparkleEl.classList.remove("running");
+    }
+
+    // Updated at
+    if (d.updated_at) {
+      var t = new Date(d.updated_at);
+      $("updated-at").textContent = t.toLocaleTimeString();
+    }
+  }
+
+  connect();
 })();
 </script>
 </body>
 </html>`,
-		state.PRDName,
-		state.PRDName,
-		state.Phase,
-		state.RunDuration,
-		summary,
-		state.TotalCost,
-		storiesHTML,
+		esc(state.PRDName), esc(state.Phase),
+		runningClass(state.Running), esc(state.Version),
+		phaseClass(state.Phase), esc(state.PhaseIcon), esc(state.Phase),
+		renderBarTrack(state.Completed, state.Total, 16),
+		state.Completed, state.Total,
+		esc(state.RunDuration),
+		esc(state.CostDisplay),
+		renderBadgesHTML(state.Badges),
+		runningClass(state.Running),
+		renderSepLine(40),
+		stuckVisibleClass(state.StuckAlert), esc(state.StuckAlert),
+		rateLimitVisibleClass(state.RateLimit), renderRateLimitHTML(state.RateLimit),
+		repeatDash(20), renderMiniBarHTML(state.Completed, state.Total),
+		storiesHTML, repeatDash(30),
+		repeatDash(20),
+		initialCtx,
+		repeatDash(30),
+		repeatHeavy(40),
+		runningClass(state.Running),
+		claudeContent,
+		repeatHeavy(40),
 	)
+}
+
+// ── HTML helpers ──
+
+func escapeHTML(s string) string {
+	// Minimal HTML escaping for content inserted into pre-escaped contexts.
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '&':
+			b = append(b, []byte("&amp;")...)
+		case '<':
+			b = append(b, []byte("&lt;")...)
+		case '>':
+			b = append(b, []byte("&gt;")...)
+		case '"':
+			b = append(b, []byte("&quot;")...)
+		default:
+			b = append(b, s[i])
+		}
+	}
+	return string(b)
+}
+
+func esc(s string) string {
+	return escapeHTML(s)
+}
+
+func runningClass(running bool) string {
+	if running {
+		return " running"
+	}
+	return ""
+}
+
+func phaseClass(phase string) string {
+	switch phase {
+	case "Complete":
+		return " done"
+	case "Idle":
+		return " idle"
+	case "Paused":
+		return " paused"
+	default:
+		return ""
+	}
+}
+
+func stuckVisibleClass(alert string) string {
+	if alert != "" {
+		return " visible"
+	}
+	return ""
+}
+
+func rateLimitVisibleClass(rl RateLimitStatus) string {
+	if rl.HasLimit {
+		return " visible"
+	}
+	return ""
+}
+
+func renderRateLimitHTML(rl RateLimitStatus) string {
+	if !rl.HasLimit {
+		return ""
+	}
+	s := fmt.Sprintf(`<span class="rl-label">Plan Usage</span> <span class="rl-value">%s`, esc(rl.Window))
+	if rl.Status != "" {
+		s += " · " + esc(rl.Status)
+	}
+	if rl.ResetsIn != "" {
+		s += " · resets in " + esc(rl.ResetsIn)
+	}
+	s += "</span>"
+	return s
+}
+
+func renderBadgesHTML(badges []Badge) string {
+	if len(badges) == 0 {
+		return ""
+	}
+	s := ""
+	for _, b := range badges {
+		cls := "badge"
+		switch {
+		case b.Label == "Judge":
+			cls += " badge-judge"
+		case b.Label == "Quality":
+			cls += " badge-quality"
+		case len(b.Label) > 0 && b.Label[len(b.Label)-1] == 's' && b.Label != "Workers":
+			// fallthrough
+		case contains(b.Label, "Worker"):
+			cls += " badge-workers"
+		case b.Label == "ntfy":
+			cls += " badge-ntfy"
+		}
+		s += fmt.Sprintf(`<span class="%s">%s %s</span>`, cls, esc(b.Icon), esc(b.Label))
+	}
+	return s
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > len(sub) && (s[:len(sub)] == sub || s[len(s)-len(sub):] == sub || containsInner(s, sub)))
+}
+
+func containsInner(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+func renderBarTrack(done, total, width int) string {
+	if total == 0 {
+		return repeatStr("─", width)
+	}
+	filled := width * done / total
+	if filled > width {
+		filled = width
+	}
+	empty := width - filled
+	return fmt.Sprintf(`<span class="bar-filled">%s</span><span class="bar-empty">%s</span>`,
+		repeatStr("━", filled), repeatStr("─", empty))
+}
+
+func renderMiniBarHTML(done, total int) string {
+	if total == 0 {
+		return ""
+	}
+	w := 20
+	filled := w * done / total
+	if filled > w {
+		filled = w
+	}
+	empty := w - filled
+	return fmt.Sprintf(`<span class="mini-filled">%s</span><span class="mini-empty">%s</span> <span class="mini-label">%d/%d</span>`,
+		repeatStr("━", filled), repeatStr("─", empty), done, total)
+}
+
+func renderSepLine(width int) string {
+	// Build: ━━✦━━━━...━━━━✦━━
+	if width < 6 {
+		return repeatStr("─", width)
+	}
+	half := (width - 3) / 2
+	return fmt.Sprintf(
+		`<span class="sep-heavy">%s</span> <span class="sep-accent">✦</span> <span class="sep-heavy">%s</span>`,
+		repeatStr("━", half), repeatStr("━", width-3-half))
+}
+
+func renderInitialCtxContent(progress string) string {
+	if progress != "" {
+		return escapeHTML(progress)
+	}
+	return `<span class="ctx-placeholder">Waiting for progress updates...</span>`
+}
+
+func renderStoryRow(st StoryStatus) string {
+	icon := storyIconHTML(st.Status)
+	meta := ""
+	var parts []string
+	if st.Role != "" {
+		parts = append(parts, fmt.Sprintf(`<span class="role-tag">%s</span>`, esc(st.Role)))
+	}
+	if st.Iteration > 0 {
+		parts = append(parts, fmt.Sprintf(`<span class="iter-tag">iter %d</span>`, st.Iteration))
+	}
+	if st.WorkerID > 0 {
+		parts = append(parts, fmt.Sprintf(`<span class="worker-tag">W%d</span>`, st.WorkerID))
+	}
+	if len(parts) > 0 {
+		meta = `<div class="story-meta">` + joinStrings(parts, " · ") + `</div>`
+	}
+
+	return fmt.Sprintf(
+		`<div class="story-row"><span class="story-icon %s">%s</span><span class="story-id %s">%s</span><span class="story-title %s">%s</span>%s</div>`,
+		esc(st.Status), icon,
+		esc(st.Status), esc(st.ID),
+		esc(st.Status), esc(st.Title),
+		meta,
+	)
+}
+
+func storyIconHTML(status string) string {
+	switch status {
+	case "done":
+		return "✓"
+	case "running":
+		return `<span class="spinner"></span>`
+	case "failed", "stuck":
+		return "✗"
+	default:
+		return "○"
+	}
+}
+
+func repeatStr(ch string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	s := ""
+	for i := 0; i < n; i++ {
+		s += ch
+	}
+	return s
+}
+
+func repeatDash(n int) string  { return repeatStr("─", n) }
+func repeatHeavy(n int) string { return repeatStr("━", n) }
+
+func joinStrings(parts []string, sep string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	s := parts[0]
+	for _, p := range parts[1:] {
+		s += sep + p
+	}
+	return s
 }
