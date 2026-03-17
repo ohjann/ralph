@@ -141,6 +141,12 @@ func Parse(args []string) (*Config, error) {
 		}
 		cfg.ProjectDir = abs
 		cfg.LogDir = filepath.Join(cfg.ProjectDir, ".ralph", "logs")
+
+		// Load .ralph/.env so VOYAGE_API_KEY etc. are available for memory commands
+		envFile := filepath.Join(cfg.ProjectDir, ".ralph", ".env")
+		dotEnv, _ := loadDotEnv(envFile)
+		cfg.applyEnvDefaults(dotEnv)
+
 		return cfg, nil
 	}
 
@@ -455,11 +461,17 @@ func Parse(args []string) (*Config, error) {
 // applyEnvDefaults fills in config values from .env file and OS environment variables.
 // Priority: CLI flags > OS env vars > .env file values.
 func (c *Config) applyEnvDefaults(dotEnv map[string]string) {
-	// Helper: get value from dotEnv then OS env, returning first non-empty.
-	getEnv := func(key string) string {
-		if v, ok := dotEnv[key]; ok && v != "" {
-			return v
+	// Export all .env vars into the OS environment (don't clobber existing values).
+	// This ensures keys like VOYAGE_API_KEY and ANTHROPIC_API_KEY are available
+	// to downstream code that reads them via os.Getenv.
+	for k, v := range dotEnv {
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
 		}
+	}
+
+	// Helper: get value from OS env (now includes .env values from above).
+	getEnv := func(key string) string {
 		return os.Getenv(key)
 	}
 
