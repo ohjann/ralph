@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/eoghanhynes/ralph/internal/debuglog"
 )
 
 // MemoryConfig holds configuration for the semantic memory system.
@@ -443,7 +445,12 @@ func Parse(args []string) (*Config, error) {
 
 	// Load .ralph/.env if it exists (values only apply where flags weren't explicitly set)
 	envFile := filepath.Join(cfg.ProjectDir, ".ralph", ".env")
-	dotEnv, _ := loadDotEnv(envFile) // ignore error (file may not exist)
+	dotEnv, envErr := loadDotEnv(envFile)
+	if envErr != nil {
+		debuglog.Log("dotenv: could not load %s: %v", envFile, envErr)
+	} else {
+		debuglog.Log("dotenv: loaded %d vars from %s", len(dotEnv), envFile)
+	}
 
 	// Apply env vars (dotenv -> OS env -> flag). Flags always win.
 	cfg.applyEnvDefaults(dotEnv)
@@ -465,8 +472,11 @@ func (c *Config) applyEnvDefaults(dotEnv map[string]string) {
 	// This ensures keys like VOYAGE_API_KEY and ANTHROPIC_API_KEY are available
 	// to downstream code that reads them via os.Getenv.
 	for k, v := range dotEnv {
-		if os.Getenv(k) == "" {
+		if existing := os.Getenv(k); existing == "" {
 			os.Setenv(k, v)
+			debuglog.Log("dotenv: set %s (len=%d)", k, len(v))
+		} else {
+			debuglog.Log("dotenv: skipped %s (already set in env)", k)
 		}
 	}
 

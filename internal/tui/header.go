@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eoghanhynes/ralph/internal/costs"
 )
 
 func renderHeader(m *Model, width int) string {
@@ -46,11 +47,8 @@ func renderHeader(m *Model, width int) string {
 	// Show rate limit reset time if available, otherwise show cost or iteration count
 	var costBlock string
 	if m.rateLimitInfo != nil && !m.rateLimitInfo.ResetsAt.IsZero() {
-		remaining := time.Until(m.rateLimitInfo.ResetsAt)
-		if remaining < 0 {
-			remaining = 0
-		}
-		costBlock = styleCost.Render(fmt.Sprintf("Resets in %s", formatDuration(remaining.Truncate(time.Second))))
+		pct := rateLimitUsagePercent(m.rateLimitInfo)
+		costBlock = styleCost.Render(fmt.Sprintf("Usage: %d%%", pct))
 	} else if m.runCosting.TotalInputTokens > 0 || m.runCosting.TotalOutputTokens > 0 {
 		costBlock = styleCost.Render(fmt.Sprintf("$%.2f", m.runCosting.TotalCost))
 	} else {
@@ -362,4 +360,31 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %02ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+// rateLimitUsagePercent computes what percentage of the rate limit window has elapsed.
+func rateLimitUsagePercent(info *costs.RateLimitInfo) int {
+	if info == nil || info.ResetsAt.IsZero() {
+		return 0
+	}
+	var windowDuration time.Duration
+	switch info.RateLimitType {
+	case "five_hour":
+		windowDuration = 5 * time.Hour
+	default:
+		windowDuration = 5 * time.Hour // sensible default
+	}
+	remaining := time.Until(info.ResetsAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+	elapsed := windowDuration - remaining
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	pct := int(float64(elapsed) / float64(windowDuration) * 100)
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }

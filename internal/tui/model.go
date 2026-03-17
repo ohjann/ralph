@@ -252,11 +252,8 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 
 	// Cost display (mirrors header logic)
 	if m.rateLimitInfo != nil && !m.rateLimitInfo.ResetsAt.IsZero() {
-		remaining := time.Until(m.rateLimitInfo.ResetsAt)
-		if remaining < 0 {
-			remaining = 0
-		}
-		state.CostDisplay = fmt.Sprintf("Resets in %s", formatDuration(remaining.Truncate(time.Second)))
+		pct := rateLimitUsagePercent(m.rateLimitInfo)
+		state.CostDisplay = fmt.Sprintf("Usage: %d%%", pct)
 	} else if m.runCosting.TotalInputTokens > 0 || m.runCosting.TotalOutputTokens > 0 {
 		state.CostDisplay = fmt.Sprintf("$%.2f", m.runCosting.TotalCost)
 		state.HasTokenData = true
@@ -741,6 +738,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case panelClaude:
 				m.claudeVP.ViewUp()
 			}
+			return m, nil
+		case msg.String() == "m":
+			// Toggle status page server on/off at runtime
+			if m.statusServer != nil {
+				m.stopStatusServer()
+				m.statusServer = nil
+				m.cfg.StatusPort = 0
+				m.claudeContent += "\n── Status page stopped ──\n"
+			} else {
+				port := m.cfg.StatusPort
+				if port == 0 {
+					port = 8080
+				}
+				ss := statuspage.New()
+				if err := ss.Start(port); err != nil {
+					m.claudeContent += fmt.Sprintf("\n── Status page failed to start on port %d: %v ──\n", port, err)
+				} else {
+					m.statusServer = ss
+					m.cfg.StatusPort = port
+					m.updateStatusPage()
+					m.claudeContent += fmt.Sprintf("\n── Status page started: http://localhost:%d ──\n", port)
+				}
+			}
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
 			return m, nil
 		case msg.String() == "[" || msg.String() == "]":
 			// Cycle context panel tabs
@@ -2135,7 +2158,8 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 	baseHelp := styleKey.Render("q") + styleFooter.Render(": quit  ") +
 		styleKey.Render("tab") + styleFooter.Render(": panel  ") +
 		styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
-		styleKey.Render("j/k") + styleFooter.Render(": scroll")
+		styleKey.Render("j/k") + styleFooter.Render(": scroll  ") +
+		styleKey.Render("m") + styleFooter.Render(": monitor")
 	if parallel {
 		baseHelp += "  " + styleKey.Render("</>") + styleFooter.Render(": worker")
 	}

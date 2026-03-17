@@ -28,6 +28,8 @@ func loadDotEnv(path string) (map[string]string, error) {
 			continue
 		}
 		key = strings.TrimSpace(key)
+		// Strip optional "export " prefix (common in shell-style .env files)
+		key = strings.TrimPrefix(key, "export ")
 		val = strings.TrimSpace(val)
 		// Strip surrounding quotes
 		if len(val) >= 2 {
