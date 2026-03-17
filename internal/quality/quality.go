@@ -149,7 +149,8 @@ Be specific. Include file paths and line numbers. Don't flag style preferences â
 `, lens.Prompt, manifest, lens.Name)
 
 	logPath := filepath.Join(logDir, fmt.Sprintf("quality-%s-%d.log", lens.Name, iteration))
-	_, err := runner.RunClaude(ctx, projectDir, prompt, logPath)
+	result, err := runner.RunClaude(ctx, projectDir, prompt, logPath)
+	_ = result
 	if err != nil {
 		return LensResult{Lens: lens.Name, Err: err}
 	}
@@ -209,7 +210,8 @@ Focus on real fixes. Don't add unnecessary comments, documentation, or refactori
 `, string(assessmentJSON))
 
 	logPath := filepath.Join(logDir, fmt.Sprintf("quality-fix-%d.log", iteration))
-	_, err = runner.RunClaude(ctx, projectDir, prompt, logPath)
+	result, err := runner.RunClaude(ctx, projectDir, prompt, logPath)
+	_ = result
 	return err
 }
 

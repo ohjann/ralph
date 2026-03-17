@@ -129,7 +129,8 @@ type Model struct {
 	loadedCheckpoint *checkpoint.Checkpoint
 
 	// Cost tracking
-	runCosting *costs.RunCosting
+	runCosting    *costs.RunCosting
+	rateLimitInfo *costs.RateLimitInfo // latest rate limit info from Claude CLI
 
 	// Memory / ChromaDB sidecar
 	memorySidecar  *memory.Sidecar
@@ -1002,6 +1003,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return costUpdateMsg{Usage: *msg.TokenUsage, StoryID: m.currentStoryID}
 			})
 		}
+		// Update rate limit info if available
+		if msg.RateLimitInfo != nil {
+			m.rateLimitInfo = msg.RateLimitInfo
+		}
 		// Capture retrieval data for memory panel display
 		if len(msg.DocRefs) > 0 && m.currentStoryID != "" {
 			m.memoryRetrieval = &MemoryRetrievalMsg{
@@ -1183,6 +1188,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if u.TokenUsage != nil && m.runCosting != nil {
 			m.runCosting.AddIteration(u.StoryID, *u.TokenUsage, 0)
 			m.costsContent = renderCostsContent(m.runCosting, m.storyDisplayInfos)
+		}
+		// Update rate limit info from parallel workers
+		if u.RateLimitInfo != nil {
+			m.rateLimitInfo = u.RateLimitInfo
 		}
 
 		// Usage limit — pause everything and wait for user
@@ -1768,15 +1777,16 @@ func (m *Model) View() string {
 
 	// Context panel
 	ctxData := contextPanelData{
-		Mode:            m.ctxMode,
-		ProgressContent: m.progressContent,
-		ProgressChanged: m.progressChanged,
-		WorktreeContent: m.worktreeContent,
-		JudgeContent:    m.judgeContent,
-		QualityContent:  m.qualityContent,
-		MemoryContent:   m.memoryContent,
-		CostsContent:    m.costsContent,
-		Phase:           m.phase,
+		Mode:             m.ctxMode,
+		ProgressContent:  m.progressContent,
+		ProgressChanged:  m.progressChanged,
+		WorktreeContent:  m.worktreeContent,
+		JudgeContent:     m.judgeContent,
+		QualityContent:   m.qualityContent,
+		MemoryContent:    m.memoryContent,
+		CostsContent:     m.costsContent,
+		RateLimitContent: renderRateLimitContent(m.rateLimitInfo),
+		Phase:            m.phase,
 	}
 	ctxPanel := renderContextPanel(
 		&m.contextVP,

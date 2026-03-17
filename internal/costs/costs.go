@@ -244,6 +244,13 @@ func (rc *RunCosting) GetStoryCost(storyID string) float64 {
 	return 0
 }
 
+// RateLimitInfo holds rate limit data from the Claude CLI rate_limit_event.
+type RateLimitInfo struct {
+	Status        string    `json:"status"`          // "allowed" or "limited"
+	ResetsAt      time.Time `json:"resets_at"`       // when the current window resets
+	RateLimitType string    `json:"rate_limit_type"` // e.g. "five_hour"
+}
+
 
 // CacheHitRate computes the cache hit rate from total cache reads vs total input tokens.
 func (rc *RunCosting) CacheHitRate() float64 {

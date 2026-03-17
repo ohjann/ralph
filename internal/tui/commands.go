@@ -150,7 +150,8 @@ All stories must have "passes": false and "notes": "".
 		_ = os.MkdirAll(cfg.LogDir, 0o755)
 
 		logPath := filepath.Join(cfg.LogDir, "plan.log")
-		_, err = runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		_ = result
 		if err != nil {
 			return planDoneMsg{Err: fmt.Errorf("claude plan generation failed: %w", err)}
 		}
@@ -255,6 +256,7 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		runArchitect := !cfg.NoArchitect && needsArchitect(cfg.ProjectDir, storyID, story)
 
 		var totalUsage *costs.TokenUsage
+		var latestRateLimit *costs.RateLimitInfo
 
 		// --- Architect phase ---
 		if runArchitect {
@@ -267,15 +269,20 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			}
 
 			logPath := runner.LogFilePath(cfg.LogDir, iteration) + ".architect"
-			usage, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
+			result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
 				Iteration: iteration,
 				StoryID:   storyID,
 				Role:      roles.RoleArchitect,
 			})
-			totalUsage = usage
+			if result != nil {
+				totalUsage = result.TokenUsage
+				if result.RateLimitInfo != nil {
+					latestRateLimit = result.RateLimitInfo
+				}
+			}
 
 			if err != nil {
-				return claudeDoneMsg{Err: fmt.Errorf("architect failed: %w", err), TokenUsage: totalUsage, Role: roles.RoleArchitect}
+				return claudeDoneMsg{Err: fmt.Errorf("architect failed: %w", err), TokenUsage: totalUsage, RateLimitInfo: latestRateLimit, Role: roles.RoleArchitect}
 			}
 
 			// Validate that plan.md was created and is non-empty (>= 50 bytes)
@@ -325,13 +332,18 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
-		usage, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
+		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
 			Iteration: iteration,
 			StoryID:   storyID,
 			Role:      implRole,
 		})
 
-		totalUsage = combineTokenUsage(totalUsage, usage)
+		if result != nil {
+			totalUsage = combineTokenUsage(totalUsage, result.TokenUsage)
+			if result.RateLimitInfo != nil {
+				latestRateLimit = result.RateLimitInfo
+			}
+		}
 		completeSignal := runner.LogContainsComplete(logPath)
 
 		return claudeDoneMsg{
@@ -342,6 +354,7 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			TotalFound:     retrieval.TotalFound,
 			MaxTokens:      retrieval.MaxTokens,
 			Role:           implRole,
+			RateLimitInfo:  latestRateLimit,
 		}
 	}
 }
@@ -515,7 +528,8 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 `, string(prdData), string(progressData))
 
 		logPath := filepath.Join(cfg.LogDir, "summary.log")
-		_, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		_ = result
 
 		// Read the generated summary
 		summaryPath := filepath.Join(cfg.ProjectDir, "SUMMARY.md")

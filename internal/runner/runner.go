@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/events"
@@ -321,11 +322,17 @@ type RunClaudeOpts struct {
 	Role      roles.Role
 }
 
+// RunClaudeResult holds the results from a RunClaude invocation.
+type RunClaudeResult struct {
+	TokenUsage    *costs.TokenUsage
+	RateLimitInfo *costs.RateLimitInfo
+}
+
 // RunClaude executes claude with streaming JSON output, parsing events into
 // a human-readable activity file for the TUI to display. Raw JSON is written
-// to the log file for debugging. Returns accumulated token usage from the
-// streaming response alongside any error.
-func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) (*costs.TokenUsage, error) {
+// to the log file for debugging. Returns accumulated token usage and rate limit
+// info from the streaming response alongside any error.
+func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) (*RunClaudeResult, error) {
 	logFile, err := os.Create(logFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("creating log file: %w", err)
@@ -376,17 +383,21 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	}
 
 	usage := proc.tokenUsage()
+	result := &RunClaudeResult{
+		TokenUsage:    &usage,
+		RateLimitInfo: proc.rateLimitInfo,
+	}
 
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			return &usage, ctx.Err()
+			return result, ctx.Err()
 		}
 		if IsUsageLimitError(stderrBuf.String()) {
-			return &usage, &UsageLimitError{Stderr: strings.TrimSpace(stderrBuf.String())}
+			return result, &UsageLimitError{Stderr: strings.TrimSpace(stderrBuf.String())}
 		}
-		return &usage, err
+		return result, err
 	}
-	return &usage, nil
+	return result, nil
 }
 
 // LogFilePath returns the log file path for a given iteration.
@@ -514,6 +525,9 @@ type streamProcessor struct {
 	cacheWrite   int
 	numTurns     int
 	durationMS   int
+
+	// Rate limit info from rate_limit_event
+	rateLimitInfo *costs.RateLimitInfo
 }
 
 // tokenUsage returns the accumulated token usage as a costs.TokenUsage.
@@ -544,6 +558,21 @@ func (sp *streamProcessor) parseUsage(usage map[string]interface{}) {
 	if v, ok := usage["cache_read_input_tokens"].(float64); ok {
 		sp.cacheRead += int(v)
 	}
+}
+
+// parseRateLimitInfo extracts rate limit data from a rate_limit_event.
+func (sp *streamProcessor) parseRateLimitInfo(info map[string]interface{}) {
+	rli := &costs.RateLimitInfo{}
+	if status, ok := info["status"].(string); ok {
+		rli.Status = status
+	}
+	if resetsAt, ok := info["resetsAt"].(float64); ok {
+		rli.ResetsAt = time.Unix(int64(resetsAt), 0)
+	}
+	if rlType, ok := info["rateLimitType"].(string); ok {
+		rli.RateLimitType = rlType
+	}
+	sp.rateLimitInfo = rli
 }
 
 func (sp *streamProcessor) processLine(line string) {
@@ -590,6 +619,12 @@ func (sp *streamProcessor) processLine(line string) {
 	case "system":
 		if model, ok := raw["model"].(string); ok && sp.model == "" {
 			sp.model = model
+		}
+		return
+
+	case "rate_limit_event":
+		if info, ok := raw["rate_limit_info"].(map[string]interface{}); ok {
+			sp.parseRateLimitInfo(info)
 		}
 		return
 	}

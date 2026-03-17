@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,15 +32,16 @@ func newContextViewport(width, height int) viewport.Model {
 }
 
 type contextPanelData struct {
-	Mode            contextMode
-	ProgressContent string
-	ProgressChanged bool
-	WorktreeContent string
-	JudgeContent    string
-	QualityContent  string
-	MemoryContent   string
-	CostsContent    string
-	Phase           phase
+	Mode             contextMode
+	ProgressContent  string
+	ProgressChanged  bool
+	WorktreeContent  string
+	JudgeContent     string
+	QualityContent   string
+	MemoryContent    string
+	CostsContent     string
+	RateLimitContent string
+	Phase            phase
 }
 
 func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, width, height int) string {
@@ -96,6 +98,9 @@ func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, 
 		content = data.CostsContent
 		if content == "" {
 			content = styleMuted.Render("  No usage data yet")
+		}
+		if data.RateLimitContent != "" {
+			content = data.RateLimitContent + "\n" + content
 		}
 	}
 
@@ -405,6 +410,37 @@ func renderCostsContent(rc *costs.RunCosting, stories []StoryDisplayInfo) string
 		cacheRate := rc.CacheHitRateUnlocked()
 		sb.WriteString(fmt.Sprintf("  Cache hit rate: %.0f%%\n", cacheRate*100))
 	}
+
+	return sb.String()
+}
+
+// renderRateLimitContent formats rate limit info for the usage panel.
+func renderRateLimitContent(info *costs.RateLimitInfo) string {
+	if info == nil || info.ResetsAt.IsZero() {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("  Plan Usage\n")
+	sb.WriteString("  " + strings.Repeat("─", 40) + "\n")
+
+	remaining := time.Until(info.ResetsAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	windowLabel := info.RateLimitType
+	switch windowLabel {
+	case "five_hour":
+		windowLabel = "5-hour window"
+	case "daily":
+		windowLabel = "daily window"
+	}
+
+	sb.WriteString(fmt.Sprintf("  Window: %s\n", windowLabel))
+	sb.WriteString(fmt.Sprintf("  Status: %s\n", info.Status))
+	sb.WriteString(fmt.Sprintf("  Resets in: %s\n", formatDuration(remaining.Truncate(time.Second))))
+	sb.WriteString("  " + strings.Repeat("─", 40) + "\n")
 
 	return sb.String()
 }

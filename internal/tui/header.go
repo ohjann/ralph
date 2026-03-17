@@ -43,9 +43,15 @@ func renderHeader(m *Model, width int) string {
 	elapsed := time.Since(m.startTime).Truncate(time.Second)
 	elapsedBlock := fmt.Sprintf("⏱ %s", formatDuration(elapsed))
 
-	// Show cost if available (API key), otherwise show iteration count
+	// Show rate limit reset time if available, otherwise show cost or iteration count
 	var costBlock string
-	if m.runCosting.TotalInputTokens > 0 || m.runCosting.TotalOutputTokens > 0 {
+	if m.rateLimitInfo != nil && !m.rateLimitInfo.ResetsAt.IsZero() {
+		remaining := time.Until(m.rateLimitInfo.ResetsAt)
+		if remaining < 0 {
+			remaining = 0
+		}
+		costBlock = styleCost.Render(fmt.Sprintf("Resets in %s", formatDuration(remaining.Truncate(time.Second))))
+	} else if m.runCosting.TotalInputTokens > 0 || m.runCosting.TotalOutputTokens > 0 {
 		costBlock = styleCost.Render(fmt.Sprintf("$%.2f", m.runCosting.TotalCost))
 	} else {
 		totalIters := len(m.runCosting.Stories)

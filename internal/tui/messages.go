@@ -55,12 +55,13 @@ type nextStoryMsg struct {
 }
 type claudeDoneMsg struct {
 	Err            error
-	CompleteSignal bool              // <promise>COMPLETE</promise> found
-	DocRefs        []memory.DocRef   // retrieved doc refs for confirmation tracking
-	TokenUsage     *costs.TokenUsage // accumulated token usage from streaming
-	TotalFound     int               // total retrieval results before token budget trim
-	MaxTokens      int               // token budget used for retrieval
-	Role           roles.Role        // which role just completed (architect/implementer)
+	CompleteSignal bool                // <promise>COMPLETE</promise> found
+	DocRefs        []memory.DocRef     // retrieved doc refs for confirmation tracking
+	TokenUsage     *costs.TokenUsage   // accumulated token usage from streaming
+	RateLimitInfo  *costs.RateLimitInfo // latest rate limit info from Claude CLI
+	TotalFound     int                 // total retrieval results before token budget trim
+	MaxTokens      int                 // token budget used for retrieval
+	Role           roles.Role          // which role just completed (architect/implementer)
 }
 type judgeDoneMsg struct {
 	Result judge.Result
@@ -117,6 +118,11 @@ type MemoryRetrievalMsg struct {
 type costUpdateMsg struct {
 	Usage   costs.TokenUsage
 	StoryID string
+}
+
+// Rate limit info update
+type rateLimitUpdateMsg struct {
+	Info *costs.RateLimitInfo
 }
 
 // Terminal size

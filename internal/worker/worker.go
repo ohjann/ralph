@@ -68,17 +68,18 @@ type Worker struct {
 }
 
 type WorkerUpdate struct {
-	WorkerID    WorkerID
-	StoryID     string
-	State       WorkerState
-	Role        roles.Role // current agent role for TUI display
-	Err         error
-	Passed      bool
-	ChangeID    string // jj change_id of committed work, for rebase
-	Retryable   bool   // true for transient errors (network, timeouts)
-	UsageLimit  bool   // true when Claude hit usage/rate limit
-	JudgeResult *judge.Result
-	TokenUsage  *costs.TokenUsage // token/turn usage from Claude run
+	WorkerID      WorkerID
+	StoryID       string
+	State         WorkerState
+	Role          roles.Role // current agent role for TUI display
+	Err           error
+	Passed        bool
+	ChangeID      string // jj change_id of committed work, for rebase
+	Retryable     bool   // true for transient errors (network, timeouts)
+	UsageLimit    bool   // true when Claude hit usage/rate limit
+	JudgeResult   *judge.Result
+	TokenUsage    *costs.TokenUsage    // token/turn usage from Claude run
+	RateLimitInfo *costs.RateLimitInfo // latest rate limit info from Claude CLI
 }
 
 // shouldRunArchitect determines if the architect agent should run before the implementer.
@@ -150,19 +151,21 @@ Just implement your story, commit, update progress.md, and stop.`, storyID)
 
 // Run executes the full worker lifecycle in the workspace.
 func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
-	var claudeUsage *costs.TokenUsage // captured from RunClaude, forwarded in updates
+	var claudeUsage *costs.TokenUsage       // captured from RunClaude, forwarded in updates
+	var latestRateLimit *costs.RateLimitInfo // latest rate limit info from Claude CLI
 
 	send := func(state WorkerState, role roles.Role, err error, passed bool, changeID string) {
 		w.State = state
 		updateCh <- WorkerUpdate{
-			WorkerID:   w.ID,
-			StoryID:    w.StoryID,
-			State:      state,
-			Role:       role,
-			Err:        err,
-			Passed:     passed,
-			ChangeID:   changeID,
-			TokenUsage: claudeUsage,
+			WorkerID:      w.ID,
+			StoryID:       w.StoryID,
+			State:         state,
+			Role:          role,
+			Err:           err,
+			Passed:        passed,
+			ChangeID:      changeID,
+			TokenUsage:    claudeUsage,
+			RateLimitInfo: latestRateLimit,
 		}
 	}
 
@@ -230,12 +233,17 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		archPrompt = appendParallelMode(archPrompt, w.StoryID)
 
 		archLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect"
-		archUsage, err := runner.RunClaude(w.Ctx, ws.Dir, archPrompt, archLogPath, runner.RunClaudeOpts{
+		archResult, err := runner.RunClaude(w.Ctx, ws.Dir, archPrompt, archLogPath, runner.RunClaudeOpts{
 			Iteration: w.Iteration,
 			StoryID:   w.StoryID,
 			Role:      roles.RoleArchitect,
 		})
-		claudeUsage = archUsage
+		if archResult != nil {
+			claudeUsage = archResult.TokenUsage
+			if archResult.RateLimitInfo != nil {
+				latestRateLimit = archResult.RateLimitInfo
+			}
+		}
 		if err != nil {
 			if w.Ctx.Err() != nil {
 				send(WorkerFailed, roles.RoleArchitect, w.Ctx.Err(), false, "")
@@ -245,13 +253,14 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			if errors.As(err, &usageErr) {
 				w.State = WorkerFailed
 				updateCh <- WorkerUpdate{
-					WorkerID:   w.ID,
-					StoryID:    w.StoryID,
-					State:      WorkerFailed,
-					Role:       roles.RoleArchitect,
-					Err:        err,
-					UsageLimit: true,
-					TokenUsage: claudeUsage,
+					WorkerID:      w.ID,
+					StoryID:       w.StoryID,
+					State:         WorkerFailed,
+					Role:          roles.RoleArchitect,
+					Err:           err,
+					UsageLimit:    true,
+					TokenUsage:    claudeUsage,
+					RateLimitInfo: latestRateLimit,
 				}
 				return
 			}
@@ -283,12 +292,17 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	prompt = appendParallelMode(prompt, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
-	usage, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
+	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
 		Iteration: w.Iteration,
 		StoryID:   w.StoryID,
 		Role:      implRole,
 	})
-	claudeUsage = accumulateUsage(claudeUsage, usage) // accumulate architect + implementer/debugger usage
+	if implResult != nil {
+		claudeUsage = accumulateUsage(claudeUsage, implResult.TokenUsage)
+		if implResult.RateLimitInfo != nil {
+			latestRateLimit = implResult.RateLimitInfo
+		}
+	}
 	if err != nil {
 		if w.Ctx.Err() != nil {
 			send(WorkerFailed, implRole, w.Ctx.Err(), false, "")
@@ -299,13 +313,14 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		if errors.As(err, &usageErr) {
 			w.State = WorkerFailed
 			updateCh <- WorkerUpdate{
-				WorkerID:   w.ID,
-				StoryID:    w.StoryID,
-				State:      WorkerFailed,
-				Role:       implRole,
-				Err:        err,
-				UsageLimit: true,
-				TokenUsage: claudeUsage,
+				WorkerID:      w.ID,
+				StoryID:       w.StoryID,
+				State:         WorkerFailed,
+				Role:          implRole,
+				Err:           err,
+				UsageLimit:    true,
+				TokenUsage:    claudeUsage,
+				RateLimitInfo: latestRateLimit,
 			}
 			return
 		}
@@ -349,13 +364,14 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		// Send done with judge result
 		w.State = WorkerDone
 		updateCh <- WorkerUpdate{
-			WorkerID:    w.ID,
-			StoryID:     w.StoryID,
-			State:       WorkerDone,
-			Passed:      passed,
-			ChangeID:    changeID,
-			JudgeResult: &result,
-			TokenUsage:  claudeUsage,
+			WorkerID:      w.ID,
+			StoryID:       w.StoryID,
+			State:         WorkerDone,
+			Passed:        passed,
+			ChangeID:      changeID,
+			JudgeResult:   &result,
+			TokenUsage:    claudeUsage,
+			RateLimitInfo: latestRateLimit,
 		}
 		return
 	}
