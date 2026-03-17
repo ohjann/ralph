@@ -160,10 +160,7 @@ func renderProgressBar(fillRatio float64, barWidth int) string {
 	empty := barWidth - filled
 
 	// Use gradient blocks for a fancier look
-	filledStr := ""
-	for i := 0; i < filled; i++ {
-		filledStr += "█"
-	}
+	filledStr := strings.Repeat("█", filled)
 	emptyStr := strings.Repeat("░", empty)
 
 	return styleProgressFilled.Render(filledStr) +

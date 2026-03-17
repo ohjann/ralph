@@ -77,6 +77,7 @@ type Model struct {
 
 	// Story data for the stories panel
 	storyDisplayInfos  []StoryDisplayInfo
+	cachedPRDStories   []prd.UserStory // cached from slow tick to avoid re-reading prd.json every 500ms
 	animFrame          int    // animation frame for spinners
 	storiesSelectedIdx int    // cursor position in stories list
 	storiesExpandedID  string // ID of currently expanded story (empty = none)
@@ -829,16 +830,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Advance animation frame
 		m.animFrame++
 
-		// Update story display infos from PRD
-		if p, err := prd.Load(m.cfg.PRDFile); err == nil {
-			var coordIface interface {
-				Workers() map[worker.WorkerID]*worker.Worker
-			}
-			if m.coord != nil {
-				coordIface = m.coord
-			}
-			m.storyDisplayInfos = BuildStoryDisplayInfos(p.UserStories, m.currentStoryID, coordIface, m.phase, m.iteration, string(m.currentRole))
-		}
+		// Rebuild story display infos from cached PRD stories (updated on slow tick).
+		// This avoids re-reading and parsing prd.json from disk every 500ms.
+		m.rebuildStoryDisplayInfos()
 
 		// Auto-select context mode based on phase (skip if user manually switched)
 		// Reset manual override when the phase changes so new phases can auto-select.
@@ -919,6 +913,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case markdownRenderedMsg:
 		applyMarkdownRendered(msg)
 
+	case markdownDebounceMsg:
+		if cmd := handleMarkdownDebounce(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case worktreeMsg:
 		m.worktreeContent = msg.Content
 
@@ -934,6 +933,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prdReloadedMsg:
 		m.completedStories = msg.CompletedCount
 		m.totalStories = msg.TotalCount
+		// Cache PRD stories so fast tick can rebuild display infos without disk I/O
+		m.cachedPRDStories = msg.Stories
 
 	// --- Phase transitions ---
 	case planDoneMsg:
@@ -1874,9 +1875,13 @@ func (m *Model) View() string {
 		return m.renderResumePrompt()
 	}
 
-	// Layout: header(3) + top panels + claude activity + [status bar(1)] + [hint input(3)] + footer(1)
-	headerHeight := 3
-	footerHeight := 1
+	// Render header and footer first so we can measure their actual height
+	header := renderHeader(m, m.width)
+	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused)
+
+	// Use lipgloss.Height() for dynamic layout instead of hardcoded values
+	headerHeight := lipgloss.Height(header)
+	footerHeight := lipgloss.Height(footer)
 	statusBarHeight := 0
 	if m.stuckAlert != nil {
 		statusBarHeight = 1
@@ -1899,9 +1904,6 @@ func (m *Model) View() string {
 
 	storiesWidth := m.width * 35 / 100
 	contextWidth := m.width - storiesWidth
-
-	// Render header
-	header := renderHeader(m, m.width)
 
 	// Stories panel
 	storiesPanel := renderStoriesPanel(
@@ -1977,7 +1979,7 @@ func (m *Model) View() string {
 		workerTabStr = strings.Join(tabParts, " │ ")
 	}
 	claudePanel := renderClaudePanel(
-		m.claudeVP,
+		&m.claudeVP,
 		m.spinner,
 		m.claudeContent,
 		claudeRunning,
@@ -1986,8 +1988,6 @@ func (m *Model) View() string {
 		claudeHeight,
 		workerTabStr,
 	)
-
-	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused)
 
 	parts := []string{header, topRow, claudePanel}
 	if m.stuckAlert != nil {
@@ -2061,6 +2061,21 @@ func (m *Model) renderResumePrompt() string {
 	b.WriteString("  Press " + styleKey.Render("y") + " to resume, " + styleKey.Render("n") + " to start fresh, " + styleKey.Render("q") + " to quit\n")
 
 	return b.String()
+}
+
+// rebuildStoryDisplayInfos reconstructs display infos from cached PRD stories.
+// Called on fast tick (500ms) but uses cached data to avoid disk I/O.
+func (m *Model) rebuildStoryDisplayInfos() {
+	if len(m.cachedPRDStories) == 0 {
+		return
+	}
+	var coordIface interface {
+		Workers() map[worker.WorkerID]*worker.Worker
+	}
+	if m.coord != nil {
+		coordIface = m.coord
+	}
+	m.storyDisplayInfos = BuildStoryDisplayInfos(m.cachedPRDStories, m.currentStoryID, coordIface, m.phase, m.iteration, string(m.currentRole))
 }
 
 // clampLines truncates or pads a string to exactly n lines.

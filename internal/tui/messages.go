@@ -4,6 +4,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/memory"
+	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/quality"
 	"github.com/eoghanhynes/ralph/internal/roles"
 	"github.com/eoghanhynes/ralph/internal/runner"
@@ -44,6 +45,7 @@ type prdReloadedMsg struct {
 	TotalCount     int
 	AllComplete    bool
 	CurrentStoryID string
+	Stories        []prd.UserStory // cached for display info rebuilds without disk I/O
 }
 
 // Phase transition messages

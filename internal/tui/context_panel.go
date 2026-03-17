@@ -69,7 +69,9 @@ func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, 
 		} else {
 			// Use pre-rendered markdown from cache (rendered async in Update).
 			// Fall back to raw content if nothing rendered yet.
-			if markdownCache.rendered != "" && (markdownCache.input == content || markdownCache.pending) {
+			// Accept the cached render if it matches the current input OR if a
+			// newer render is in-flight (dirtyInput set, debounce pending).
+			if markdownCache.rendered != "" && (markdownCache.input == content || markdownCache.dirtyInput == content) {
 				content = markdownCache.rendered
 			}
 		}
@@ -158,22 +160,30 @@ func hasQualityContent(data contextPanelData) bool {
 	return data.QualityContent != "" || data.Phase == phaseQualityReview || data.Phase == phaseQualityFix || data.Phase == phaseQualityPrompt
 }
 
-// markdownCache caches the last rendered markdown and the renderer itself
-// to avoid expensive re-creation on every content change.
+// maxMarkdownLines is the maximum number of tail lines sent to glamour.
+// Rendering only the tail keeps glamour fast as the progress file grows,
+// since the viewport auto-scrolls to the bottom anyway.
+const maxMarkdownLines = 150
+
+// markdownCache caches the last rendered markdown.
 // All fields are only accessed from the main Bubble Tea goroutine.
 var markdownCache struct {
-	input    string
-	width    int
+	// Cache key
+	input string
+	width int
+
+	// Cache value
 	rendered string
 
-	// Cached renderer — only recreated when width changes.
-	renderer      *glamour.TermRenderer
-	rendererWidth int
+	// Sequence counter — incremented on every new render request.
+	// Results from stale renders (seq < current) are discarded.
+	seq uint64
 
-	// Async rendering: when content changes, we render in the background
-	// and return the stale cached result until the new one is ready.
-	pending   bool
-	pendingIn string
+	// Debounce: we note when content last changed and only dispatch
+	// a render once it has settled for debounceInterval.
+	lastChangeAt time.Time
+	dirtyInput   string // content waiting to be rendered after debounce
+	dirtyWidth   int
 }
 
 // markdownRenderedMsg is sent when async markdown rendering completes.
@@ -181,70 +191,115 @@ type markdownRenderedMsg struct {
 	Input    string
 	Width    int
 	Rendered string
+	Seq      uint64 // matches the seq at dispatch time; stale results are dropped
 }
 
+// markdownDebounceMsg fires after the debounce interval to check if it's
+// time to actually kick off a render.
+type markdownDebounceMsg struct {
+	Seq uint64
+}
+
+const markdownDebounceInterval = 800 * time.Millisecond
+
 // renderMarkdownAsync starts a background render and returns a Cmd.
-// The renderer is captured from the cache on the main goroutine and passed
-// into the background closure so that no shared state is accessed concurrently.
-func renderMarkdownAsync(content string, width int) tea.Cmd {
-	// Prepare renderer on the main goroutine (cache access is safe here).
-	renderer := markdownCache.renderer
-	if renderer == nil || width != markdownCache.rendererWidth {
+// A fresh glamour.TermRenderer is created inside the goroutine so there
+// is no shared mutable state — the previous design shared a cached renderer
+// between concurrent Cmd goroutines which is not safe.
+func renderMarkdownAsync(content string, width int, seq uint64) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		// Truncate to tail: only render the last maxMarkdownLines lines.
+		// This keeps glamour fast as the progress file grows.
+		truncated := truncateToTail(content, maxMarkdownLines)
+
 		r, err := glamour.NewTermRenderer(
 			glamour.WithAutoStyle(),
 			glamour.WithWordWrap(width),
 		)
 		if err != nil {
-			// Can't create renderer — return raw content immediately.
-			return func() tea.Msg {
-				return markdownRenderedMsg{Input: content, Width: width, Rendered: content}
-			}
+			return markdownRenderedMsg{Input: content, Width: width, Rendered: truncated, Seq: seq}
 		}
-		renderer = r
-		markdownCache.renderer = r
-		markdownCache.rendererWidth = width
-	}
-
-	return func() tea.Msg {
-		// Only uses the local `renderer` — no shared state access.
-		rendered, err := renderer.Render(content)
+		rendered, err := r.Render(truncated)
 		if err != nil {
-			return markdownRenderedMsg{Input: content, Width: width, Rendered: content}
+			return markdownRenderedMsg{Input: content, Width: width, Rendered: truncated, Seq: seq}
 		}
 		return markdownRenderedMsg{
 			Input:    content,
 			Width:    width,
 			Rendered: strings.TrimRight(rendered, "\n"),
+			Seq:      seq,
 		}
-	}
+	})
 }
 
-// maybeRenderMarkdown checks if markdown needs re-rendering and returns
-// a Cmd to render async if so. Call from Update(), not View().
+// maybeRenderMarkdown is called from Update() when progress content changes.
+// It debounces: instead of rendering immediately, it records the change and
+// schedules a debounce check. The actual render only fires once content has
+// been stable for markdownDebounceInterval.
 func maybeRenderMarkdown(content string, width int) tea.Cmd {
 	// Exact cache hit — nothing to do.
 	if content == markdownCache.input && width == markdownCache.width {
 		return nil
 	}
 
-	// Already rendering this exact input — don't double-dispatch.
-	if markdownCache.pending && content == markdownCache.pendingIn && width == markdownCache.rendererWidth {
+	now := time.Now()
+	markdownCache.lastChangeAt = now
+	markdownCache.dirtyInput = content
+	markdownCache.dirtyWidth = width
+	markdownCache.seq++
+	seq := markdownCache.seq
+
+	// Schedule a debounce check instead of rendering immediately.
+	return tea.Tick(markdownDebounceInterval, func(time.Time) tea.Msg {
+		return markdownDebounceMsg{Seq: seq}
+	})
+}
+
+// handleMarkdownDebounce is called from Update() when a debounce timer fires.
+// If no newer content arrived since this timer was scheduled, kick off the render.
+func handleMarkdownDebounce(msg markdownDebounceMsg) tea.Cmd {
+	// Stale debounce — a newer change superseded this one.
+	if msg.Seq != markdownCache.seq {
 		return nil
 	}
-
-	// New content — kick off async render.
-	markdownCache.pending = true
-	markdownCache.pendingIn = content
-	return renderMarkdownAsync(content, width)
+	// Content settled — nothing new arrived during the debounce window.
+	content := markdownCache.dirtyInput
+	width := markdownCache.dirtyWidth
+	if content == markdownCache.input && width == markdownCache.width {
+		return nil // already rendered
+	}
+	return renderMarkdownAsync(content, width, markdownCache.seq)
 }
 
 // applyMarkdownRendered updates the cache when async rendering completes.
 func applyMarkdownRendered(msg markdownRenderedMsg) {
+	// Discard stale results — a newer render was requested.
+	if msg.Seq < markdownCache.seq {
+		return
+	}
 	markdownCache.input = msg.Input
 	markdownCache.width = msg.Width
 	markdownCache.rendered = msg.Rendered
-	markdownCache.pending = false
-	markdownCache.pendingIn = ""
+}
+
+// truncateToTail returns the last n lines of s. If s has fewer than n lines,
+// it is returned unchanged. This avoids feeding glamour a huge document when
+// only the tail is visible in the auto-scrolled viewport.
+func truncateToTail(s string, n int) string {
+	// Fast path: count newlines from the end.
+	end := len(s)
+	for count := 0; end > 0; {
+		i := strings.LastIndexByte(s[:end], '\n')
+		if i < 0 {
+			break
+		}
+		count++
+		if count >= n {
+			return s[i+1:]
+		}
+		end = i
+	}
+	return s
 }
 
 // renderWorktreeCompact formats jj status output more compactly.

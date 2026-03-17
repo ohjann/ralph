@@ -26,7 +26,7 @@ func newClaudeViewport(width, height int) viewport.Model {
 	return vp
 }
 
-func renderClaudePanel(vp viewport.Model, sp spinner.Model, content string, running bool, active bool, width, height int, workerTabs ...string) string {
+func renderClaudePanel(vp *viewport.Model, sp spinner.Model, content string, running bool, active bool, width, height int, workerTabs ...string) string {
 	// Build title with sparkle
 	var title string
 	if running {

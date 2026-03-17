@@ -27,6 +27,20 @@ import (
 	"github.com/eoghanhynes/ralph/internal/worker"
 )
 
+// safeCmd wraps a tea.Cmd so that panics in the command goroutine are recovered
+// instead of corrupting the terminal. Bubble Tea only recovers panics from
+// Update/View — panics in Cmd goroutines leave the terminal in a broken state.
+func safeCmd(fn func() tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		defer func() {
+			if r := recover(); r != nil {
+				debuglog.Log("panic recovered in tea.Cmd: %v", r)
+			}
+		}()
+		return fn()
+	}
+}
+
 func fastTickCmd() tea.Cmd {
 	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
 		return fastTickMsg{}
@@ -79,12 +93,13 @@ func reloadPRDCmd(path string) tea.Cmd {
 			TotalCount:     p.TotalCount(),
 			AllComplete:    p.AllComplete(),
 			CurrentStoryID: storyID,
+			Stories:        p.UserStories,
 		}
 	}
 }
 
 func planCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		planContent, err := os.ReadFile(cfg.PlanFile)
 		if err != nil {
 			return planDoneMsg{Err: fmt.Errorf("reading plan file: %w", err)}
@@ -162,7 +177,7 @@ All stories must have "passes": false and "notes": "".
 		}
 
 		return planDoneMsg{}
-	}
+	})
 }
 
 func archiveCmd(cfg *config.Config) tea.Cmd {
@@ -244,7 +259,7 @@ func combineTokenUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
 }
 
 func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, iteration int, chromaClient *memory.ChromaClient, embedder memory.Embedder) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		p, err := prd.Load(cfg.PRDFile)
 		if err != nil {
 			return claudeDoneMsg{Err: fmt.Errorf("loading PRD: %w", err)}
@@ -356,11 +371,11 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			Role:           implRole,
 			RateLimitInfo:  latestRateLimit,
 		}
-	}
+	})
 }
 
 func generateFixStoryCmd(ctx context.Context, cfg *config.Config, info runner.StuckInfo) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		p, err := prd.Load(cfg.PRDFile)
 		if err != nil {
 			return fixStoryGeneratedMsg{Err: err}
@@ -383,7 +398,7 @@ func generateFixStoryCmd(ctx context.Context, cfg *config.Config, info runner.St
 		}
 
 		return fixStoryGeneratedMsg{StoryID: fix.ID, TokenUsage: tokenUsage}
-	}
+	})
 }
 
 func pollStuckCmd(projectDir string, iteration int) tea.Cmd {
@@ -413,7 +428,7 @@ func captureRevsCmd(ctx context.Context, dirs []string) []judge.DirRev {
 }
 
 func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		p, err := prd.Load(cfg.PRDFile)
 		if err != nil {
 			return coordinator.DAGAnalyzedMsg{Err: err}
@@ -448,11 +463,11 @@ func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 		}
 
 		return coordinator.DAGAnalyzedMsg{DAG: d}
-	}
+	})
 }
 
 func mergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.WorkerUpdate) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		conflictsResolved, err := coord.MergeAndSync(ctx, u)
 		return coordinator.MergeCompleteMsg{
 			StoryID:           u.StoryID,
@@ -461,7 +476,7 @@ func mergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.
 			Err:               err,
 			ConflictsResolved: conflictsResolved,
 		}
-	}
+	})
 }
 
 func pollWorkerActivityCmd(wID worker.WorkerID, activityPath string) tea.Cmd {
@@ -475,7 +490,7 @@ func pollWorkerActivityCmd(wID worker.WorkerID, activityPath string) tea.Cmd {
 }
 
 func qualityReviewCmd(ctx context.Context, cfg *config.Config, iteration int) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		manifest, err := quality.GetDiffManifest(ctx, cfg.ProjectDir)
 		if err != nil || manifest == "" {
 			return qualityReviewDoneMsg{Err: fmt.Errorf("no changes to review: %v", err)}
@@ -488,18 +503,18 @@ func qualityReviewCmd(ctx context.Context, cfg *config.Config, iteration int) te
 		_ = quality.WriteAssessment(cfg.ProjectDir, assessment)
 
 		return qualityReviewDoneMsg{Assessment: assessment}
-	}
+	})
 }
 
 func qualityFixCmd(ctx context.Context, cfg *config.Config, assessment quality.Assessment, iteration int) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		err := quality.RunFix(ctx, cfg.ProjectDir, cfg.LogDir, assessment, iteration)
 		return qualityFixDoneMsg{Err: err}
-	}
+	})
 }
 
 func generateSummaryCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		// Read PRD for context
 		prdData, _ := os.ReadFile(cfg.PRDFile)
 		// Read progress for context
@@ -536,13 +551,13 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 		content, _ := os.ReadFile(summaryPath)
 
 		return summaryDoneMsg{Content: string(content), Err: err}
-	}
+	})
 }
 
 // chromaSetupCmd sets up the Python environment, starts the ChromaDB sidecar,
 // creates all collections, and returns the sidecar + client for storage.
 func chromaSetupCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		dataDir := filepath.Join(cfg.RalphHome, "memory")
 		port := cfg.Memory.Port
 		if port == 0 {
@@ -575,25 +590,25 @@ func chromaSetupCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 
 		debuglog.Log("chromadb sidecar healthy on port %d, all collections ready", sc.Port())
 		return chromaSetupDoneMsg{Sidecar: sc, Client: client}
-	}
+	})
 }
 
 // codebaseScanCmd runs the codebase scanner in the background.
 func codebaseScanCmd(ctx context.Context, cfg *config.Config, client *memory.ChromaClient, embedder memory.Embedder) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		if err := memory.ScanCodebase(ctx, cfg.ProjectDir, client, embedder); err != nil {
 			debuglog.Log("codebase scan failed: %v", err)
 			return codebaseScanDoneMsg{Err: err}
 		}
 		debuglog.Log("codebase scan complete")
 		return codebaseScanDoneMsg{}
-	}
+	})
 }
 
 // runPipelineCmd runs the embedding pipeline for a completed or context-exhausted story.
 // It uses the provided embedder, embeds story data, then enforces collection caps.
 func runPipelineCmd(ctx context.Context, client *memory.ChromaClient, embedder memory.Embedder, projectDir, storyID string, contextExhausted bool) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		pipeline := memory.NewPipeline(client, embedder)
 
 		var err error
@@ -616,7 +631,7 @@ func runPipelineCmd(ctx context.Context, client *memory.ChromaClient, embedder m
 
 		debuglog.Log("pipeline embed complete for %s", storyID)
 		return pipelineEmbedDoneMsg{StoryID: storyID}
-	}
+	})
 }
 
 // memoryStatsCmd fetches collection statistics and formats them for the memory panel.
