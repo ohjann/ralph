@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/checkpoint"
 	"github.com/eoghanhynes/ralph/internal/config"
+	"github.com/eoghanhynes/ralph/internal/tui/sprite"
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/notify"
@@ -152,6 +153,9 @@ type Model struct {
 
 	// Remote status page
 	statusServer *statuspage.StatusServer
+
+	// Sprite mascot
+	mascot *sprite.Mascot
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
@@ -183,6 +187,11 @@ func NewModel(cfg *config.Config, version string) *Model {
 	hi.SetHeight(1)
 	hi.ShowLineNumbers = false
 
+	var m *sprite.Mascot
+	if cfg.SpriteEnabled {
+		m = sprite.NewMascot()
+	}
+
 	return &Model{
 		cfg:            cfg,
 		version:        version,
@@ -202,6 +211,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		notifier:       n,
 		statusServer:   ss,
 		hintInput:      hi,
+		mascot:         m,
 	}
 }
 
@@ -469,6 +479,12 @@ func (m *Model) contextContentWidth() int {
 func (m *Model) Init() tea.Cmd {
 	setTitle := tea.SetWindowTitle("✦ ralph")
 
+	// Start sprite tick loop if mascot is enabled.
+	var spriteInit tea.Cmd
+	if m.mascot != nil {
+		spriteInit = spriteTickCmd()
+	}
+
 	if m.cfg.IdleMode {
 		m.phase = phaseIdle
 		return tea.Batch(
@@ -476,6 +492,7 @@ func (m *Model) Init() tea.Cmd {
 			m.spinner.Tick,
 			fastTickCmd(),
 			tickCmd(),
+			spriteInit,
 		)
 	}
 	if m.cfg.PlanFile != "" {
@@ -486,6 +503,7 @@ func (m *Model) Init() tea.Cmd {
 			m.spinner.Tick,
 			fastTickCmd(),
 			tickCmd(),
+			spriteInit,
 		)
 	}
 	return tea.Batch(
@@ -494,6 +512,7 @@ func (m *Model) Init() tea.Cmd {
 		m.spinner.Tick,
 		fastTickCmd(),
 		tickCmd(),
+		spriteInit,
 	)
 }
 
@@ -530,6 +549,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextVP.Height = topHeight - 4 // extra line for tab bar
 		m.claudeVP.Width = m.width - 4
 		m.claudeVP.Height = claudeHeight - 3
+
+		if m.mascot != nil {
+			m.mascot.Resize(sprite.LayoutParams{
+				Width:       m.width,
+				Height:      m.height,
+				HasStuckBar: m.stuckAlert != nil,
+				HasHintInput: m.hintActive,
+			})
+		}
 
 		// Re-render markdown at new width if we have content.
 		if m.progressContent != "" {
@@ -843,6 +871,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+
+	// --- Sprite tick: advance mascot animation ---
+	case spriteTickMsg:
+		if m.mascot != nil {
+			m.mascot.Tick()
+			cmds = append(cmds, spriteTickCmd())
+		}
 
 	// --- Fast tick: poll activity + progress ---
 	case fastTickMsg:
@@ -2022,6 +2057,11 @@ func (m *Model) View() string {
 	parts = append(parts, footer)
 
 	output := lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	// Overlay sprite mascot before line clamping
+	if m.mascot != nil {
+		output = m.mascot.Overlay(output)
+	}
 
 	// Clamp to exactly terminal height to prevent scrolling/jitter
 	lines := strings.Split(output, "\n")

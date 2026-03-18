@@ -47,6 +47,12 @@ func fastTickCmd() tea.Cmd {
 	})
 }
 
+func spriteTickCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+		return spriteTickMsg{}
+	})
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}

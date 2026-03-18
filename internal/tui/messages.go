@@ -33,8 +33,9 @@ const (
 )
 
 // Tick messages
-type fastTickMsg struct{} // 500ms — poll activity/progress
-type tickMsg struct{}     // 2s — poll jj st, reload prd
+type fastTickMsg struct{}   // 500ms — poll activity/progress
+type tickMsg struct{}       // 2s — poll jj st, reload prd
+type spriteTickMsg struct{} // 120ms — sprite animation
 
 // Data refresh messages
 type progressContentMsg struct{ Content string }

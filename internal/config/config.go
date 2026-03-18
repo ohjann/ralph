@@ -51,6 +51,7 @@ type Config struct {
 	HistoryCommand     bool   // true when "history" subcommand is used
 	HistoryAll         bool   // --all flag for history subcommand
 	NoArchitect        bool   // --no-architect: globally skip architect phase for all stories
+	SpriteEnabled      bool   // sprite mascot overlay (default true)
 
 	// Derived paths
 	PRDFile        string
@@ -69,6 +70,7 @@ func Parse(args []string) (*Config, error) {
 		QualityReview:      true,
 		QualityWorkers:     3,
 		QualityMaxIters:    2,
+		SpriteEnabled:      true,
 		Memory: DefaultMemoryConfig(),
 	}
 
