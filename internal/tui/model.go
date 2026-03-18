@@ -607,6 +607,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.hintInput.Focus()
 		}
 
+		// Interactive sprite mode: capture ALL input except q/ctrl+c
+		if m.mascot != nil && m.mascot.Interactive {
+			switch msg.String() {
+			case "ctrl+c":
+				if m.coord != nil {
+					m.coord.CancelAll()
+					m.coord.CleanupAll(context.Background())
+				}
+				m.cleanupWorkerLogs()
+				m.stopStatusServer()
+				m.stopSidecar()
+				m.cancel()
+				return m, tea.Quit
+			case "q":
+				if m.confirmQuit || m.phase == phaseDone || m.phase == phaseIdle {
+					m.cleanupWorkerLogs()
+					m.stopStatusServer()
+					m.stopSidecar()
+					m.cancel()
+					return m, tea.Quit
+				}
+				m.confirmQuit = true
+				return m, nil
+			case "p", "esc":
+				m.mascot.Interactive = false
+				return m, nil
+			default:
+				m.confirmQuit = false
+				sprite.HandleKey(msg, m.mascot.Spr, &m.mascot.World)
+				return m, nil
+			}
+		}
+
+		// 'p' enters interactive sprite mode
+		if msg.String() == "p" && m.mascot != nil {
+			m.mascot.Interactive = true
+			return m, nil
+		}
+
 		switch {
 		case msg.String() == "ctrl+c":
 			if m.coord != nil {
@@ -1935,7 +1974,7 @@ func (m *Model) View() string {
 
 	// Render header and footer first so we can measure their actual height
 	header := renderHeader(m, m.width)
-	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused)
+	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused, m.mascot != nil && m.mascot.Interactive)
 
 	// Use lipgloss.Height() for dynamic layout instead of hardcoded values
 	headerHeight := lipgloss.Height(header)
@@ -2182,7 +2221,13 @@ func renderHintInput(ti textarea.Model, width int) string {
 	return label + " " + ti.View() + esc
 }
 
-func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool, review bool, qualityPrompt bool, resumePrompt bool, paused bool) string {
+func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bool, review bool, qualityPrompt bool, resumePrompt bool, paused bool, interactive bool) string {
+	if interactive {
+		return "  " + styleKey.Render("arrows") + styleFooter.Render(": move  ") +
+			styleKey.Render("space") + styleFooter.Render(": jump  ") +
+			styleKey.Render("p/esc") + styleFooter.Render(": exit play mode  ") +
+			styleKey.Render("q") + styleFooter.Render(": quit")
+	}
 	if paused {
 		return "  " + styleKey.Render("enter") + styleFooter.Render(": resume  ") +
 			styleKey.Render("q") + styleFooter.Render(": quit")

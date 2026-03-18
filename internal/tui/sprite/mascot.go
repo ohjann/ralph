@@ -3,9 +3,10 @@ package sprite
 // Mascot bundles a Sprite, World, and AI into a single facade
 // that the TUI model can drive with simple method calls.
 type Mascot struct {
-	Spr   *Sprite
-	World World
-	AI    *AI
+	Spr         *Sprite
+	World       World
+	AI          *AI
+	Interactive bool // when true, AI is paused and user controls the sprite
 }
 
 // NewMascot creates a Mascot with a sprite positioned on the first platform.
@@ -62,7 +63,9 @@ func (m *Mascot) Tick() {
 	if len(m.World.Platforms) == 0 {
 		return
 	}
-	m.AI.Tick(m.Spr, &m.World)
+	if !m.Interactive {
+		m.AI.Tick(m.Spr, &m.World)
+	}
 	m.Spr.Update(&m.World)
 }
 
