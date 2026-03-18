@@ -49,13 +49,12 @@ func (s *Sprite) Update(w *World) bool {
 
 		// Check for landing on a platform.
 		ix, iy := int(s.X), int(s.Y)
-		// The sprite is 2 rows tall; bottom row is iy+1.
-		feetY := iy + 1
+		feetY := iy + s.Height() - 1
+		oldFeetY := int(oldY) + s.Height() - 1
 		for i := range w.Platforms {
 			p := &w.Platforms[i]
-			if s.VelY >= 0 && feetY >= p.Y-1 && int(oldY)+1 <= p.Y-1 &&
+			if s.VelY >= 0 && feetY >= p.Y-1 && oldFeetY <= p.Y-1 &&
 				ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
-				// Snap to platform: sprite bottom at p.Y - 1, so top at p.Y - 2.
 				s.Y = float64(p.Y - s.Height())
 				s.VelY = 0
 				s.OnGround = true
