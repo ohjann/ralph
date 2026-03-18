@@ -9,10 +9,11 @@ type Mascot struct {
 	Interactive bool // when true, AI is paused and user controls the sprite
 }
 
-// NewMascot creates a Mascot with a sprite positioned on the first platform.
+// NewMascot creates a Mascot with a sprite that will be placed on the bottom
+// platform once the world is built via Resize.
 func NewMascot() *Mascot {
 	return &Mascot{
-		Spr: NewSprite(10, 1),
+		Spr: NewSprite(10, 9999),
 		AI:  NewAI(42),
 	}
 }
@@ -26,6 +27,7 @@ func (m *Mascot) Resize(lp LayoutParams) {
 	}
 
 	// Find the closest platform to the sprite's current Y position.
+	// On first resize (Y=0), this naturally picks the bottom platform.
 	bestIdx := 0
 	bestDist := int(^uint(0) >> 1)
 	iy := int(m.Spr.Y)

@@ -15,12 +15,13 @@ const (
 
 // AI controls autonomous sprite behavior through a simple state machine.
 type AI struct {
-	State       AIState
-	rng         *rand.Rand
+	State        AIState
+	rng          *rand.Rand
 	ticksInState int
 	targetTicks  int // how many ticks to stay in current state
 	patrolDist   int // remaining patrol distance
 	climbDir     int // -1 up, 1 down
+	climbTicks   int // ticks spent actually on the ladder
 	stuckCounter int // frames at same position
 	lastX        float64
 	lastY        float64
@@ -134,24 +135,32 @@ func (a *AI) tickClimbing(s *Sprite, w *World) {
 			a.transitionTo(AIPatrol)
 			return
 		}
-		dx := ladder.X - int(s.X)
-		if dx == 0 {
+
+		// Try to enter the ladder if the sprite overlaps its column.
+		ix := int(s.X)
+		if ix <= ladder.X && ix+s.Width()-1 >= ladder.X {
 			s.StartClimbOnLadder(a.climbDir, w)
-			if !s.OnLadder {
-				a.transitionTo(AIPatrol)
+			if s.OnLadder {
+				a.climbTicks = 0
 				return
 			}
-		} else {
-			dir := 1
-			if dx < 0 {
-				dir = -1
-			}
-			s.Walk(dir, w)
+			// Entry failed (wrong direction for this ladder), bail.
+			a.transitionTo(AIPatrol)
+			return
 		}
+
+		// Not overlapping yet — walk toward the ladder.
+		dx := ladder.X - ix
+		dir := 1
+		if dx < 0 {
+			dir = -1
+		}
+		s.Walk(dir, w)
 	} else {
 		// On ladder: keep climbing.
 		// Note: physics Update is called by Mascot.Tick after AI.Tick,
 		// so we must NOT call s.Update here to avoid double-ticking.
+		a.climbTicks++
 		s.StartClimb(a.climbDir)
 
 		// Check if we've reached a platform.
@@ -168,12 +177,12 @@ func (a *AI) tickClimbing(s *Sprite, w *World) {
 				return
 			}
 		}
-	}
 
-	// Bail if climbing takes too long.
-	if a.ticksInState > 60 {
-		a.transitionTo(AIPatrol)
-		s.OnLadder = false
+		// Bail if actual climbing takes too long.
+		if a.climbTicks > 80 {
+			s.OnLadder = false
+			a.recoverStuck(s, w)
+		}
 	}
 }
 
@@ -232,9 +241,10 @@ func (a *AI) findNearestLadder(s *Sprite, w *World) *Ladder {
 	ix := int(s.X)
 	for i := range w.Ladders {
 		l := &w.Ladders[i]
-		// Only consider ladders that span the sprite's vertical range.
+		// Only consider ladders that overlap the sprite's vertical range
+		// (including the platform row at its feet).
 		iy := int(s.Y)
-		if iy+s.Height()-1 < l.Y1 || iy > l.Y2 {
+		if iy+s.Height() < l.Y1 || iy > l.Y2 {
 			continue
 		}
 		dist := ix - l.X

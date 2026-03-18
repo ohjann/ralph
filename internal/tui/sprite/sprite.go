@@ -16,8 +16,8 @@ const (
 
 // Catppuccin Mocha palette colors for sprite rendering.
 var (
-	headColor = lipgloss.Color("#F9E2AF") // Yellow (head)
-	bodyColor = lipgloss.Color("#F9845C") // Peach (body)
+	headColor = lipgloss.Color("#89B4FA") // Blue (robot head)
+	bodyColor = lipgloss.Color("#74C7EC") // Sapphire (robot body)
 
 	headStyle = lipgloss.NewStyle().Foreground(headColor)
 	bodyStyle = lipgloss.NewStyle().Foreground(bodyColor)
@@ -30,30 +30,31 @@ type frame struct {
 }
 
 // actionFrames maps each Action to its animation frames.
+// Robot sprite rendered in braille characters (6x8 pixel grid per 3x2 char frame).
 var actionFrames = map[Action][]frame{
 	Idle: {
-		{Head: " o ", Body: "/|\\"},
-		{Head: " o ", Body: "/|\\"},
+		{Head: "⣯⣿⣽", Body: "⢾⠿⡷"},
+		{Head: "⣯⣿⣽", Body: "⢾⠿⡷"},
 	},
 	WalkLeft: {
-		{Head: " o ", Body: "/|\\"},
-		{Head: " o ", Body: "|/\\"},
+		{Head: "⣯⣿⣽", Body: "⢺⠟⣗"},
+		{Head: "⣯⣿⣽", Body: "⡾⠛⣗"},
 	},
 	WalkRight: {
-		{Head: " o ", Body: "/|\\"},
-		{Head: " o ", Body: "/\\|"},
+		{Head: "⣯⣿⣽", Body: "⣺⠻⡗"},
+		{Head: "⣯⣿⣽", Body: "⣺⠛⢷"},
 	},
 	Jump: {
-		{Head: "\\o/", Body: " | "},
-		{Head: "\\o/", Body: "/ \\"},
+		{Head: "⣗⣿⣺", Body: "⢚⠿⡓"},
+		{Head: "⣗⣿⣺", Body: "⠚⠿⠓"},
 	},
 	Climb: {
-		{Head: " o ", Body: "/|\\"},
-		{Head: " o ", Body: "\\|/"},
+		{Head: "⣯⣿⣽", Body: "⢞⠿⡳"},
+		{Head: "⣯⣿⣽", Body: "⡺⣛⢗"},
 	},
 	Fall: {
-		{Head: " o ", Body: "\\|/"},
-		{Head: " o ", Body: " | "},
+		{Head: "⣯⣿⣽", Body: "⡝⠛⢫"},
+		{Head: "⣯⣿⣽", Body: "⡙⠛⢋"},
 	},
 }
 

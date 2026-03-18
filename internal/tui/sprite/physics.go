@@ -23,6 +23,22 @@ func (s *Sprite) Update(w *World) bool {
 	if s.OnLadder {
 		// No gravity while climbing.
 		s.advanceAnimation(climbAnimRate)
+
+		// Check if the sprite has reached a platform and should dismount.
+		ix, iy := int(s.X), int(s.Y)
+		feetY := iy + s.Height()
+		for i := range w.Platforms {
+			p := &w.Platforms[i]
+			if feetY == p.Y && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
+				s.OnLadder = false
+				s.OnGround = true
+				s.Y = float64(p.Y - s.Height())
+				s.Action = Idle
+				s.Frame = 0
+				s.FrameTick = 0
+				break
+			}
+		}
 	} else if !s.OnGround {
 		// Apply gravity.
 		s.VelY += Gravity
@@ -117,9 +133,21 @@ func (s *Sprite) StartClimbOnLadder(dir int, w *World) {
 		return
 	}
 	ix, iy := int(s.X), int(s.Y)
+	feetRow := iy + s.Height() // row just below the sprite (the platform row)
 	for i := range w.Ladders {
 		l := &w.Ladders[i]
-		if ix <= l.X && ix+s.Width()-1 >= l.X && iy >= l.Y1 && iy+s.Height()-1 <= l.Y2 {
+		// Overlap check: sprite (including the platform row at its feet)
+		// overlaps the ladder vertically, and sprite horizontally covers
+		// the ladder column.
+		if ix <= l.X && ix+s.Width()-1 >= l.X &&
+			feetRow >= l.Y1 && iy <= l.Y2 {
+			// Don't climb past the ends of the ladder.
+			if dir < 0 && iy <= l.Y1 {
+				continue
+			}
+			if dir > 0 && feetRow >= l.Y2 {
+				continue
+			}
 			s.OnLadder = true
 			s.OnGround = false
 			s.Action = Climb
