@@ -217,6 +217,7 @@ var (
 type Sprite struct {
 	X         float64
 	Y         float64
+	VelX      float64 // horizontal velocity (set on jump for arc momentum)
 	VelY      float64
 	Dir       int // -1 left, 0 neutral, 1 right
 	Action    Action

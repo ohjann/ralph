@@ -34,7 +34,7 @@ func (m *Mascot) Resize(lp LayoutParams) {
 	bestDist := int(^uint(0) >> 1)
 	iy := int(m.Spr.Y)
 	for i, p := range m.World.Platforms {
-		dy := iy - (p.Y - m.Spr.Height())
+		dy := iy - (p.Y - m.Spr.Height() + 1)
 		if dy < 0 {
 			dy = -dy
 		}
@@ -55,7 +55,7 @@ func (m *Mascot) Resize(lp LayoutParams) {
 	}
 
 	// Snap Y to the platform surface.
-	m.Spr.Y = float64(p.Y - m.Spr.Height())
+	m.Spr.Y = float64(p.Y - m.Spr.Height() + 1)
 	m.Spr.OnGround = true
 	m.Spr.OnLadder = false
 	m.Spr.VelY = 0

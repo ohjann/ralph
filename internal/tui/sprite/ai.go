@@ -168,10 +168,10 @@ func (a *AI) tickClimbing(s *Sprite, w *World) {
 		feetY := iy + s.Height()
 		for i := range w.Platforms {
 			p := &w.Platforms[i]
-			if feetY == p.Y && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
+			if feetY == p.Y+1 && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
 				s.OnLadder = false
 				s.OnGround = true
-				s.Y = float64(p.Y - s.Height())
+				s.Y = float64(p.Y - s.Height() + 1)
 				s.Action = Idle
 				a.transitionTo(AIPatrol)
 				return
@@ -275,7 +275,7 @@ func (a *AI) recoverStuck(s *Sprite, w *World) {
 	for i := range w.Platforms {
 		p := &w.Platforms[i]
 		if ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
-			dy := int(s.Y) - (p.Y - s.Height())
+			dy := int(s.Y) - (p.Y - s.Height() + 1)
 			if dy < 0 {
 				dy = -dy
 			}
@@ -292,7 +292,7 @@ func (a *AI) recoverStuck(s *Sprite, w *World) {
 		// Fallback: use the first platform.
 		p := &w.Platforms[0]
 		s.X = float64(p.X1 + (p.X2-p.X1)/2)
-		s.Y = float64(p.Y - s.Height())
+		s.Y = float64(p.Y - s.Height() + 1)
 		s.OnGround = true
 	}
 

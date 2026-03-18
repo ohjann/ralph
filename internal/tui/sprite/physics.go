@@ -29,10 +29,10 @@ func (s *Sprite) Update(w *World) bool {
 		feetY := iy + s.Height()
 		for i := range w.Platforms {
 			p := &w.Platforms[i]
-			if feetY == p.Y && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
+			if feetY == p.Y+1 && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
 				s.OnLadder = false
 				s.OnGround = true
-				s.Y = float64(p.Y - s.Height())
+				s.Y = float64(p.Y - s.Height() + 1)
 				s.Action = Idle
 				s.Frame = 0
 				s.FrameTick = 0
@@ -47,6 +47,15 @@ func (s *Sprite) Update(w *World) bool {
 		}
 		s.Y += s.VelY
 
+		// Apply horizontal momentum (arc jumps).
+		if s.VelX != 0 {
+			newX := s.X + s.VelX
+			ix := int(newX)
+			if ix >= 0 && ix+s.Width()-1 < w.Width {
+				s.X = newX
+			}
+		}
+
 		// Check for landing on a platform.
 		ix, iy := int(s.X), int(s.Y)
 		feetY := iy + s.Height() - 1
@@ -55,8 +64,9 @@ func (s *Sprite) Update(w *World) bool {
 			p := &w.Platforms[i]
 			if s.VelY >= 0 && feetY >= p.Y-1 && oldFeetY <= p.Y-1 &&
 				ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
-				s.Y = float64(p.Y - s.Height())
+				s.Y = float64(p.Y - s.Height() + 1)
 				s.VelY = 0
+				s.VelX = 0
 				s.OnGround = true
 				if s.Action == Jump || s.Action == Fall {
 					s.Action = Idle
@@ -88,7 +98,7 @@ func (s *Sprite) checkGroundSupport(w *World) {
 	supported := false
 	for i := range w.Platforms {
 		p := &w.Platforms[i]
-		if feetY == p.Y && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
+		if feetY == p.Y+1 && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
 			supported = true
 			break
 		}
@@ -100,12 +110,24 @@ func (s *Sprite) checkGroundSupport(w *World) {
 	}
 }
 
+// JumpMomentum is the horizontal speed carried into a jump from walking.
+const JumpMomentum = 1.0
+
 // Jump initiates a jump if the sprite is on the ground.
+// If the sprite is walking, horizontal momentum is carried into the jump.
 func (s *Sprite) Jump() {
 	if !s.OnGround || s.OnLadder {
 		return
 	}
 	s.VelY = JumpVel
+	// Carry horizontal momentum from current action.
+	if s.Action == WalkLeft {
+		s.VelX = -JumpMomentum
+	} else if s.Action == WalkRight {
+		s.VelX = JumpMomentum
+	} else {
+		s.VelX = 0
+	}
 	s.OnGround = false
 	s.Action = Jump
 	s.Frame = 0
@@ -180,7 +202,7 @@ func (s *Sprite) Walk(dir int, w *World) {
 	hasSupport := false
 	for i := range w.Platforms {
 		p := &w.Platforms[i]
-		if feetY == p.Y && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
+		if feetY == p.Y+1 && ix >= p.X1 && ix+s.Width()-1 <= p.X2 {
 			hasSupport = true
 			break
 		}
