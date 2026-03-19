@@ -62,6 +62,8 @@ var collectionSection = map[string]string{
 	CollectionErrors.Name:     "### Known Errors",
 	CollectionDecisions.Name:  "### Architectural Decisions",
 	CollectionCodebase.Name:   "### Codebase Context",
+	CollectionLessons.Name:    "### Cross-Story Lessons",
+	CollectionPRDLessons.Name: "### PRD Quality Lessons",
 }
 
 // RetrieveContext queries all memory collections for content relevant to a story,

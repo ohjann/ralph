@@ -75,7 +75,9 @@ var (
 	CollectionCompletions = Collection{Name: "ralph_completions", MaxDocuments: 200}
 	CollectionErrors     = Collection{Name: "ralph_errors", MaxDocuments: 100}
 	CollectionDecisions  = Collection{Name: "ralph_decisions", MaxDocuments: 100}
-	CollectionCodebase   = Collection{Name: "ralph_codebase", MaxDocuments: 300}
+	CollectionCodebase    = Collection{Name: "ralph_codebase", MaxDocuments: 300}
+	CollectionLessons    = Collection{Name: "ralph_lessons", MaxDocuments: 100}
+	CollectionPRDLessons = Collection{Name: "ralph_prd_lessons", MaxDocuments: 50}
 )
 
 // AllCollections returns all predefined collections.
@@ -86,6 +88,8 @@ func AllCollections() []Collection {
 		CollectionErrors,
 		CollectionDecisions,
 		CollectionCodebase,
+		CollectionLessons,
+		CollectionPRDLessons,
 	}
 }
 

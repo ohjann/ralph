@@ -18,6 +18,8 @@ var CollectionCaps = map[string]int{
 	CollectionErrors.Name:      CollectionErrors.MaxDocuments,
 	CollectionDecisions.Name:   CollectionDecisions.MaxDocuments,
 	CollectionCodebase.Name:    CollectionCodebase.MaxDocuments,
+	CollectionLessons.Name:     CollectionLessons.MaxDocuments,
+	CollectionPRDLessons.Name:  CollectionPRDLessons.MaxDocuments,
 }
 
 // DeduplicateInsert inserts a document into a collection with deduplication.
