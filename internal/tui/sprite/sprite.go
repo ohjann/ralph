@@ -242,6 +242,8 @@ func NewSprite(x, y float64) *Sprite {
 // Each pair of pixel rows is rendered as one line of half-block characters (▀/▄).
 // Each character encodes two vertical pixels using fg (top) and bg (bottom) colors.
 // This gives square-looking pixels since terminal chars are ~2x taller than wide.
+// Cells where only one pixel has color are rendered as transparent (space) to avoid
+// the empty half showing the terminal's default background over underlying content.
 func (s *Sprite) Frames() []string {
 	frames := actionFrames[s.Action]
 	if len(frames) == 0 {
@@ -258,17 +260,15 @@ func (s *Sprite) Frames() []string {
 		for col := 0; col < SpriteWidth; col++ {
 			top := f.Pixels[topRow][col]
 			bot := f.Pixels[botRow][col]
-			if top == "" && bot == "" {
-				buf.WriteRune(' ')
-			} else if top != "" && bot != "" {
+			if top != "" && bot != "" {
 				style := lipgloss.NewStyle().Foreground(top).Background(bot)
 				buf.WriteString(style.Render("▀"))
-			} else if top != "" {
-				style := lipgloss.NewStyle().Foreground(top)
-				buf.WriteString(style.Render("▀"))
 			} else {
-				style := lipgloss.NewStyle().Foreground(bot)
-				buf.WriteString(style.Render("▄"))
+				// Both empty, or only one pixel colored — treat as transparent.
+				// A half-block with only foreground set would show the terminal's
+				// default background in the empty half, creating visible artifacts
+				// when the sprite overlays other content.
+				buf.WriteRune(' ')
 			}
 		}
 		result[row] = buf.String()
