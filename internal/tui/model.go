@@ -978,7 +978,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activityPath := filepath.Join(m.cfg.LogDir, "summary-activity.log")
 			cmds = append(cmds, pollActivityCmd(activityPath))
 		}
-		if m.phase == phaseParallel && m.coord != nil && m.activeWorkerView > 0 {
+		if m.phase == phaseParallel && m.coord != nil && m.activeWorkerView > 0 && m.coord.IsWorkerActive(m.activeWorkerView) {
 			activityPath := m.coord.GetWorkerActivityPath(m.activeWorkerView)
 			if activityPath != "" {
 				wID := m.activeWorkerView
@@ -1644,7 +1644,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case coordinator.WorkerActivityMsg:
-		// Always update the cache with latest content
+		// Don't overwrite cached content with empty content — this happens
+		// when the workspace is destroyed but the poll fires one more time.
+		if msg.Content == "" {
+			break
+		}
 		m.workerLogCache[msg.WorkerID] = msg.Content
 		if msg.WorkerID == m.activeWorkerView {
 			m.claudeContent = msg.Content

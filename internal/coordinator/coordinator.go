@@ -618,6 +618,17 @@ func (c *Coordinator) CleanupAll(ctx context.Context) {
 	}
 }
 
+// IsWorkerActive returns true if the worker exists and is still running (not done/failed).
+func (c *Coordinator) IsWorkerActive(wID worker.WorkerID) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w, ok := c.workers[wID]
+	if !ok {
+		return false
+	}
+	return w.State != worker.WorkerDone && w.State != worker.WorkerFailed
+}
+
 // GetWorkerActivityPath returns the activity log path for a given worker.
 func (c *Coordinator) GetWorkerActivityPath(wID worker.WorkerID) string {
 	c.mu.Lock()
