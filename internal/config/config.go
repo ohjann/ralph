@@ -172,6 +172,9 @@ func Parse(args []string) (*Config, error) {
 		case "--no-judge":
 			cfg.JudgeEnabled = false
 			i++
+		case "--no-guy":
+			cfg.SpriteEnabled = false
+			i++
 		case "--workers":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--workers requires a number")
@@ -628,6 +631,7 @@ Options:
   --notify <topic>               Send push notifications via ntfy.sh to given topic
   --ntfy-server <url>            Self-hosted ntfy server URL (default: https://ntfy.sh)
   --enable-monitoring            Enable ntfy + status page using .ralph/.env config
+  --no-guy                        Disable sprite mascot overlay
   --no-architect                  Skip architect phase for all stories (go straight to implementer)
   --help, -h                      Show this help message
 

@@ -193,7 +193,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 
 	var m *sprite.Mascot
 	if cfg.SpriteEnabled {
-		m = sprite.NewMascot()
+		m = sprite.NewMascot(cfg.Workers)
 	}
 
 	return &Model{
