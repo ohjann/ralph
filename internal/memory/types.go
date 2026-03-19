@@ -54,6 +54,26 @@ func (d Document) LastConfirmed() time.Time {
 	}
 }
 
+// Confidence returns the confidence from metadata, or 1.0 if not set.
+// Only ralph_lessons and ralph_prd_lessons documents have confidence metadata.
+func (d Document) Confidence() float64 {
+	if d.Metadata == nil {
+		return 1.0
+	}
+	v, ok := d.Metadata["confidence"]
+	if !ok {
+		return 1.0
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return 1.0
+	}
+	if f > 1.0 {
+		return 1.0
+	}
+	return f
+}
+
 // StoryID returns the story_id from metadata, or empty string if not set.
 func (d Document) StoryID() string {
 	if d.Metadata == nil {

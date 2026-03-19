@@ -158,10 +158,11 @@ func RetrieveContext(
 				continue
 			}
 			recencyWeight := computeRecencyWeight(r.Document.LastConfirmed(), now)
+			confidenceWeight := confidenceWeightForCollection(cr.name, r.Document)
 			ranked = append(ranked, rankedResult{
 				result:     r,
 				collection: cr.name,
-				combined:   r.Score * recencyWeight,
+				combined:   r.Score * recencyWeight * confidenceWeight,
 			})
 		}
 	}
@@ -203,6 +204,21 @@ func RetrieveContext(
 		TotalFound: len(ranked),
 		MaxTokens:  opts.MaxTokens,
 	}, nil
+}
+
+// isLessonCollection returns true if the collection has confidence metadata.
+func isLessonCollection(name string) bool {
+	return name == CollectionLessons.Name || name == CollectionPRDLessons.Name
+}
+
+// confidenceWeightForCollection returns the confidence weight to apply in ranking.
+// For lesson collections, returns min(confidence, 1.0) from document metadata.
+// For other collections, returns 1.0 (no effect on ranking).
+func confidenceWeightForCollection(collName string, doc Document) float64 {
+	if !isLessonCollection(collName) {
+		return 1.0
+	}
+	return doc.Confidence()
 }
 
 // computeRecencyWeight returns a decay factor based on how many days ago

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/eoghanhynes/ralph/internal/costs"
@@ -210,21 +211,8 @@ func TestBuildSynthesisPrompt(t *testing.T) {
 		"cross-story lessons",
 	}
 	for _, check := range checks {
-		if !synthContains(prompt, check) {
+		if !strings.Contains(prompt, check) {
 			t.Errorf("prompt missing %q", check)
 		}
 	}
-}
-
-func synthContains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && synthContainsSubstr(s, substr))
-}
-
-func synthContainsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

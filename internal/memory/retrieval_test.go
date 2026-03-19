@@ -545,3 +545,147 @@ func TestNewRetriever_NilEmbedder(t *testing.T) {
 		t.Error("expected nil retriever for nil embedder")
 	}
 }
+
+func TestIsLessonCollection(t *testing.T) {
+	if !isLessonCollection(CollectionLessons.Name) {
+		t.Error("expected ralph_lessons to be a lesson collection")
+	}
+	if !isLessonCollection(CollectionPRDLessons.Name) {
+		t.Error("expected ralph_prd_lessons to be a lesson collection")
+	}
+	if isLessonCollection(CollectionPatterns.Name) {
+		t.Error("expected ralph_patterns NOT to be a lesson collection")
+	}
+}
+
+func TestConfidenceWeightForCollection_NonLesson(t *testing.T) {
+	doc := Document{Metadata: map[string]interface{}{"confidence": 0.3}}
+	w := confidenceWeightForCollection(CollectionPatterns.Name, doc)
+	if w != 1.0 {
+		t.Errorf("expected 1.0 for non-lesson collection, got %f", w)
+	}
+}
+
+func TestConfidenceWeightForCollection_Lesson(t *testing.T) {
+	doc := Document{Metadata: map[string]interface{}{"confidence": 0.8}}
+	w := confidenceWeightForCollection(CollectionLessons.Name, doc)
+	if math.Abs(w-0.8) > 0.001 {
+		t.Errorf("expected 0.8 for lesson with confidence 0.8, got %f", w)
+	}
+}
+
+func TestConfidenceWeightForCollection_LessonNoMetadata(t *testing.T) {
+	doc := Document{}
+	w := confidenceWeightForCollection(CollectionLessons.Name, doc)
+	if w != 1.0 {
+		t.Errorf("expected 1.0 for lesson with no metadata, got %f", w)
+	}
+}
+
+func TestRetrieveContext_LessonsWithConfidenceWeighting(t *testing.T) {
+	now := time.Now()
+	meta := func(conf float64) map[string]interface{} {
+		return map[string]interface{}{
+			"last_confirmed": now.Format(time.RFC3339),
+			"confidence":     conf,
+		}
+	}
+
+	qr := map[string][]QueryResult{
+		CollectionLessons.Name: {
+			{
+				Document: Document{ID: "high-conf", Content: "high confidence lesson", Metadata: meta(0.95)},
+				Distance: 0.1, // Score = 0.9
+			},
+			{
+				Document: Document{ID: "low-conf", Content: "low confidence lesson", Metadata: meta(0.4)},
+				Distance: 0.1, // Score = 0.9
+			},
+		},
+		CollectionPatterns.Name: {
+			{
+				Document: Document{ID: "pattern1", Content: "a pattern", Metadata: map[string]interface{}{
+					"last_confirmed": now.Format(time.RFC3339),
+				}},
+				Distance: 0.15, // Score = 0.85
+			},
+		},
+	}
+	// Fill remaining collections
+	for _, col := range AllCollections() {
+		if _, ok := qr[col.Name]; !ok {
+			qr[col.Name] = nil
+		}
+	}
+
+	srv := newFakeChromaServer(qr, nil)
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	embedder := &fakeEmbedder{embedding: []float64{0.1}}
+
+	result, err := RetrieveContext(context.Background(), client, embedder, "test story", "test desc", nil, RetrievalOptions{
+		MinScore:  0.5,
+		TopK:      5,
+		MaxTokens: 5000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All 3 results should appear (none excluded)
+	if len(result.DocRefs) != 3 {
+		t.Fatalf("expected 3 doc refs, got %d", len(result.DocRefs))
+	}
+
+	// Verify lessons appear in results
+	foundHighConf := false
+	foundLowConf := false
+	for _, ref := range result.DocRefs {
+		if ref.DocID == "high-conf" {
+			foundHighConf = true
+		}
+		if ref.DocID == "low-conf" {
+			foundLowConf = true
+		}
+	}
+	if !foundHighConf {
+		t.Error("expected high-confidence lesson in results")
+	}
+	if !foundLowConf {
+		t.Error("expected low-confidence lesson in results (deprioritized, not excluded)")
+	}
+
+	// High-confidence lesson (0.9 * ~1.0 * 0.95 ≈ 0.855) should rank higher than
+	// low-confidence lesson (0.9 * ~1.0 * 0.4 ≈ 0.36)
+	var highConfScore, lowConfScore float64
+	for _, ref := range result.DocRefs {
+		if ref.DocID == "high-conf" {
+			highConfScore = ref.Score
+		}
+		if ref.DocID == "low-conf" {
+			lowConfScore = ref.Score
+		}
+	}
+	if highConfScore <= lowConfScore {
+		t.Errorf("high-confidence lesson (%.3f) should rank above low-confidence lesson (%.3f)", highConfScore, lowConfScore)
+	}
+
+	// Pattern (non-lesson) should NOT be affected by confidence weighting
+	// Pattern: 0.85 * ~1.0 * 1.0 ≈ 0.85 (no confidence penalty)
+	var patternScore float64
+	for _, ref := range result.DocRefs {
+		if ref.DocID == "pattern1" {
+			patternScore = ref.Score
+		}
+	}
+	// Pattern should rank higher than low-confidence lesson
+	if patternScore <= lowConfScore {
+		t.Errorf("pattern (%.3f) should rank above low-confidence lesson (%.3f)", patternScore, lowConfScore)
+	}
+
+	// Verify markdown output includes lesson section
+	if !strings.Contains(result.Text, "### Cross-Story Lessons") {
+		t.Error("expected Cross-Story Lessons section in markdown output")
+	}
+}
