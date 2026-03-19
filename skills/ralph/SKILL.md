@@ -22,7 +22,63 @@ If none of the above are available, ask the user to provide a plan.
 
 ---
 
-## Step 2: Where to Write prd.json
+## Step 2: Check for Learned PRD Lessons
+
+Before generating prd.json, check if `.ralph/lessons.json` exists in the project root. If it exists, read the `prd_lessons` array and incorporate applicable lessons into the generated PRD.
+
+### How to incorporate lessons
+
+1. Read `.ralph/lessons.json` and extract the `prd_lessons` array
+2. If the file does not exist or `prd_lessons` is empty/missing, skip this step entirely — do not error
+3. Sort lessons by `confidence` descending
+4. Take at most **10** lessons to avoid overwhelming the PRD
+5. Lessons with `confidence >= 0.7` are **constraints** — apply them as firm rules when generating stories
+6. Lessons with `confidence < 0.7` are **suggestions** — consider them but do not enforce strictly
+
+### Learned PRD Constraints
+
+When lessons are found, add a `learnedConstraints` section to the generated prd.json inside the top-level `constraints` array, formatted as:
+
+For high-confidence lessons (>= 0.7):
+```
+"[LEARNED] <recommendation> (confidence: <confidence>, confirmed <times_confirmed>x)"
+```
+
+For lower-confidence lessons (< 0.7):
+```
+"[SUGGESTION] <recommendation> (confidence: <confidence>)"
+```
+
+### Example lessons.json prd_lessons entry
+
+```json
+{
+  "id": "prd-sizing-001",
+  "category": "sizing",
+  "pattern": "Stories touching more than 8 files often fail on first attempt",
+  "evidence": "3 out of 4 large stories required debugger intervention",
+  "recommendation": "Split stories that touch more than 8 files into smaller units",
+  "confidence": 0.85,
+  "times_confirmed": 3,
+  "created_at": "2025-06-15T10:00:00Z"
+}
+```
+
+This would produce the constraint:
+```
+"[LEARNED] Split stories that touch more than 8 files into smaller units (confidence: 0.85, confirmed 3x)"
+```
+
+### Lesson categories to watch for
+
+- **sizing** — Story size and scope guidance
+- **criteria** — Acceptance criteria quality patterns
+- **ordering** — Story dependency and ordering issues
+- **missing_criteria** — Criteria that should have been included but were missed
+
+---
+
+## Step 3: Where to Write prd.json
 
 **CRITICAL: Always write `prd.json` to the PROJECT ROOT directory (the current working directory).**
 
@@ -315,6 +371,7 @@ Each is one focused change that can be completed and verified independently.
 
 Before writing prd.json, verify:
 
+- [ ] **Learned lessons checked** (read `.ralph/lessons.json` prd_lessons if it exists, skip gracefully if not)
 - [ ] **Output path is project root** (not `.claude/`, not `skills/`, not any subdirectory)
 - [ ] **Previous run archived** (if prd.json exists with different branchName, archive it first)
 - [ ] Each story is a coherent, self-contained change (one concern end-to-end)
