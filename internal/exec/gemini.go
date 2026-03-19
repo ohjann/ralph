@@ -17,7 +17,7 @@ type GeminiResult struct {
 }
 
 // geminiModel is the default model name used for Gemini CLI invocations.
-const geminiModel = "gemini-2.5-flash"
+const geminiModel = "gemini-2.5-pro"
 
 // usageMetadata matches the Gemini API response usage metadata structure.
 type usageMetadata struct {
@@ -33,7 +33,7 @@ type geminiJSONResponse struct {
 
 // runGeminiOnce executes a single gemini invocation.
 func runGeminiOnce(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "gemini", "-p", prompt, "-o", "text")
+	cmd := exec.CommandContext(ctx, "gemini", "-m", geminiModel, "-p", prompt, "-o", "text")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), err
