@@ -774,19 +774,19 @@ func synthesisCmd(ctx context.Context, cfg *config.Config, client *memory.Chroma
 		evts, _ := events.Load(cfg.ProjectDir)
 
 		// Run synthesis
-		lessons, err := memory.SynthesizeRunLessons(ctx, cfg.ProjectDir, runSummary, states, evts)
+		result, err := memory.SynthesizeRunLessons(ctx, cfg.ProjectDir, runSummary, states, evts)
 		if err != nil {
 			return synthesisCompleteMsg{Err: fmt.Errorf("synthesis: %w", err)}
 		}
 
 		// Embed lessons if we have a client and embedder
-		if len(lessons) > 0 && client != nil && embedder != nil {
-			if err := memory.EmbedLessons(ctx, client, embedder, lessons, cfg.ProjectDir); err != nil {
-				return synthesisCompleteMsg{Lessons: lessons, Err: fmt.Errorf("embed lessons: %w", err)}
+		if len(result.Lessons) > 0 && client != nil && embedder != nil {
+			if err := memory.EmbedLessons(ctx, client, embedder, result.Lessons, cfg.ProjectDir); err != nil {
+				return synthesisCompleteMsg{Lessons: result.Lessons, Err: fmt.Errorf("embed lessons: %w", err)}
 			}
 		}
 
-		return synthesisCompleteMsg{Lessons: lessons}
+		return synthesisCompleteMsg{Lessons: result.Lessons}
 	})
 }
 
