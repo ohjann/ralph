@@ -410,6 +410,49 @@ judge-prompt.md     Review template for Gemini judge
 skills/ralph/       Claude Code skill for converting plans to prd.json
 ```
 
+### Workspace Setup & Teardown
+
+When using parallel workers (`--workers`), each worker runs in an isolated jj workspace. If your project needs custom initialization (e.g. symlinking `node_modules`, copying `.env` files, starting a dev server), you can add scripts to your project's `.ralph/` directory:
+
+- **`.ralph/workspace-setup.sh`** — runs after workspace creation and state copy
+- **`.ralph/workspace-teardown.sh`** — runs before workspace destruction (best-effort, errors ignored)
+
+Both scripts receive the `WORKSPACE_DIR` environment variable pointing to the worker's workspace root. The setup script also receives `RALPH_WORKSPACE=1`.
+
+**Example** (Node.js monorepo):
+
+```bash
+#!/bin/bash
+# .ralph/workspace-setup.sh
+set -e
+WORKSPACE_DIR="${WORKSPACE_DIR:-$(pwd)}"
+MAIN_DIR="$(jj workspace root --name default 2>/dev/null || jj root)"
+
+# Symlink node_modules (instant, shared across workers)
+if [ -d "$MAIN_DIR/node_modules" ] && [ ! -e "$WORKSPACE_DIR/node_modules" ]; then
+    ln -s "$MAIN_DIR/node_modules" "$WORKSPACE_DIR/node_modules"
+fi
+
+# Copy .env files
+if [ -f "$MAIN_DIR/.env" ] && [ ! -f "$WORKSPACE_DIR/.env" ]; then
+    cp "$MAIN_DIR/.env" "$WORKSPACE_DIR/.env"
+fi
+```
+
+```bash
+#!/bin/bash
+# .ralph/workspace-teardown.sh
+# Kill any background processes started by setup
+WORKSPACE_DIR="${WORKSPACE_DIR:-$(pwd)}"
+PID_FILE="$WORKSPACE_DIR/.ralph/dev-server.pid"
+if [ -f "$PID_FILE" ]; then
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+fi
+```
+
+If no scripts exist, Ralph skips this step silently — they're entirely optional.
+
 ## Key Files (In Your Project)
 
 Ralph creates and manages these files in the project directory:
@@ -426,6 +469,8 @@ Ralph creates and manages these files in the project directory:
 | `.ralph/checkpoint.json` | Orchestration checkpoint for resume |
 | `.ralph/memory/` | ChromaDB vector database storage |
 | `.ralph/run-history.json` | Accumulated run summaries with cost data |
+| `.ralph/workspace-setup.sh` | (Optional) Custom worker workspace initialization |
+| `.ralph/workspace-teardown.sh` | (Optional) Custom worker workspace cleanup |
 
 ## References
 
