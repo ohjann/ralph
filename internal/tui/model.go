@@ -74,7 +74,8 @@ type Model struct {
 	judgeContent    string
 	qualityContent  string
 
-	costsContent string
+	costsContent        string
+	antiPatternsContent string
 
 	// Story data for the stories panel
 	storyDisplayInfos  []StoryDisplayInfo
@@ -1136,6 +1137,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, codebaseScanCmd(m.ctx, m.cfg, m.chromaClient, m.memoryEmbedder))
 			}
 			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
+			cmds = append(cmds, detectAntiPatternsCmd(m.ctx, m.chromaClient))
 		}
 
 	case codebaseScanDoneMsg:
@@ -1149,6 +1151,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case memoryStatsMsg:
 		m.memoryContent = renderMemoryWithRetrieval(msg.Content, m.memoryRetrieval)
+
+	case antiPatternsMsg:
+		m.antiPatternsContent = renderAntiPatternsContent(msg.Patterns)
 
 	case costUpdateMsg:
 		if m.runCosting != nil {
@@ -1176,6 +1181,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh memory stats immediately after embed so counts update
 		if m.chromaClient != nil {
 			cmds = append(cmds, memoryStatsCmd(m.ctx, m.chromaClient, m.cfg.Memory.Disabled, withEmbedder(m.memoryEmbedder != nil)))
+			cmds = append(cmds, detectAntiPatternsCmd(m.ctx, m.chromaClient))
 		}
 
 	case nextStoryMsg:
@@ -2062,9 +2068,10 @@ func (m *Model) View() string {
 		JudgeContent:     m.judgeContent,
 		QualityContent:   m.qualityContent,
 		MemoryContent:    m.memoryContent,
-		CostsContent:     m.costsContent,
-		RateLimitContent: renderRateLimitContent(m.rateLimitInfo),
-		Phase:            m.phase,
+		CostsContent:        m.costsContent,
+		AntiPatternsContent: m.antiPatternsContent,
+		RateLimitContent:    renderRateLimitContent(m.rateLimitInfo),
+		Phase:               m.phase,
 	}
 	ctxPanel := renderContextPanel(
 		&m.contextVP,

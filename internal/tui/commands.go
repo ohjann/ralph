@@ -751,3 +751,18 @@ func renderCapBar(count, max, width int) string {
 	}
 	return "[" + string(bar) + "]"
 }
+
+// detectAntiPatternsCmd runs anti-pattern detection against ChromaDB and returns results.
+func detectAntiPatternsCmd(ctx context.Context, client *memory.ChromaClient) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return antiPatternsMsg{}
+		}
+		patterns, err := memory.DetectAntiPatterns(ctx, client)
+		if err != nil {
+			debuglog.Log("anti-pattern detection failed (non-fatal): %v", err)
+			return antiPatternsMsg{}
+		}
+		return antiPatternsMsg{Patterns: patterns}
+	}
+}

@@ -117,6 +117,11 @@ type MemoryRetrievalMsg struct {
 	MaxTokens  int // token budget used
 }
 
+// Anti-pattern detection
+type antiPatternsMsg struct {
+	Patterns []memory.AntiPattern
+}
+
 // Cost tracking
 type costUpdateMsg struct {
 	Usage   costs.TokenUsage

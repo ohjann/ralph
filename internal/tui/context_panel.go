@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/eoghanhynes/ralph/internal/memory"
 )
 
 // contextMode determines what the context panel shows.
@@ -39,9 +40,10 @@ type contextPanelData struct {
 	JudgeContent     string
 	QualityContent   string
 	MemoryContent    string
-	CostsContent     string
-	RateLimitContent string
-	Phase            phase
+	CostsContent        string
+	AntiPatternsContent string
+	RateLimitContent    string
+	Phase               phase
 }
 
 func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, width, height int) string {
@@ -103,6 +105,9 @@ func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, 
 		}
 		if data.RateLimitContent != "" {
 			content = data.RateLimitContent + "\n" + content
+		}
+		if data.AntiPatternsContent != "" {
+			content = content + "\n" + data.AntiPatternsContent
 		}
 	}
 
@@ -532,4 +537,55 @@ func autoSelectContextMode(p phase, judgeContent, qualityContent string) context
 		}
 		return contextProgress
 	}
+}
+
+// categoryIcon returns a compact icon for an anti-pattern category.
+func categoryIcon(category string) string {
+	switch category {
+	case "fragile_area":
+		return "🔥"
+	case "flaky_test":
+		return "🎲"
+	case "high_friction":
+		return "🧱"
+	case "common_oversight":
+		return "👁"
+	default:
+		return "⚠"
+	}
+}
+
+// renderAntiPatternsContent builds the anti-patterns section for the Usage tab.
+func renderAntiPatternsContent(patterns []memory.AntiPattern) string {
+	if len(patterns) == 0 {
+		return "  Detected Anti-Patterns (0)\n  " + strings.Repeat("─", 40) + "\n  No anti-patterns detected"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  Detected Anti-Patterns (%d)\n", len(patterns)))
+	sb.WriteString("  " + strings.Repeat("─", 40) + "\n")
+
+	const maxFiles = 3
+	for _, ap := range patterns {
+		icon := categoryIcon(ap.Category)
+		// One line: icon description (Nx)
+		sb.WriteString(fmt.Sprintf("  %s %s (%dx)\n", icon, ap.Description, ap.OccurrenceCount))
+
+		// Affected files on next line, truncated
+		if len(ap.FilesAffected) > 0 {
+			shown := ap.FilesAffected
+			extra := 0
+			if len(shown) > maxFiles {
+				extra = len(shown) - maxFiles
+				shown = shown[:maxFiles]
+			}
+			fileStr := strings.Join(shown, ", ")
+			if extra > 0 {
+				fileStr += fmt.Sprintf(" +%d more", extra)
+			}
+			sb.WriteString(fmt.Sprintf("    files: %s\n", fileStr))
+		}
+	}
+
+	return sb.String()
 }
