@@ -160,6 +160,10 @@ type Model struct {
 	clarifyAnswers  []string // answers collected so far
 	clarifyIndex    int      // index of current question being answered
 
+	// Interactive story creation
+	storyCreator *interactive.StoryCreator
+	livePRD      *prd.PRD // reference to the in-memory PRD for dynamic story injection
+
 	// Status bar (vim-like, bottom of screen)
 	statusText  string
 	statusLevel statusLevel
@@ -235,6 +239,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		hintInput:      hi,
 		taskInput:      ti,
 		mascot:         m,
+		storyCreator:   interactive.NewStoryCreator(),
 	}
 }
 
@@ -535,6 +540,11 @@ func (m *Model) Init() tea.Cmd {
 	}
 	if m.cfg.NoPRD {
 		// Skip archive and DAG analysis — go straight to interactive mode.
+		// Load the PRD written by main.go so interactive tasks can be appended.
+		if p, err := prd.Load(m.cfg.PRDFile); err == nil {
+			m.livePRD = p
+			m.storyDAG = &dag.DAG{Nodes: make(map[string]*dag.StoryNode)}
+		}
 		m.phase = phaseInteractive
 		m.claudeContent += "── Interactive mode — add tasks with the input bar ──\n"
 		m.claudeVP.SetContent(m.claudeContent)
@@ -824,6 +834,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					m.storyDAG = dag.FromCheckpoint(cp.DAG, p.UserStories)
+					m.livePRD = p
 
 					var incomplete []prd.UserStory
 					for _, s := range p.UserStories {
@@ -1339,25 +1350,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusText = ""
 
 	case clarifyResultMsg:
+		dispatchReady := false
 		if msg.Err != nil {
 			// Clarification failed — fall back to dispatching task as-is with warning
 			debuglog.Log("clarifyResultMsg: error — falling back to direct dispatch: %v", msg.Err)
 			m.claudeContent += fmt.Sprintf("── Clarification failed (%v), dispatching task as-is ──\n", msg.Err)
-			m.claudeVP.SetContent(m.claudeContent)
-			m.claudeVP.GotoBottom()
-			m.prevClaudeLen = len(m.claudeContent)
-			// Treat as READY — proceed to story creation (P55-006)
 			m.statusText = "⚠ Clarification failed, task dispatched as-is"
 			m.statusLevel = statusWarn
 			cmds = append(cmds, tea.Tick(5*time.Second, func(time.Time) tea.Msg {
 				return statusClearMsg{}
 			}))
+			dispatchReady = true
 		} else if msg.Ready {
-			// Task is clear — proceed to story creation (P55-006)
-			m.claudeContent += "── Task is clear, proceeding to story creation ──\n"
-			m.claudeVP.SetContent(m.claudeContent)
-			m.claudeVP.GotoBottom()
-			m.prevClaudeLen = len(m.claudeContent)
+			// Task is clear — proceed to story creation
+			m.claudeContent += "── Task is clear, creating story ──\n"
+			dispatchReady = true
 		} else {
 			// Questions returned — enter clarification Q&A mode
 			m.clarifyingTask = msg.TaskText
@@ -1382,6 +1389,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Update stories panel to show clarifying status
 			m.rebuildStoryDisplayInfos()
+		}
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+
+		// Create and dispatch the interactive story when task is ready
+		if dispatchReady && m.livePRD != nil && m.storyDAG != nil {
+			// Bootstrap coordinator if none exists (pure interactive / post-PRD mode)
+			if m.coord == nil {
+				m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, nil)
+				m.coord.SetMemory(m.chromaClient, m.memoryEmbedder)
+				m.coord.SetRunCosting(m.runCosting)
+				m.coord.SetNotifier(m.notifier)
+				debuglog.Log("bootstrapped coordinator for interactive task dispatch")
+			}
+			story := m.storyCreator.CreateAndAppend(msg.TaskText, "", m.livePRD, m.storyDAG)
+			m.coord.AddStory(&story)
+			m.totalStories++
+			m.coord.ScheduleReady(m.ctx)
+			m.claudeContent += fmt.Sprintf("── Interactive task %s dispatched ──\n", story.ID)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+			debuglog.Log("dispatched interactive task %s: %s", story.ID, story.Title)
+			// Ensure we're listening for worker updates
+			if m.coord.ActiveCount() > 0 {
+				cmds = append(cmds, m.coord.ListenCmd())
+			}
+			// Switch to phaseParallel since there's now an active worker
+			if m.phase == phaseInteractive {
+				m.phase = phaseParallel
+				debuglog.Log("switching from phaseInteractive to phaseParallel for interactive task dispatch")
+			}
 		}
 
 	case pipelineEmbedDoneMsg:
@@ -1633,6 +1673,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showCompletionReport()
 				return m, nil
 			}
+			m.livePRD = p
 			// Filter to incomplete stories only
 			var incomplete []prd.UserStory
 			for _, s := range p.UserStories {
