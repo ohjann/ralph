@@ -990,9 +990,21 @@ worker, coordinator, and TUI.
 
 ---
 
-## Phase 5: Learning Loop / Self-Improving System (Revised)
+## Phase 5: Learning Loop / Self-Improving System (Revised) ✅ COMPLETE
 
 **Impact: Medium-High | Complexity: Medium | Dependencies: Phase 2 (vector DB — already complete), Phase 3 (run history — already complete)**
+
+> **Status: Implemented** (completed 2026-03-23 on branch `ralph/phase5-learning-loop`).
+> All 12 stories passed. Key deliverables:
+> - `ralph_lessons` and `ralph_prd_lessons` ChromaDB collections with full dedup/decay/cap hygiene
+> - `SynthesizeRunLessons()` — post-run Gemini analysis extracting cross-story lessons
+> - `EmbedLessons()` — stores lessons in ChromaDB with confidence tracking and dedup
+> - `DetectAntiPatterns()` — aggregates `ralph_errors` to flag fragile areas, flaky tests, common oversights
+> - Anti-pattern warnings injected into `BuildPrompt()` for stories touching flagged files
+> - Anti-patterns displayed in TUI Usage tab
+> - PRD-quality lessons extracted and stored in `ralph_prd_lessons` for `/ralph` skill feedback
+> - `/ralph` skill reads `.ralph/lessons.json` to incorporate learned constraints into PRD generation
+> - Confidence-weighted ranking in retrieval pipeline for lessons
 
 > **Revision note (2026-03-19):** The original Phase 5 was written before
 > Phase 2 was implemented. The memory pipeline already provides cross-run
@@ -1160,6 +1172,165 @@ batch per PRD run) so a smaller cap is appropriate.
 existing memory pipeline. Modifications to runner (prompt injection), TUI
 (anti-pattern display), and skill invocation. Two new ChromaDB collections
 (`ralph_lessons`, `ralph_prd_lessons`).
+
+---
+
+## Phase 5.5: Interactive Task Mode
+
+**Impact: High | Complexity: Medium | Dependencies: Phase 4 (agent roles — already complete), Phase 1 (story state — already complete), Phase 5 (learning loop — already complete, memory system used for interactive tasks)**
+
+> **Added 2026-03-23.** Ralph currently requires a pre-defined prd.json to
+> operate. This phase makes prd.json optional and adds a persistent input
+> bar to the TUI so users can inject tasks on the fly. Each task is
+> independent (no DAG dependencies) and dispatched to the next available
+> worker. This transforms Ralph from a batch executor into an interactive
+> coding assistant that still leverages the full orchestration stack
+> (workspace isolation, memory, judge, cost tracking).
+
+### Goal
+
+Allow users to dynamically add tasks to Ralph at any time — whether
+starting from an empty session or injecting ad-hoc work alongside a
+running PRD. Tasks entered interactively bypass the DAG and are dispatched
+immediately to available workers.
+
+### Context for Builder
+
+The TUI already has an input mechanism — the "hint" field lets users send
+guidance to stuck workers. The coordinator's `ScheduleReady()` polls for
+stories with satisfied dependencies each tick. A story with no `dependsOn`
+is immediately ready. The worker, memory, merge, and workspace systems are
+all story-agnostic — they don't care whether a `UserStory` came from
+prd.json or was created at runtime.
+
+Key existing touch points:
+- `cmd/ralph/main.go`: validates prd.json exists at startup
+- `internal/tui/model.go`: TUI model, phase state machine
+- `internal/tui/commands.go`: TUI command handlers
+- `internal/coordinator/coordinator.go`: worker scheduling
+- `internal/prd/prd.go`: PRD struct and story management
+
+### What to Build
+
+#### 5.5a. Make prd.json Optional
+
+Relax validation in `cmd/ralph/main.go`:
+- If no prd.json is provided, start with an empty `PRD` struct (project
+  name defaults to the current directory name, empty story list)
+- Skip DAG analysis phase when starting without a PRD
+- Skip archive phase when there's nothing to archive
+- The TUI starts in an "interactive" state with the input bar focused
+
+When a prd.json IS provided, behavior is unchanged — stories load and
+execute as normal, but the input bar is still available.
+
+#### 5.5b. Task Input Bar
+
+Add a persistent text input to the TUI (below the stories panel or as a
+dedicated input area):
+- Always visible, always accepting input regardless of current phase
+- User types a task description and hits Enter
+- Input is cleared and the task enters the clarification flow (5.5c)
+- The hint input field remains separate — hints go to running workers,
+  tasks go to the coordinator
+
+Key bindings:
+- `Tab` or a dedicated key to toggle focus between task input and hint input
+- `Enter` submits the task
+- `Esc` clears the input without submitting
+
+#### 5.5c. Clarification Step
+
+Before dispatching, run a lightweight Claude call to assess whether the
+task description is sufficient:
+
+1. Send the user's one-liner to Claude with a prompt like:
+   "Given this task and the current codebase, do you have any clarifying
+   questions? If the task is clear enough to proceed, respond with READY.
+   Otherwise, list up to 3 specific questions."
+2. If Claude responds with READY, proceed directly to dispatch (5.5d)
+3. If Claude returns questions, display them in the TUI below the input bar
+4. User types answers inline (each answer submitted with Enter)
+5. Once all questions are answered, bundle the original task + Q&A into
+   the story description and dispatch
+
+The clarification prompt should include:
+- The user's task description
+- A brief codebase summary (project name, key directories — reuse what
+  `BuildPrompt()` already assembles for project context)
+- Any currently running/completed stories (for awareness of in-flight work)
+
+This is similar to the architect phase but lighter weight and interactive.
+Use Sonnet for speed.
+
+#### 5.5d. Dynamic Story Creation & Dispatch
+
+On submission (after clarification):
+1. Mint a new `UserStory` with auto-incrementing ID (e.g., `T-001`,
+   `T-002` — "T" prefix to distinguish from PRD story IDs)
+2. Title: first ~80 chars of the user's input (or a Claude-generated
+   summary from the clarification step)
+3. Description: full input + any Q&A from clarification
+4. `DependsOn`: empty (no DAG edges)
+5. `Priority`: 0 (immediately ready)
+6. Append to `prd.UserStories`
+7. `ScheduleReady()` picks it up on the next tick — no DAG edges means
+   immediately schedulable
+
+The story flows through the existing worker pipeline: workspace creation,
+`BuildPrompt()` with memory context, implementer execution, optional
+judge, merge back.
+
+#### 5.5e. TUI Updates
+
+**Stories panel**: grows dynamically as tasks are added. Interactive tasks
+show with a distinct marker:
+
+```
+⚡ T-001: fix login button not responding on mobile    ⠋ running
+⚡ T-002: add rate limiting to /api/upload endpoint    ⏳ clarifying
+✅ P5-001: Implement auth middleware                   (from PRD)
+✅ P5-002: Add user settings page                      (from PRD)
+⚡ T-003: refactor database connection pooling         ✅ done
+```
+
+**Clarification display**: when a task is in the clarification step, show
+the questions and answer input in the context panel or a dedicated area.
+
+**Phase handling**: the TUI needs a phase that supports "idle but accepting
+input." Currently the phase machine is linear (init → ... → done). Add
+an `phaseInteractive` that runs alongside other phases — it's not a
+sequential step but a persistent capability.
+
+#### 5.5f. Session Persistence
+
+- Interactive tasks are appended to `prd.UserStories`, so they benefit
+  from the existing checkpoint system
+- If Ralph is interrupted and resumed, in-progress interactive tasks
+  are restored from the checkpoint like any other story
+- On clean completion of all tasks, optionally save the session's stories
+  to a file for reference (e.g., `.ralph/session-{timestamp}.json`)
+
+### Acceptance Criteria
+
+- [ ] Ralph starts successfully without a prd.json, presenting an empty TUI with input bar
+- [ ] Tasks can be typed and submitted via the input bar at any time
+- [ ] Clarification step fires before dispatch, asking questions if the task is ambiguous
+- [ ] User can answer clarification questions inline in the TUI
+- [ ] Submitted tasks are created as `UserStory` structs and scheduled immediately
+- [ ] Tasks execute through the full worker pipeline (workspace, Claude, merge)
+- [ ] Stories panel updates dynamically as tasks are added and progress
+- [ ] Interactive tasks work alongside PRD stories when prd.json is provided
+- [ ] Interactive tasks are included in the checkpoint for crash recovery
+- [ ] Multiple tasks can run in parallel when `--workers N > 1`
+- [ ] Memory system works with interactive tasks (patterns embedded, context retrieved)
+
+### Estimated Scope
+
+~400-600 lines of Go code. Modifications to main.go (optional PRD),
+model.go (input bar, phase handling), commands.go (clarification flow,
+story creation), coordinator.go (minor — scheduling already handles this).
+One new prompt template for the clarification step. No new packages needed.
 
 ---
 
@@ -1608,7 +1779,9 @@ Phase 1 (Story State + Checkpoint) ✅
   │      │
   │      ├──→ Phase 4 (Agent Specialization) ✅
   │      │
-  │      ├──→ Phase 5 (Learning Loop — revised)
+  │      ├──→ Phase 5 (Learning Loop) ✅
+  │      │      │
+  │      │      ├──→ Phase 5.5 (Interactive Task Mode)
   │      │      │
   │      │      └──→ Phase 10 (Auto-Split Stuck Stories)
   │      │
@@ -1634,17 +1807,20 @@ Phase 1 (Story State + Checkpoint) ✅
 | 3rd   | Phase 2: Vector Memory ✅ | Done | Transformative capability |
 | 4th   | Phase 3.1: 1M Context Recalibration ✅ | Done | Recalibrate defaults + TUI improvements |
 | 5th   | Phase 4: Agent Specialization ✅ | Done | Quality step-change |
-| **6th** | **Phase 5: Learning Loop (revised)** | ~8-10 stories | Compounding cross-run improvement (includes confirmation tracking fix) |
-| **7th** | **Phase 6: Multi-Model (simplified)** | ~4-5 stories | Speed + quality allocation per role |
-| **8th** | **Phase 7: MCP Server (scoped)** | ~6-8 stories | Real-time parallel coordination |
-| **9th** | **Phase 8: Knowledge Graph (if needed)** | ~8-10 stories | Structural intelligence — gate on evidence |
-| **10th** | **Phase 9: Improved DAG Accuracy** | ~3-4 stories | Better parallelism without speculation |
-| **11th** | **Phase 10: Auto-Split Stuck Stories** | ~5-7 stories | Reduce wasted iterations on stuck stories |
+| 6th   | Phase 5: Learning Loop (revised) ✅ | Done | Compounding cross-run improvement, anti-patterns, skill feedback |
+| **7th** | **Phase 5.5: Interactive Task Mode** | ~5-7 stories | On-the-fly task dispatch, no PRD required |
+| **8th** | **Phase 6: Multi-Model (simplified)** | ~4-5 stories | Speed + quality allocation per role |
+| **9th** | **Phase 7: MCP Server (scoped)** | ~6-8 stories | Real-time parallel coordination |
+| **10th** | **Phase 8: Knowledge Graph (if needed)** | ~8-10 stories | Structural intelligence — gate on evidence |
+| **11th** | **Phase 9: Improved DAG Accuracy** | ~3-4 stories | Better parallelism without speculation |
+| **12th** | **Phase 10: Auto-Split Stuck Stories** | ~5-7 stories | Reduce wasted iterations on stuck stories |
 | Stretch | Web Dashboard | — | Team visibility (if needed) |
 
-Phase 6 is relatively independent and could be reordered. Phase 8 is
-explicitly evidence-gated — only build if `ralph_codebase` semantic context
-isn't sufficient for architect quality.
+Phase 5.5 is the recommended next phase — it has no incomplete
+dependencies and unlocks a new usage mode. Phase 6 is relatively
+independent and could be reordered. Phase 8 is explicitly evidence-gated
+— only build if `ralph_codebase` semantic context isn't sufficient for
+architect quality.
 
 ---
 
@@ -1659,9 +1835,11 @@ After full rollout, ralph should demonstrate:
   model for each role (replaces cost reduction metric — user is on Claude Max)
 - **Crash resilience**: Any interruption recoverable via checkpoint + resume ✅ (Phase 1)
 - **Cross-run learning**: Measurable improvement in success rate across
-  successive PRD runs on the same codebase (Phase 5)
+  successive PRD runs on the same codebase ✅ (Phase 5)
 - **Parallel efficiency**: DAG analysis produces fewer false dependencies,
   enabling more concurrent story execution (Phase 9)
 - **Stuck recovery**: Stuck stories are automatically split rather than
   wasting iterations (Phase 10)
+- **Interactive mode**: Tasks can be dispatched on the fly without a PRD,
+  with clarification step ensuring quality input (Phase 5.5)
 - **Visibility**: Full usage and performance analytics in TUI ✅ (Phase 3)
