@@ -142,6 +142,14 @@ func (c *Coordinator) Notifier() *notify.Notifier {
 	return c.notifier
 }
 
+// AddStory registers a dynamically created story (e.g. an interactive task)
+// so that ScheduleReady can create workers for it. The story must already be
+// added to the DAG via dag.AddNode before calling this method.
+func (c *Coordinator) AddStory(story *prd.UserStory) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stories[story.ID] = story
+}
 
 // ScheduleReady launches workers for stories whose dependencies are met.
 // Returns the number of new workers launched.

@@ -94,3 +94,69 @@ func TestNewFromCheckpoint_ScheduleSkipsCompletedAndFailed(t *testing.T) {
 		t.Error("S-003 (failed) should not be in progress")
 	}
 }
+
+func TestAddStory_SchedulesInteractiveTask(t *testing.T) {
+	// Start with an empty DAG and no stories
+	d := &dag.DAG{Nodes: make(map[string]*dag.StoryNode)}
+	c := New(&config.Config{PRDFile: "/dev/null"}, d, 2, nil)
+
+	// Dynamically add an interactive task story
+	story := &prd.UserStory{
+		ID:          "T-001",
+		Title:       "Fix the login page",
+		Description: "Fix the login page styling",
+		DependsOn:   []string{},
+		Priority:    0,
+	}
+	d.AddNode(story.ID, nil, 0)
+	c.AddStory(story)
+
+	// ScheduleReady should pick it up
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	launched := c.ScheduleReady(ctx)
+	if launched != 1 {
+		t.Errorf("expected 1 worker launched for interactive task, got %d", launched)
+	}
+	if _, ok := c.inProgress["T-001"]; !ok {
+		t.Error("T-001 should be in progress")
+	}
+}
+
+func TestAddStory_MultipleInteractiveTasksParallel(t *testing.T) {
+	d := &dag.DAG{Nodes: make(map[string]*dag.StoryNode)}
+	c := New(&config.Config{PRDFile: "/dev/null"}, d, 3, nil)
+
+	// Add multiple interactive tasks
+	for _, id := range []string{"T-001", "T-002", "T-003"} {
+		story := &prd.UserStory{ID: id, Title: id, DependsOn: []string{}, Priority: 0}
+		d.AddNode(id, nil, 0)
+		c.AddStory(story)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	launched := c.ScheduleReady(ctx)
+	if launched != 3 {
+		t.Errorf("expected 3 workers launched in parallel, got %d", launched)
+	}
+}
+
+func TestAddStory_WithoutDAGNode_NotScheduled(t *testing.T) {
+	d := &dag.DAG{Nodes: make(map[string]*dag.StoryNode)}
+	c := New(&config.Config{PRDFile: "/dev/null"}, d, 2, nil)
+
+	// Add story to coordinator but NOT to DAG
+	story := &prd.UserStory{ID: "T-001", Title: "Test", DependsOn: []string{}, Priority: 0}
+	c.AddStory(story)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	launched := c.ScheduleReady(ctx)
+	if launched != 0 {
+		t.Errorf("expected 0 workers (not in DAG), got %d", launched)
+	}
+}
