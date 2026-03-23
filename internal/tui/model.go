@@ -429,6 +429,8 @@ func phaseIcon(p phase) string {
 		return "◇"
 	case phasePaused:
 		return "⏸"
+	case phaseInteractive:
+		return "⚡"
 	default:
 		return ""
 	}
@@ -469,6 +471,8 @@ func phaseToString(p phase) string {
 		return "Resume Prompt"
 	case phasePaused:
 		return "Paused"
+	case phaseInteractive:
+		return "Interactive"
 	default:
 		return "Unknown"
 	}
@@ -747,6 +751,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				return m, tea.Quit
 			}
+			if m.phase == phaseInteractive {
+				// In interactive mode, quit transitions to done
+				m.phase = phaseDone
+				m.allComplete = m.coord == nil || m.coord.AllDone()
+				if !m.allComplete {
+					m.exitCode = 1
+					m.completionReason = "User quit interactive mode with active workers"
+				} else {
+					m.completionReason = "User quit interactive mode"
+				}
+				debuglog.Log("entering phaseDone: %s", m.completionReason)
+				m.cancel()
+				m.showCompletionReport()
+				return m, nil
+			}
 			m.confirmQuit = true
 			return m, nil
 		case msg.String() == "tab":
@@ -861,6 +880,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.phase = phaseParallel
 					m.coord.ScheduleReady(m.ctx)
 					return m, tea.Batch(m.coord.ListenCmd(), fastTickCmd(), tickCmd())
+				case phaseInteractive:
+					m.coord.Resume()
+					m.phase = phaseInteractive
+					m.coord.ScheduleReady(m.ctx)
+					return m, tea.Batch(m.coord.ListenCmd(), fastTickCmd(), tickCmd())
 				case phasePlanning:
 					m.phase = phasePlanning
 					return m, tea.Batch(planCmd(m.ctx, m.cfg), fastTickCmd())
@@ -888,7 +912,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			m.confirmQuit = false
-			if m.phase == phaseParallel && len(m.workerTabOrder) > 0 {
+			if (m.phase == phaseParallel || m.phase == phaseInteractive) && len(m.workerTabOrder) > 0 {
 				// Worker tab switching: 1-9 maps to tab position, not worker ID
 				if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
 					idx := int(msg.String()[0]-'0') - 1
@@ -978,7 +1002,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activityPath := filepath.Join(m.cfg.LogDir, "summary-activity.log")
 			cmds = append(cmds, pollActivityCmd(activityPath))
 		}
-		if m.phase == phaseParallel && m.coord != nil && m.activeWorkerView > 0 && m.coord.IsWorkerActive(m.activeWorkerView) {
+		if (m.phase == phaseParallel || m.phase == phaseInteractive) && m.coord != nil && m.activeWorkerView > 0 && m.coord.IsWorkerActive(m.activeWorkerView) {
 			activityPath := m.coord.GetWorkerActivityPath(m.activeWorkerView)
 			if activityPath != "" {
 				wID := m.activeWorkerView
@@ -1110,7 +1134,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if hash, err := checkpoint.ComputePRDHash(m.cfg.PRDFile); err == nil {
 			m.prdHash = hash
 		}
-		if m.cfg.Workers > 1 {
+		// If no PRD stories exist, enter interactive mode
+		if p, err := prd.Load(m.cfg.PRDFile); err != nil || len(p.UserStories) == 0 {
+			m.phase = phaseInteractive
+			m.claudeContent += "── Interactive mode — no PRD stories found ──\n"
+			m.claudeVP.SetContent(m.claudeContent)
+			m.prevClaudeLen = len(m.claudeContent)
+		} else if m.cfg.Workers > 1 {
 			m.phase = phaseDagAnalysis
 			cmds = append(cmds, dagAnalyzeCmd(m.ctx, m.cfg))
 		} else {
@@ -1468,7 +1498,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Usage limit — pause everything and wait for user
 		if u.UsageLimit {
-			m.pausedDuring = phaseParallel
+			m.pausedDuring = m.phase
 			m.phase = phasePaused
 			m.claudeContent += fmt.Sprintf("\n── Usage Limit Hit (%s) ──\nClaude API usage limit reached. All workers paused.\nPress Enter to resume when your limit resets.\n", u.StoryID)
 			m.claudeVP.SetContent(m.claudeContent)
@@ -1528,7 +1558,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Try to schedule more
 				m.coord.ScheduleReady(m.ctx)
-				if m.coord.AllDone() {
+				if m.coord.AllDone() && m.phase != phaseInteractive {
 					if m.coord.CompletedCount() == m.totalStories {
 						return m.transitionToComplete()
 					}
@@ -1560,7 +1590,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
 			m.coord.ScheduleReady(m.ctx)
-			if m.coord.AllDone() {
+			if m.coord.AllDone() && m.phase != phaseInteractive {
 				m.phase = phaseDone
 				m.exitCode = 1
 				m.completionReason = fmt.Sprintf("Worker failed and all work done (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
@@ -1576,7 +1606,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if len(cmds) > 0 {
 			// There are pending commands (e.g. mergeBackCmd) — don't enter
 			// phaseDone yet; let them run and check completion afterwards.
-		} else if m.coord.AllDone() {
+		} else if m.coord.AllDone() && m.phase != phaseInteractive {
 			// No active workers and nothing left to schedule — we're done
 			m.phase = phaseDone
 			m.allComplete = m.coord.CompletedCount() == m.totalStories
@@ -1811,11 +1841,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Best-effort checkpoint cleanup on clean completion
 		_ = checkpoint.Delete(m.cfg.ProjectDir)
 		m.persistRunHistory()
-		m.phase = phaseDone
+		m.phase = phaseInteractive
 		m.allComplete = true
-		m.exitCode = 0
-		m.completionReason = "All stories completed successfully"
-		debuglog.Log("entering phaseDone: %s", m.completionReason)
+		m.claudeContent += "\n── Interactive mode — all PRD stories complete, accepting follow-up tasks ──\n"
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		debuglog.Log("entering phaseInteractive after PRD completion")
 		m.updateStatusPage()
 
 	}
@@ -2057,7 +2089,7 @@ func (m *Model) View() string {
 
 	// Render header and footer first so we can measure their actual height
 	header := renderHeader(m, m.width)
-	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused, m.mascot != nil && m.mascot.Interactive)
+	footer := renderFooter(m.width, m.confirmQuit, m.phase == phaseDone, m.phase == phaseIdle, m.phase == phaseParallel || m.phase == phaseInteractive, m.phase == phaseReview, m.phase == phaseQualityPrompt, m.phase == phaseResumePrompt, m.phase == phasePaused, m.mascot != nil && m.mascot.Interactive)
 
 	// Use lipgloss.Height() for dynamic layout instead of hardcoded values
 	headerHeight := lipgloss.Height(header)
@@ -2128,9 +2160,9 @@ func (m *Model) View() string {
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, storiesPanel, ctxPanel)
 
 	// Claude panel
-	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun || m.phase == phaseParallel || m.phase == phaseDagAnalysis || m.phase == phasePlanning || m.phase == phaseQualityReview || m.phase == phaseQualityFix || m.phase == phaseSummary
+	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun || m.phase == phaseParallel || m.phase == phaseInteractive || m.phase == phaseDagAnalysis || m.phase == phasePlanning || m.phase == phaseQualityReview || m.phase == phaseQualityFix || m.phase == phaseSummary
 	var workerTabStr string
-	if m.phase == phaseParallel && m.coord != nil {
+	if (m.phase == phaseParallel || m.phase == phaseInteractive) && m.coord != nil {
 		workers := m.coord.Workers()
 		// Sort: active workers first (by ID), then completed/failed (by ID)
 		var activeIDs, doneIDs []worker.WorkerID

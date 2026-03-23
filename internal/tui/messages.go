@@ -30,6 +30,7 @@ const (
 	phaseSummary        // generating final summary of all changes
 	phaseResumePrompt   // asking user whether to resume from checkpoint
 	phasePaused         // paused due to Claude usage limit — waiting for user
+	phaseInteractive    // idle-but-accepting-input; coexists with running workers
 )
 
 // Tick messages
