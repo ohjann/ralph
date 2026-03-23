@@ -156,6 +156,16 @@ type statusMsg struct {
 
 type statusClearMsg struct{}
 
+// clarifyResultMsg carries the result of a lightweight Claude clarification call.
+// If Ready is true, the task is clear and should proceed to story creation.
+// Otherwise, Questions contains up to 3 clarifying questions to show the user.
+type clarifyResultMsg struct {
+	TaskText  string   // original task text
+	Ready     bool     // true if Claude said READY
+	Questions []string // clarifying questions (if not ready)
+	Err       error    // non-nil if the call failed
+}
+
 // Terminal size
 type windowSizeMsg struct {
 	Width  int

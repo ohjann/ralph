@@ -660,15 +660,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case tea.KeyEnter:
 				task := strings.TrimSpace(m.taskInput.Value())
-				if task != "" {
-					m.claudeContent += fmt.Sprintf("\n── Task submitted: %s ──\n", task)
-					m.claudeVP.SetContent(m.claudeContent)
-					m.claudeVP.GotoBottom()
-					m.prevClaudeLen = len(m.claudeContent)
-				}
 				m.taskInputActive = false
 				m.taskInput.Blur()
 				m.taskInput.Reset()
+				if task != "" {
+					m.claudeContent += fmt.Sprintf("\n── Task submitted: %s ──\n── Clarifying... ──\n", task)
+					m.claudeVP.SetContent(m.claudeContent)
+					m.claudeVP.GotoBottom()
+					m.prevClaudeLen = len(m.claudeContent)
+					projectName := filepath.Base(m.cfg.ProjectDir)
+					return m, clarifyTaskCmd(m.ctx, m.cfg.ProjectDir, projectName, task, m.cachedPRDStories)
+				}
 				return m, nil
 			case tea.KeyTab:
 				if m.stuckAlert != nil {
@@ -1289,6 +1291,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusClearMsg:
 		m.statusText = ""
+
+	case clarifyResultMsg:
+		if msg.Err != nil {
+			// Clarification failed — fall back to dispatching task as-is with warning
+			debuglog.Log("clarifyResultMsg: error — falling back to direct dispatch: %v", msg.Err)
+			m.claudeContent += fmt.Sprintf("── Clarification failed (%v), dispatching task as-is ──\n", msg.Err)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+			// Treat as READY — proceed to story creation (P55-006)
+			m.statusText = "⚠ Clarification failed, task dispatched as-is"
+			m.statusLevel = statusWarn
+			cmds = append(cmds, tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+				return statusClearMsg{}
+			}))
+		} else if msg.Ready {
+			// Task is clear — proceed to story creation (P55-006)
+			m.claudeContent += "── Task is clear, proceeding to story creation ──\n"
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		} else {
+			// Questions returned — enter clarification display state (P55-005)
+			m.claudeContent += "── Clarifying questions: ──\n"
+			for i, q := range msg.Questions {
+				m.claudeContent += fmt.Sprintf("  %d. %s\n", i+1, q)
+			}
+			m.claudeContent += "── (Clarification Q&A display handled by P55-005) ──\n"
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		}
 
 	case pipelineEmbedDoneMsg:
 		if msg.Err != nil {
