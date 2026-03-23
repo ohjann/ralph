@@ -154,6 +154,12 @@ type Model struct {
 	taskInput       textarea.Model
 	taskInputActive bool // true when user is typing a task
 
+	// Clarification Q&A state (P55-005)
+	clarifyingTask  string   // original task text being clarified
+	clarifyQuestions []string // questions from Claude
+	clarifyAnswers  []string // answers collected so far
+	clarifyIndex    int      // index of current question being answered
+
 	// Status bar (vim-like, bottom of screen)
 	statusText  string
 	statusLevel statusLevel
@@ -654,11 +660,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.taskInputActive {
 			switch msg.Type {
 			case tea.KeyEsc:
+				if m.isClarifying() {
+					// Cancel clarification entirely
+					m.claudeContent += "── Clarification cancelled ──\n"
+					m.claudeVP.SetContent(m.claudeContent)
+					m.claudeVP.GotoBottom()
+					m.prevClaudeLen = len(m.claudeContent)
+					m.clearClarifyState()
+				}
 				m.taskInputActive = false
 				m.taskInput.Blur()
 				m.taskInput.Reset()
+				m.taskInput.Placeholder = "Type a task and press Enter..."
 				return m, nil
 			case tea.KeyEnter:
+				if m.isClarifying() {
+					// Submit answer to current question
+					answer := strings.TrimSpace(m.taskInput.Value())
+					m.taskInput.Reset()
+					m.clarifyAnswers = append(m.clarifyAnswers, answer)
+					m.claudeContent += fmt.Sprintf("  A%d: %s\n", m.clarifyIndex+1, answer)
+					m.claudeVP.SetContent(m.claudeContent)
+					m.claudeVP.GotoBottom()
+					m.prevClaudeLen = len(m.claudeContent)
+					m.clarifyIndex++
+
+					if m.clarifyIndex >= len(m.clarifyQuestions) {
+						// All questions answered — bundle description
+						desc := m.buildClarifyDescription()
+						m.claudeContent += fmt.Sprintf("── Clarification complete, proceeding to story creation ──\n")
+						m.claudeVP.SetContent(m.claudeContent)
+						m.claudeVP.GotoBottom()
+						m.prevClaudeLen = len(m.claudeContent)
+
+						_ = desc // bundled description ready for P55-006 dispatch
+						m.clearClarifyState()
+						m.taskInputActive = false
+						m.taskInput.Blur()
+						m.taskInput.Reset()
+						m.taskInput.Placeholder = "Type a task and press Enter..."
+					} else {
+						// Advance to next question
+						m.taskInput.Placeholder = fmt.Sprintf("Answer question %d:", m.clarifyIndex+1)
+					}
+					return m, nil
+				}
 				task := strings.TrimSpace(m.taskInput.Value())
 				m.taskInputActive = false
 				m.taskInput.Blur()
@@ -1313,15 +1359,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
 		} else {
-			// Questions returned — enter clarification display state (P55-005)
+			// Questions returned — enter clarification Q&A mode
+			m.clarifyingTask = msg.TaskText
+			m.clarifyQuestions = msg.Questions
+			m.clarifyAnswers = make([]string, 0, len(msg.Questions))
+			m.clarifyIndex = 0
+
 			m.claudeContent += "── Clarifying questions: ──\n"
 			for i, q := range msg.Questions {
 				m.claudeContent += fmt.Sprintf("  %d. %s\n", i+1, q)
 			}
-			m.claudeContent += "── (Clarification Q&A display handled by P55-005) ──\n"
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
+
+			// Activate task input for answering
+			m.taskInputActive = true
+			m.taskInput.SetWidth(m.width - 4)
+			m.taskInput.Placeholder = fmt.Sprintf("Answer question %d:", 1)
+			m.taskInput.Reset()
+			cmds = append(cmds, m.taskInput.Focus())
+
+			// Update stories panel to show clarifying status
+			m.rebuildStoryDisplayInfos()
 		}
 
 	case pipelineEmbedDoneMsg:
@@ -2231,6 +2291,9 @@ func (m *Model) View() string {
 	taskInputHeight := 0
 	if m.taskInputActive || m.phase == phaseInteractive || m.phase == phaseParallel {
 		taskInputHeight = 3
+		if m.isClarifying() && m.taskInputActive {
+			taskInputHeight = 4 // extra line for question display
+		}
 	}
 	available := m.height - headerHeight - footerHeight - statusBarHeight - statusLineHeight - hintHeight - taskInputHeight
 	if available < 10 {
@@ -2334,7 +2397,7 @@ func (m *Model) View() string {
 
 	parts := []string{header, topRow, claudePanel}
 	if m.phase == phaseInteractive || m.phase == phaseParallel {
-		parts = append(parts, renderTaskInput(m.taskInput, m.width, m.taskInputActive))
+		parts = append(parts, renderTaskInput(m.taskInput, m.width, m.taskInputActive, m.clarifyQuestions, m.clarifyIndex))
 	}
 	if m.stuckAlert != nil {
 		parts = append(parts, renderStuckBar(m.stuckAlert, m.width, m.hintActive))
@@ -2420,7 +2483,7 @@ func (m *Model) renderResumePrompt() string {
 // rebuildStoryDisplayInfos reconstructs display infos from cached PRD stories.
 // Called on fast tick (500ms) but uses cached data to avoid disk I/O.
 func (m *Model) rebuildStoryDisplayInfos() {
-	if len(m.cachedPRDStories) == 0 {
+	if len(m.cachedPRDStories) == 0 && !m.isClarifying() {
 		return
 	}
 	prevCount := len(m.storyDisplayInfos)
@@ -2431,6 +2494,15 @@ func (m *Model) rebuildStoryDisplayInfos() {
 		coordIface = m.coord
 	}
 	m.storyDisplayInfos = BuildStoryDisplayInfos(m.cachedPRDStories, m.currentStoryID, coordIface, m.phase, m.iteration, string(m.currentRole))
+	// Inject clarifying task as a temporary display entry
+	if m.isClarifying() {
+		m.storyDisplayInfos = append(m.storyDisplayInfos, StoryDisplayInfo{
+			ID:            "T-?",
+			Title:         m.clarifyingTask,
+			IsInteractive: true,
+			Status:        "clarifying",
+		})
+	}
 	// Auto-scroll to show newly added tasks
 	if len(m.storyDisplayInfos) > prevCount {
 		m.storiesVP.GotoBottom()
@@ -2494,8 +2566,19 @@ func renderHintInput(ti textarea.Model, width int) string {
 	return label + " " + ti.View() + esc
 }
 
-func renderTaskInput(ti textarea.Model, width int, active bool) string {
+func renderTaskInput(ti textarea.Model, width int, active bool, clarifyQuestions []string, clarifyIndex int) string {
 	label := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Render("⚡ Task:")
+	if len(clarifyQuestions) > 0 && active {
+		// Show current question above the input
+		qIdx := clarifyIndex
+		if qIdx >= len(clarifyQuestions) {
+			qIdx = len(clarifyQuestions) - 1
+		}
+		qLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).
+			Render(fmt.Sprintf("  Q%d. %s", qIdx+1, clarifyQuestions[qIdx]))
+		help := styleFooter.Render(" esc: cancel task  enter: submit answer")
+		return qLabel + "\n" + label + " " + ti.View() + help
+	}
 	if active {
 		help := styleFooter.Render(" esc: cancel  enter: submit  tab: switch")
 		return label + " " + ti.View() + help
@@ -2811,3 +2894,32 @@ func (m *Model) buildRunSummary() costs.RunSummary {
 	}
 }
 
+// isClarifying returns true if the model is in clarification Q&A mode.
+func (m *Model) isClarifying() bool {
+	return len(m.clarifyQuestions) > 0
+}
+
+// clearClarifyState resets all clarification state fields.
+func (m *Model) clearClarifyState() {
+	m.clarifyingTask = ""
+	m.clarifyQuestions = nil
+	m.clarifyAnswers = nil
+	m.clarifyIndex = 0
+}
+
+// buildClarifyDescription bundles the original task with Q&A into the format:
+// Task: {original}\n\nQ: {q1}\nA: {a1}\n\nQ: {q2}\nA: {a2}
+func (m *Model) buildClarifyDescription() string {
+	var sb strings.Builder
+	sb.WriteString("Task: ")
+	sb.WriteString(m.clarifyingTask)
+	for i, q := range m.clarifyQuestions {
+		sb.WriteString("\n\nQ: ")
+		sb.WriteString(q)
+		sb.WriteString("\nA: ")
+		if i < len(m.clarifyAnswers) {
+			sb.WriteString(m.clarifyAnswers[i])
+		}
+	}
+	return sb.String()
+}
