@@ -176,6 +176,9 @@ type Model struct {
 
 	// Sprite mascot
 	mascot *sprite.Mascot
+
+	// Settings panel state
+	settings settingsState
 }
 
 func NewModel(cfg *config.Config, version string) *Model {
@@ -240,6 +243,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 		taskInput:      ti,
 		mascot:         m,
 		storyCreator:   interactive.NewStoryCreator(),
+		settings:       newSettingsState(cfg),
 	}
 }
 
@@ -917,6 +921,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case msg.String() == "tab":
 			m.activePanel = (m.activePanel + 1) % panelCount
+			return m, nil
+		case msg.String() == "s" && !m.hintActive && !m.taskInputActive:
+			m.ctxMode = contextSettings
+			m.ctxModeManual = true
+			m.ctxManualAtPhase = m.phase
+			m.activePanel = panelContext
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && (msg.String() == "j" || msg.String() == "down"):
+			m.settings.moveDown()
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && (msg.String() == "k" || msg.String() == "up"):
+			m.settings.moveUp()
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && msg.String() == "enter":
+			m.settings.toggle()
+			m.settings.applyTo(m.cfg)
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && (msg.String() == "+" || msg.String() == "="):
+			m.settings.increment()
+			m.settings.applyTo(m.cfg)
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && msg.String() == "-":
+			m.settings.decrement()
+			m.settings.applyTo(m.cfg)
+			return m, nil
+		case m.ctxMode == contextSettings && m.activePanel == panelContext && msg.String() == "ctrl+s":
+			if err := m.cfg.SaveConfig(); err != nil {
+				m.statusText = fmt.Sprintf("Save failed: %v", err)
+				m.statusLevel = statusError
+			} else {
+				m.settings.Dirty = false
+				m.statusText = "Settings saved to .ralph/config.toml"
+				m.statusLevel = statusInfo
+			}
 			return m, nil
 		case msg.String() == "j" || msg.String() == "down":
 			switch m.activePanel {
@@ -2377,6 +2415,7 @@ func (m *Model) View() string {
 		AntiPatternsContent: m.antiPatternsContent,
 		RateLimitContent:    renderRateLimitContent(m.rateLimitInfo),
 		Phase:               m.phase,
+		Settings:            &m.settings,
 	}
 	ctxPanel := renderContextPanel(
 		&m.contextVP,
@@ -2651,6 +2690,7 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 		styleKey.Render("tab") + styleFooter.Render(": panel  ") +
 		styleKey.Render("[/]") + styleFooter.Render(": context tab  ") +
 		styleKey.Render("j/k") + styleFooter.Render(": scroll  ") +
+		styleKey.Render("s") + styleFooter.Render(": settings  ") +
 		styleKey.Render("m") + styleFooter.Render(": monitor")
 	if parallel {
 		baseHelp += "  " + styleKey.Render("</>") + styleFooter.Render(": worker") +

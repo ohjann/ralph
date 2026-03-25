@@ -23,6 +23,7 @@ const (
 	contextQuality                     // quality review assessment
 	contextMemory                      // memory statistics and context
 	contextCosts                       // cost tracking breakdown
+	contextSettings                    // settings editor
 	contextModeCount                   // sentinel: total number of modes
 )
 
@@ -44,6 +45,7 @@ type contextPanelData struct {
 	AntiPatternsContent string
 	RateLimitContent    string
 	Phase               phase
+	Settings            *settingsState
 }
 
 func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, width, height int) string {
@@ -109,6 +111,12 @@ func renderContextPanel(vp *viewport.Model, data contextPanelData, active bool, 
 		if data.AntiPatternsContent != "" {
 			content = content + "\n" + data.AntiPatternsContent
 		}
+	case contextSettings:
+		if data.Settings != nil {
+			content = renderSettingsPanel(*data.Settings, contentW)
+		} else {
+			content = styleMuted.Render("  Settings unavailable")
+		}
 	}
 
 	vp.SetContent(content)
@@ -139,6 +147,7 @@ func renderContextTabs(data contextPanelData) string {
 		{contextQuality, "◇", "Quality", true},
 		{contextMemory, "⧫", "Memory", true},
 		{contextCosts, "◎", "Usage", true},
+		{contextSettings, "⚙", "Settings", true},
 	}
 
 	var parts []string

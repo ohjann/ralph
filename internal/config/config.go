@@ -161,6 +161,40 @@ func Parse(args []string) (*Config, error) {
 		return cfg, nil
 	}
 
+	// Pre-scan for --dir so we can resolve ProjectDir early and load config.toml.
+	for j := 0; j < len(args); j++ {
+		if args[j] == "--dir" && j+1 < len(args) {
+			cfg.ProjectDir = args[j+1]
+			break
+		}
+		if len(args[j]) > 6 && args[j][:6] == "--dir=" {
+			cfg.ProjectDir = args[j][6:]
+			break
+		}
+	}
+
+	// Resolve ProjectDir early for config.toml loading.
+	if cfg.ProjectDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("cannot determine working directory: %w", err)
+		}
+		cfg.ProjectDir = cwd
+	}
+	earlyAbs, err := filepath.Abs(cfg.ProjectDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve project dir: %w", err)
+	}
+	cfg.ProjectDir = earlyAbs
+
+	// Load config.toml (priority: CLI flags > config.toml > defaults).
+	tc, tcErr := loadTomlConfig(cfg.ProjectDir)
+	if tcErr != nil {
+		debuglog.Log("config.toml: error loading: %v", tcErr)
+	} else if tc != nil {
+		tc.applyTo(cfg)
+	}
+
 	i := 0
 	for i < len(args) {
 		switch args[i] {
@@ -441,7 +475,7 @@ func Parse(args []string) (*Config, error) {
 	// Resolve RALPH_HOME: directory of the binary, or parent of binary dir, or $RALPH_HOME
 	cfg.RalphHome = resolveRalphHome()
 
-	// Resolve PROJECT_DIR
+	// Re-resolve PROJECT_DIR in case --dir was set in the flag loop.
 	if cfg.ProjectDir == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -449,9 +483,9 @@ func Parse(args []string) (*Config, error) {
 		}
 		cfg.ProjectDir = cwd
 	}
-	abs, err := filepath.Abs(cfg.ProjectDir)
-	if err != nil {
-		return nil, fmt.Errorf("cannot resolve project dir: %w", err)
+	abs, absErr := filepath.Abs(cfg.ProjectDir)
+	if absErr != nil {
+		return nil, fmt.Errorf("cannot resolve project dir: %w", absErr)
 	}
 	cfg.ProjectDir = abs
 
@@ -618,29 +652,41 @@ func printUsage() {
 
 Run the Ralph autonomous agent loop against a prd.json in the current directory.
 
-Options:
+General:
   --dir <path>                    Project directory containing prd.json (default: current directory)
   --plan <path>                   Generate prd.json from a plan file before executing
   --idle                          Launch TUI in idle mode (no execution, just display layout)
-  --no-judge                      Disable LLM-as-Judge verification (enabled by default)
-  --judge-max-rejections <n>      Max judge rejections per story before auto-passing (default: 2)
+  --help, -h                      Show this help message
+
+Execution:
   --workers <n>                   Number of parallel workers (default: 1 = serial)
   --workspace-base <path>         Base directory for workspaces (default: /tmp/ralph-workspaces)
+  --no-architect                  Skip architect phase for all stories (go straight to implementer)
+
+Judge:
+  --no-judge                      Disable LLM-as-Judge verification (enabled by default)
+  --judge-max-rejections <n>      Max judge rejections per story before auto-passing (default: 2)
+
+Quality:
   --no-quality-review             Disable final quality review (enabled by default)
   --quality-workers <n>           Parallel quality reviewers (default: 3)
   --quality-max-iterations <n>    Max review-fix cycles (default: 2)
+
+Memory:
   --memory-top-k <n>             Number of memory results to retrieve (default: 15)
   --memory-min-score <f>         Minimum similarity score for memory retrieval (default: 0.6)
   --memory-max-tokens <n>        Max tokens for memory context (default: 8000)
   --memory-disable               Disable semantic memory (skip ChromaDB sidecar)
   --memory-port <n>              ChromaDB sidecar port (default: 9876)
+
+Monitoring:
   --status-port <port>           Start remote status page on given port (disabled by default)
   --notify <topic>               Send push notifications via ntfy.sh to given topic
   --ntfy-server <url>            Self-hosted ntfy server URL (default: https://ntfy.sh)
   --enable-monitoring            Enable ntfy + status page using .ralph/.env config
+
+Display:
   --no-guy                        Disable sprite mascot overlay
-  --no-architect                  Skip architect phase for all stories (go straight to implementer)
-  --help, -h                      Show this help message
 
 Examples:
   ralph                           Run until all stories are complete
