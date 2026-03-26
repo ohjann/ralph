@@ -688,19 +688,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.clarifyIndex++
 
 					if m.clarifyIndex >= len(m.clarifyQuestions) {
-						// All questions answered — bundle description
+						// All questions answered — bundle description and dispatch
 						desc := m.buildClarifyDescription()
-						m.claudeContent += fmt.Sprintf("── Clarification complete, proceeding to story creation ──\n")
+						m.claudeContent += "── Clarification complete, creating story ──\n"
 						m.claudeVP.SetContent(m.claudeContent)
 						m.claudeVP.GotoBottom()
 						m.prevClaudeLen = len(m.claudeContent)
 
-						_ = desc // bundled description ready for P55-006 dispatch
 						m.clearClarifyState()
 						m.taskInputActive = false
 						m.taskInput.Blur()
 						m.taskInput.Reset()
 						m.taskInput.Placeholder = "Type a task and press Enter..."
+
+						// Dispatch the story using the clarified description
+						cmd := m.dispatchInteractiveTask(desc)
+						return m, cmd
 					} else {
 						// Advance to next question
 						m.taskInput.Placeholder = fmt.Sprintf("Answer question %d:", m.clarifyIndex+1)
@@ -746,8 +749,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.hintInput.Focus()
 		}
 
-		// 't' to enter task input mode when in interactive/parallel phase
-		if msg.String() == "t" && (m.phase == phaseInteractive || m.phase == phaseParallel) {
+		// 't' to enter task input mode when in interactive, parallel, or done phase
+		if msg.String() == "t" && (m.phase == phaseInteractive || m.phase == phaseParallel || m.phase == phaseDone) {
 			m.taskInputActive = true
 			m.taskInput.SetWidth(m.width - 4)
 			m.taskInput.Focus()
@@ -997,13 +1000,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case msg.String() == "m":
-			// Toggle status page server on/off at runtime
+			// Toggle all monitoring (status page + ntfy) on/off at runtime
 			if m.statusServer != nil {
+				// Turn everything off
 				m.stopStatusServer()
 				m.statusServer = nil
 				m.cfg.StatusPort = 0
-				m.claudeContent += "\n── Status page stopped ──\n"
+				m.notifier.SetDisabled(true)
+				m.claudeContent += "\n── Monitoring stopped (status page + notifications) ──\n"
 			} else {
+				// Turn everything on
 				port := m.cfg.StatusPort
 				if port == 0 {
 					port = 8080
@@ -1017,6 +1023,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateStatusPage()
 					m.claudeContent += fmt.Sprintf("\n── Status page started: http://localhost:%d ──\n", port)
 				}
+				m.notifier.SetDisabled(false)
+				m.claudeContent += "── Notifications enabled ──\n"
 			}
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
@@ -1370,31 +1378,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prevClaudeLen = len(m.claudeContent)
 
 		// Create and dispatch the interactive story when task is ready
-		if dispatchReady && m.livePRD != nil && m.storyDAG != nil {
-			// Bootstrap coordinator if none exists (pure interactive / post-PRD mode)
-			if m.coord == nil {
-				m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, nil)
-				m.coord.SetRunCosting(m.runCosting)
-				m.coord.SetNotifier(m.notifier)
-				debuglog.Log("bootstrapped coordinator for interactive task dispatch")
-			}
-			story := m.storyCreator.CreateAndAppend(msg.TaskText, "", m.livePRD, m.storyDAG)
-			m.coord.AddStory(&story)
-			m.totalStories++
-			m.coord.ScheduleReady(m.ctx)
-			m.claudeContent += fmt.Sprintf("── Interactive task %s dispatched ──\n", story.ID)
-			m.claudeVP.SetContent(m.claudeContent)
-			m.claudeVP.GotoBottom()
-			m.prevClaudeLen = len(m.claudeContent)
-			debuglog.Log("dispatched interactive task %s: %s", story.ID, story.Title)
-			// Ensure we're listening for worker updates
-			if m.coord.ActiveCount() > 0 {
-				cmds = append(cmds, m.coord.ListenCmd())
-			}
-			// Switch to phaseParallel since there's now an active worker
-			if m.phase == phaseInteractive {
-				m.phase = phaseParallel
-				debuglog.Log("switching from phaseInteractive to phaseParallel for interactive task dispatch")
+		if dispatchReady {
+			if cmd := m.dispatchInteractiveTask(msg.TaskText); cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
 
@@ -2577,6 +2563,8 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 	if parallel {
 		baseHelp += "  " + styleKey.Render("</>") + styleFooter.Render(": worker") +
 			"  " + styleKey.Render("t") + styleFooter.Render(": task")
+	} else if done {
+		baseHelp += "  " + styleKey.Render("t") + styleFooter.Render(": new task")
 	}
 	if qualityPrompt {
 		return "  " + styleKey.Render("enter") + styleFooter.Render(": continue fixing  ") +
@@ -2933,6 +2921,41 @@ func (m *Model) isClarifying() bool {
 }
 
 // clearClarifyState resets all clarification state fields.
+// dispatchInteractiveTask creates a story from the task text and dispatches it to a worker.
+// Returns a tea.Cmd to listen for worker updates, or nil if dispatch prerequisites aren't met.
+func (m *Model) dispatchInteractiveTask(taskText string) tea.Cmd {
+	if m.livePRD == nil || m.storyDAG == nil {
+		debuglog.Log("dispatchInteractiveTask: skipped — livePRD or storyDAG is nil")
+		return nil
+	}
+	// Bootstrap coordinator if none exists (pure interactive / post-PRD mode)
+	if m.coord == nil {
+		m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, nil)
+		m.coord.SetRunCosting(m.runCosting)
+		m.coord.SetNotifier(m.notifier)
+		debuglog.Log("bootstrapped coordinator for interactive task dispatch")
+	}
+	story := m.storyCreator.CreateAndAppend(taskText, "", m.livePRD, m.storyDAG)
+	m.coord.AddStory(&story)
+	m.totalStories++
+	m.coord.ScheduleReady(m.ctx)
+	m.claudeContent += fmt.Sprintf("── Interactive task %s dispatched ──\n", story.ID)
+	m.claudeVP.SetContent(m.claudeContent)
+	m.claudeVP.GotoBottom()
+	m.prevClaudeLen = len(m.claudeContent)
+	debuglog.Log("dispatched interactive task %s: %s", story.ID, story.Title)
+	// Switch to phaseParallel since there's now an active worker
+	if m.phase == phaseInteractive {
+		m.phase = phaseParallel
+		debuglog.Log("switching from phaseInteractive to phaseParallel for interactive task dispatch")
+	}
+	// Listen for worker updates
+	if m.coord.ActiveCount() > 0 {
+		return m.coord.ListenCmd()
+	}
+	return nil
+}
+
 func (m *Model) clearClarifyState() {
 	m.clarifyingTask = ""
 	m.clarifyQuestions = nil

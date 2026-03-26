@@ -81,10 +81,10 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	prompt = strings.ReplaceAll(prompt, "{{ACCEPTANCE_CRITERIA}}", criteriaStr)
 	prompt = strings.ReplaceAll(prompt, "{{DIFF}}", diff)
 
-	// Run gemini
-	output, tokenUsage, err := rexec.RunGemini(ctx, prompt)
+	// Run Claude judge
+	output, tokenUsage, err := rexec.RunClaudeJudge(ctx, prompt)
 	if err != nil || output == "" {
-		return Result{Passed: true, Warning: "gemini returned empty output or error", TokenUsage: tokenUsage}
+		return Result{Passed: true, Warning: "claude judge returned empty output or error", TokenUsage: tokenUsage}
 	}
 
 	// Parse verdict

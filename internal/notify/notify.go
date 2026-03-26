@@ -16,6 +16,7 @@ type Notifier struct {
 	topic     string
 	serverURL string
 	terminal  bool // send macOS/terminal notifications
+	disabled  bool // when true, all notifications are suppressed
 }
 
 // NewNotifier creates a Notifier. If serverURL is empty, defaults to "https://ntfy.sh".
@@ -30,10 +31,22 @@ func NewNotifier(topic string, serverURL string) *Notifier {
 	}
 }
 
+// SetDisabled enables or disables all notifications at runtime.
+func (n *Notifier) SetDisabled(disabled bool) {
+	if n != nil {
+		n.disabled = disabled
+	}
+}
+
+// IsDisabled returns whether notifications are currently suppressed.
+func (n *Notifier) IsDisabled() bool {
+	return n != nil && n.disabled
+}
+
 // Notify sends a push notification. Priority levels: 1=min, 3=default, 5=urgent.
 // The send is non-blocking (fire-and-forget goroutine) and logs errors rather than failing.
 func (n *Notifier) Notify(ctx context.Context, title string, message string, priority int) error {
-	if n == nil {
+	if n == nil || n.disabled {
 		return nil
 	}
 

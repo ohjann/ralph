@@ -147,6 +147,14 @@ func renderCurrentTask(m *Model) string {
 			return styleMuted.Render("Scheduling...")
 		}
 		return styleMuted.Render("Starting workers...")
+	case phaseInit:
+		return styleMuted.Render("Initializing...")
+	case phaseSummary:
+		return lipgloss.NewStyle().Foreground(colorTeal).Render("✎ Generating summary...")
+	case phaseResumePrompt:
+		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("◇ Resume from checkpoint? Press Enter to continue, q to restart")
+	case phaseInteractive:
+		return lipgloss.NewStyle().Foreground(colorPrimary).Render("⌨ Interactive — press t to add a task")
 	default:
 		if m.currentStoryID != "" {
 			s := styleStoryID.Render(m.currentStoryID)
@@ -161,7 +169,7 @@ func renderCurrentTask(m *Model) string {
 			}
 			return s
 		}
-		return styleMuted.Render("Waiting...")
+		return styleMuted.Render("Preparing next story...")
 	}
 }
 

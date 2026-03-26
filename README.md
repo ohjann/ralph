@@ -14,8 +14,8 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - **Parallel execution** — DAG analysis determines story dependencies; independent stories run across N workers in isolated jj workspaces
 - **Gemini judge** — an independent LLM reviews each story after Claude marks it complete, rejecting subpar implementations
 - **Quality review gate** — five parallel "lens" reviewers (security, efficiency, DRY, error handling, testing) examine the full changeset after all stories pass
-- **Semantic memory** — ChromaDB vector database with Voyage AI embeddings stores patterns, errors, decisions, and codebase signatures across runs
-- **Confidence decay** — unconfirmed memories decay by 0.85x per run; confirmed memories get boosted
+- **Markdown memory** — cross-run learnings and PRD quality lessons stored as markdown files in `.ralph/memory/`, injected into worker prompts via LLM-native comprehension
+- **Dream consolidation** — periodic consolidation cycle merges duplicates, drops stale entries, and keeps memory files lean (inspired by Claude Code's Auto Dream)
 - **Real-time cost tracking** — token usage parsed from Claude and Gemini streaming output, aggregated per-story and per-run
 - **TUI costs tab** — per-story cost breakdown, total run cost, token counts, cache hit rate
 - **Run history** — `ralph history` shows recent runs with date, stories, cost, duration, first-pass rate, and model; `--stats` for aggregates; `--compare` for model-vs-model comparison
@@ -32,6 +32,8 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** installed and authenticated (`npm install -g @anthropic-ai/claude-code`)
 - **[jj (Jujutsu)](https://martinvonz.github.io/jj/)** for version control (Ralph uses jj, not git)
 - (Optional) **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** for `--judge` mode
+
+No external ML/vector infrastructure required — memory runs on plain markdown files.
 
 ## Building
 
@@ -173,11 +175,7 @@ Options:
   --ntfy-server <url>             Self-hosted ntfy server URL (default: https://ntfy.sh)
   --status-port <port>            Start remote status page on given port (disabled by default)
   --enable-monitoring             Enable ntfy + status page using .ralph/.env config
-  --memory-max-tokens <n>         Max tokens for injected memory context (default: 8000)
-  --memory-top-k <n>              Results per memory collection (default: 15)
-  --memory-min-score <float>      Memory similarity threshold (default: 0.6)
-  --memory-disable                Skip ChromaDB startup
-  --memory-port <port>            ChromaDB sidecar port (default: 9876)
+  --memory-disable                Disable memory injection
   --idle                          Launch TUI without executing (display only)
   --help, -h                      Show help
 
@@ -186,10 +184,9 @@ Subcommands:
   ralph history --all             Show all run history
   ralph history --stats           Show aggregate statistics across all runs
   ralph history --compare         Compare runs grouped by model
-  ralph memory stats              Show memory collection statistics
-  ralph memory search <query>     Test semantic retrieval
-  ralph memory prune              Force memory confidence decay
-  ralph memory reset              Clear all memory collections
+  ralph memory stats              Show memory file sizes and entry counts
+  ralph memory consolidate        Manually trigger dream consolidation cycle
+  ralph memory reset              Clear all memory files
 
 Arguments:
   max_iterations                  Max loop iterations (default: 1.5x story count)
@@ -265,23 +262,13 @@ Combined with [Tailscale](https://tailscale.com), the status page is accessible 
 
 The status page shows: PRD name, current phase, run duration, story list with status/cost, and total run cost — all updating in real-time via SSE. JSON API available at `/api/status`.
 
-### Semantic Memory (ChromaDB)
+### Memory
 
-Ralph uses a ChromaDB vector database for semantic memory across runs. It requires a Python environment with `chromadb` installed.
+Ralph stores cross-run learnings and PRD quality lessons as markdown files in `.ralph/memory/`. These are injected into worker prompts so each iteration benefits from past experience. No external dependencies required — the LLM reads markdown directly in-context.
 
-**Setup:**
+A periodic dream consolidation cycle (every 5 runs by default, or manually via `ralph memory consolidate`) merges duplicates, drops stale entries, and keeps memory files lean.
 
-1. Install conda (or ensure pip is available)
-2. Ralph will automatically create a conda environment and install chromadb on first run
-3. Memory data persists in `.ralph/memory/chroma/`
-
-To use Voyage AI embeddings (recommended), set your API key:
-
-```bash
-export VOYAGE_API_KEY=your-key    # or uses ANTHROPIC_API_KEY as fallback
-```
-
-To disable semantic memory entirely:
+To disable memory injection entirely:
 
 ```bash
 ralph --memory-disable
@@ -380,7 +367,7 @@ Each iteration is a fresh Claude Code instance. Memory persists via:
 - **`prd.json`** -- which stories are done (injected directly into prompt)
 - **`CLAUDE.md`** -- Ralph updates these with discovered patterns
 - **Story state** -- structured state.json, plan.md, decisions.md per story
-- **Semantic memory** -- ChromaDB vector retrieval of relevant patterns, errors, and decisions from past runs
+- **Markdown memory** -- cross-run learnings and PRD lessons in `.ralph/memory/`, injected into prompts with dream consolidation for maintenance
 
 ### Stuck Detection + Hint Injection
 
@@ -421,7 +408,7 @@ internal/
   storystate/       Per-story state persistence (state.json, plan.md, decisions.md)
   checkpoint/       Orchestration checkpoint for crash recovery and resume
   interactive/      Dynamic story creation and session persistence for interactive tasks
-  memory/           ChromaDB sidecar, embedding pipeline, semantic retrieval
+  memory/           Markdown-based cross-run memory, dream consolidation, size monitoring
   costs/            Token usage tracking, pricing, run history
   notify/           Push notifications via ntfy.sh
   statuspage/       Remote HTTP status page with SSE live updates
@@ -488,7 +475,7 @@ Ralph creates and manages these files in the project directory:
 | `.ralph/stories/` | Per-story state (state.json, plan.md, decisions.md) |
 | `.ralph/checkpoint.json` | Orchestration checkpoint for resume |
 | `.ralph/session-*.json` | Saved interactive task sessions |
-| `.ralph/memory/` | ChromaDB vector database storage |
+| `.ralph/memory/` | Cross-run learnings and PRD lessons (markdown files) |
 | `.ralph/run-history.json` | Accumulated run summaries with cost data |
 | `.ralph/workspace-setup.sh` | (Optional) Custom worker workspace initialization |
 | `.ralph/workspace-teardown.sh` | (Optional) Custom worker workspace cleanup |

@@ -1444,23 +1444,23 @@ Update `cmd/ralph/main.go` `printHistory()` to show two new columns:
 
 ---
 
-## Phase 5.8: Markdown Memory — Replace Vector DB with Dream-Based Consolidation
+## Phase 5.8: Markdown Memory — Replace Vector DB with Dream-Based Consolidation ✅ COMPLETE
 
 **Impact: High (simplification) | Complexity: Medium | Dependencies: Phase 2 (supersedes), Phase 5 (supersedes memory portions)**
 
-> **Added 2026-03-26.** Phase 2 built a comprehensive semantic memory system
-> using ChromaDB, Voyage AI embeddings, and ~2600 lines of Go infrastructure.
-> With 1M context windows now standard on Claude Max, the core justification
-> for vector search — context scarcity — no longer applies. An LLM reading
-> markdown files in-context performs better relevance filtering than cosine
-> similarity, understands *why* something is stale (not just that it hasn't
-> been confirmed), and requires zero external dependencies.
->
-> This phase replaces the entire vector DB stack with structured markdown
-> files and a dream-based consolidation cycle inspired by Claude Code's
-> [Auto Dream](https://claudefa.st/blog/guide/mechanics/auto-dream) system.
-> The result is ~300 lines of Go replacing ~2600, with three fewer external
-> dependencies (ChromaDB, Python/conda, Voyage AI).
+> **Status: Implemented** (completed 2026-03-26).
+> Phase 5.8 has been fully implemented. The entire ChromaDB/Voyage AI vector
+> memory system has been replaced with a lightweight markdown-based memory
+> system (~300 lines replacing ~2600). Key deliverables:
+> - `internal/memory/` reduced to `files.go`, `synthesis.go`, `dream.go`, `size.go`, `types.go`
+> - Post-run synthesis writes cross-story lessons to `.ralph/memory/learnings.md`
+> - PRD quality lessons written to `.ralph/memory/prd-learnings.md`
+> - `BuildPrompt()` injects memory file contents into worker prompts
+> - Dream consolidation runs automatically every N runs (default: 5) or manually via `ralph memory consolidate`
+> - Size monitoring warns when memory files exceed thresholds (50k/150k tokens)
+> - `ralph memory` subcommands updated: `stats`, `consolidate`, `reset`
+> - ChromaDB, Voyage AI, and Python/conda dependencies fully removed
+> - All vector DB code (`client.go`, `embedder.go`, `retrieval.go`, `sidecar.go`, `scanner.go`, `maintenance.go`, `setup.go`, `pipeline.go`) deleted
 >
 > **Key insight:** Ralph's workers ARE Claude Code instances. They already
 > have auto-memory natively. The only knowledge that requires custom handling
@@ -1731,21 +1731,21 @@ Update `ralph memory` subcommand:
 
 ### Acceptance Criteria
 
-- [ ] ChromaDB, Voyage AI, and Python environment dependencies fully removed
-- [ ] `internal/memory/` reduced from ~2600 lines to ~300 lines
-- [ ] Post-run synthesis writes cross-story lessons to `.ralph/memory/learnings.md`
-- [ ] PRD quality lessons written to `.ralph/memory/prd-learnings.md`
-- [ ] `BuildPrompt()` injects memory file contents into worker prompts
-- [ ] Dream consolidation runs automatically every N runs (default: 5)
-- [ ] Dream cycle merges duplicates, drops stale entries, updates confirmations
-- [ ] `ralph memory consolidate` manually triggers dream cycle
-- [ ] `ralph memory stats` shows file sizes, entry counts, consolidation status
-- [ ] Size warning emitted when memory files exceed warn threshold (50k tokens)
-- [ ] Size error emitted when memory files exceed critical threshold (150k tokens)
-- [ ] `/ralph` skill continues to read learned PRD lessons from `prd-learnings.md`
-- [ ] Worker struct no longer carries ChromaClient or Embedder
-- [ ] Existing tests updated or replaced to cover new memory system
-- [ ] `make build` succeeds with all vector DB code removed
+- [x] ChromaDB, Voyage AI, and Python environment dependencies fully removed
+- [x] `internal/memory/` reduced from ~2600 lines to ~300 lines
+- [x] Post-run synthesis writes cross-story lessons to `.ralph/memory/learnings.md`
+- [x] PRD quality lessons written to `.ralph/memory/prd-learnings.md`
+- [x] `BuildPrompt()` injects memory file contents into worker prompts
+- [x] Dream consolidation runs automatically every N runs (default: 5)
+- [x] Dream cycle merges duplicates, drops stale entries, updates confirmations
+- [x] `ralph memory consolidate` manually triggers dream cycle
+- [x] `ralph memory stats` shows file sizes, entry counts, consolidation status
+- [x] Size warning emitted when memory files exceed warn threshold (50k tokens)
+- [x] Size error emitted when memory files exceed critical threshold (150k tokens)
+- [x] `/ralph` skill continues to read learned PRD lessons from `prd-learnings.md`
+- [x] Worker struct no longer carries ChromaClient or Embedder
+- [x] Existing tests updated or replaced to cover new memory system
+- [x] `make build` succeeds with all vector DB code removed
 
 ### Estimated Scope
 
@@ -2373,7 +2373,7 @@ Phase 1 (Story State + Checkpoint) ✅
   │
   ├──→ Phase 2 (Vector Memory) ✅ → SUPERSEDED
   │      │
-  │      ├──→ Phase 5.8 (Markdown Memory — replaces vector DB) ← NEXT
+  │      ├──→ Phase 5.8 (Markdown Memory — replaces vector DB) ✅
   │      │
   │      ├──→ Phase 4 (Agent Specialization) ✅
   │      │
@@ -2389,7 +2389,7 @@ Phase 1 (Story State + Checkpoint) ✅
   │      │      │
   │      │      └──→ Phase 9 (Improved DAG Accuracy)
   │      │
-  │      └──→ Phase 7 (MCP Server — scoped) ← depends on Phase 5.8
+  │      └──→ Phase 7 (MCP Server — scoped) ← depends on Phase 5.8 ✅
   │
   Phase 3 (Usage Tracking) ✅
   │
@@ -2412,7 +2412,7 @@ Phase 1 (Story State + Checkpoint) ✅
 | 6th   | Phase 5: Learning Loop (revised) ✅ | Done | Compounding cross-run improvement, anti-patterns, skill feedback |
 | 7th   | Phase 5.5: Interactive Task Mode ✅ | Done | On-the-fly task dispatch, no PRD required |
 | 8th   | Phase 5.7: Run History Observability ✅ | Done | Baseline metrics for model comparison |
-| **9th** | **Phase 5.8: Markdown Memory** | ~6-8 stories | Delete ~2600 lines, remove 3 dependencies, simpler + better memory |
+| 9th   | Phase 5.8: Markdown Memory ✅ | Done | Deleted ~2600 lines, removed 3 dependencies, simpler + better memory |
 | **10th** | **Phase 6: Multi-Model (simplified)** | ~4-5 stories | Speed + quality allocation per role |
 | **11th** | **Phase 7: MCP Server (scoped)** | ~6-8 stories | Real-time parallel coordination |
 | **12th** | **Phase 8: Knowledge Graph (if needed)** | ~8-10 stories | Structural intelligence — gate on evidence |
@@ -2421,10 +2421,10 @@ Phase 1 (Story State + Checkpoint) ✅
 | **15th** | **Phase 10: Auto-Split Stuck Stories** | ~5-7 stories | Reduce wasted iterations on stuck stories |
 | Stretch | Web Dashboard | — | Team visibility (if needed) |
 
-Phase 5.8 is the recommended next phase — it simplifies the memory
-system dramatically (removing ChromaDB, Voyage AI, and Python dependencies)
-while improving retrieval quality via LLM-native comprehension. Phase 6
-follows as it has no incomplete dependencies. Phase 8 is explicitly
+Phase 5.8 is now complete — the memory system has been simplified from
+~2600 lines of vector DB infrastructure to ~300 lines of markdown-based
+memory with dream consolidation. Phase 6 (Multi-Model) is the recommended
+next phase as it has no incomplete dependencies. Phase 8 is explicitly
 evidence-gated — only build if architects are missing structural dependency
 information that they can't get by reading codebase files directly.
 
@@ -2436,15 +2436,15 @@ After full rollout, ralph should demonstrate:
 
 - **Context efficiency**: Agent prompts contain curated learned context
   via markdown memory, not raw dumps. Dream consolidation keeps memory
-  files lean. ✅ (Phases 1-2, refined by Phase 5.8)
+  files lean. ✅ (Phases 1-2, completed by Phase 5.8)
 - **Story success rate**: >90% first-attempt pass rate (up from current baseline)
 - **Speed allocation**: Architect uses Opus, implementer uses Sonnet — right
   model for each role (replaces cost reduction metric — user is on Claude Max)
 - **Crash resilience**: Any interruption recoverable via checkpoint + resume ✅ (Phase 1)
 - **Cross-run learning**: Measurable improvement in success rate across
-  successive PRD runs on the same codebase ✅ (Phase 5, simplified by Phase 5.8)
+  successive PRD runs on the same codebase ✅ (Phase 5, completed by Phase 5.8)
 - **Minimal dependencies**: No external ML/vector infrastructure required.
-  Memory system runs on markdown files + LLM comprehension (Phase 5.8)
+  Memory system runs on markdown files + LLM comprehension ✅ (Phase 5.8)
 - **Parallel efficiency**: DAG analysis produces fewer false dependencies,
   enabling more concurrent story execution (Phase 9)
 - **Stuck recovery**: Stuck stories are automatically split rather than

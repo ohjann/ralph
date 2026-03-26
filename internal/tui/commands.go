@@ -548,6 +548,10 @@ func qualityFixCmd(ctx context.Context, cfg *config.Config, assessment quality.A
 
 func generateSummaryCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
+		// Remove stale SUMMARY.md so Claude generates a fresh one from current state
+		summaryPath := filepath.Join(cfg.ProjectDir, "SUMMARY.md")
+		_ = os.Remove(summaryPath)
+
 		// Read PRD for context
 		prdData, _ := os.ReadFile(cfg.PRDFile)
 		// Read progress for context
@@ -580,7 +584,6 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 		_ = result
 
 		// Read the generated summary
-		summaryPath := filepath.Join(cfg.ProjectDir, "SUMMARY.md")
 		content, _ := os.ReadFile(summaryPath)
 
 		return summaryDoneMsg{Content: string(content), Err: err}
