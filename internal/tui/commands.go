@@ -17,6 +17,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/debuglog"
 	rexec "github.com/eoghanhynes/ralph/internal/exec"
+	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/judge"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/quality"
@@ -55,6 +56,26 @@ func spriteTickCmd() tea.Cmd {
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}
+	})
+}
+
+func checkMemorySizeCmd(projectDir string) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		result, err := memory.CheckSize(projectDir)
+		if err != nil {
+			debuglog.Log("memory size check error: %v", err)
+			return nil
+		}
+		debuglog.Log("memory size check: %d bytes, ~%d tokens, level=%s", result.TotalBytes, result.TokenEstimate, result.Level())
+		msg := result.WarnMessage()
+		if msg == "" {
+			return nil
+		}
+		level := statusWarn
+		if result.Level() == "crit" {
+			level = statusError
+		}
+		return statusMsg{Text: msg, Level: statusLevel(level)}
 	})
 }
 

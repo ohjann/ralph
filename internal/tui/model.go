@@ -504,6 +504,9 @@ func (m *Model) Init() tea.Cmd {
 		spriteInit = spriteTickCmd()
 	}
 
+	// Check memory file sizes at startup (shown once via status bar).
+	memCheck := checkMemorySizeCmd(m.cfg.ProjectDir)
+
 	if m.cfg.IdleMode {
 		m.phase = phaseIdle
 		return tea.Batch(
@@ -512,6 +515,7 @@ func (m *Model) Init() tea.Cmd {
 			fastTickCmd(),
 			tickCmd(),
 			spriteInit,
+			memCheck,
 		)
 	}
 	if m.cfg.PlanFile != "" {
@@ -523,6 +527,7 @@ func (m *Model) Init() tea.Cmd {
 			fastTickCmd(),
 			tickCmd(),
 			spriteInit,
+			memCheck,
 		)
 	}
 	if m.cfg.NoPRD {
@@ -541,6 +546,7 @@ func (m *Model) Init() tea.Cmd {
 			m.spinner.Tick,
 			fastTickCmd(),
 			tickCmd(),
+			memCheck,
 		}
 		if spriteInit != nil {
 			initCmds = append(initCmds, spriteInit)
@@ -554,6 +560,7 @@ func (m *Model) Init() tea.Cmd {
 		fastTickCmd(),
 		tickCmd(),
 		spriteInit,
+		memCheck,
 	)
 }
 
