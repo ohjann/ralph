@@ -462,13 +462,20 @@ func renderCostsContent(rc *costs.RunCosting, stories []StoryDisplayInfo) string
 			iterLabel = "iters"
 		}
 		storyTurns := 0
+		var lastModel string
 		for _, ic := range sc.Iterations {
 			storyTurns += ic.TokenUsage.NumTurns
+			if ic.TokenUsage.Model != "" {
+				lastModel = ic.TokenUsage.Model
+			}
 		}
 
 		detail := fmt.Sprintf("%d %s, %d turns", iterCount, iterLabel, storyTurns)
 		if hasTokenData {
 			detail = fmt.Sprintf("$%.2f  %s", sc.TotalCost, detail)
+		}
+		if lastModel != "" {
+			detail += fmt.Sprintf(" [%s]", shortModel(lastModel))
 		}
 
 		sb.WriteString(fmt.Sprintf("  %s (%s)%s%s\n",
@@ -609,4 +616,18 @@ func renderAntiPatternsContent(patterns []memory.AntiPattern) string {
 	}
 
 	return sb.String()
+}
+
+// shortModel extracts a readable name from a full model ID.
+// e.g. "claude-opus-4-6" → "opus", "claude-sonnet-4-20250514" → "sonnet"
+func shortModel(model string) string {
+	for _, name := range []string{"opus", "sonnet", "haiku"} {
+		if strings.Contains(model, name) {
+			return name
+		}
+	}
+	if strings.Contains(model, "gemini") {
+		return "gemini"
+	}
+	return model
 }
