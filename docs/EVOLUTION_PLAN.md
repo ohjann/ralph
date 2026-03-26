@@ -39,13 +39,13 @@ implement user stories from a PRD. Key existing capabilities:
 
 ### Key Limitations to Address
 
-1. ~~Memory is flat — no semantic retrieval, all recent context dumped into prompt~~ → **Addressed in Phase 2** (semantic memory with vector DB)
+1. ~~Memory is flat — no semantic retrieval, all recent context dumped into prompt~~ → **Addressed in Phase 2/2.1** (vector DB → markdown memory with dream consolidation)
 2. ~~Context exhaustion recovery is lossy — relies on text markers in progress.md~~ → **Addressed in Phase 1** (structured per-story state)
 3. ~~No structured per-story work state — agent must reconstruct intent from history~~ → **Addressed in Phase 1** (storystate package)
 4. ~~No cost visibility — token usage is logged but not surfaced~~ → **Addressed in Phase 3** (usage tracking tab, run history, remote status page)
 5. ~~All Claude invocations use the same generalist prompt~~ → **Addressed in Phase 4** (role-specific agents: architect, implementer, debugger)
 6. ~~No crash recovery — killing ralph mid-run loses orchestration state~~ → **Partially addressed in Phase 1** (checkpoint package — detection and prompt work, but resume logic is a stub)
-7. ~~No cross-run learning — each PRD run starts from zero institutional knowledge~~ → **Addressed in Phase 2** (semantic memory with vector DB)
+7. ~~No cross-run learning — each PRD run starts from zero institutional knowledge~~ → **Addressed in Phase 2/2.1** (markdown memory with dream consolidation)
 
 ---
 
@@ -229,12 +229,19 @@ coordinator, workspace, and TUI.
 
 ---
 
-## Phase 2: Semantic Memory with Vector Database ✅ COMPLETE
+## Phase 2: Semantic Memory with Vector Database ✅ COMPLETE → ⚠️ SUPERSEDED BY PHASE 2.1
 
 **Impact: Transformative | Complexity: Medium | Dependencies: Phase 1 (story state provides richer content to embed)**
 
-> **Status: Complete** (completed 2026-03-12).
-> Phase 2 has been implemented with the core pipeline working end-to-end. Key deliverables:
+> **Status: Superseded** (completed 2026-03-12, superseded by Phase 5.8 on 2026-03-26).
+> Phase 2 was implemented and worked end-to-end, but with 1M context windows
+> now standard, the vector DB infrastructure (ChromaDB, Voyage AI, Python env,
+> ~2600 lines of Go) solves a problem that no longer exists — context scarcity.
+> An LLM reading markdown files in-context performs better relevance filtering
+> than cosine similarity and requires zero external dependencies. Phase 5.8
+> replaces this with markdown-based memory and dream consolidation.
+>
+> **Original deliverables (to be removed by Phase 5.8):**
 > - `internal/memory/` package — ChromaDB sidecar lifecycle, client, embedder (Voyage AI), pipeline, retrieval, hygiene, maintenance
 > - ChromaDB starts/stops with ralph lifecycle; data persists to disk
 > - All 5 collections created (patterns, completions, errors, decisions, codebase)
@@ -829,9 +836,11 @@ the full rejection reasoning is included, not just the pass/fail icon.
 
 - **The agent loop** — still needed for execution control, test feedback,
   judge verification
-- **Semantic retrieval over flat injection** — relevance > recency is still
-  better even with abundant context. Dumping everything is worse signal.
-- **Dedup and hygiene** — noise reduction matters regardless of window size
+- **Curated memory over raw dumps** — even with abundant context, structured
+  learnings are better signal than dumping everything. Phase 5.8's dream
+  consolidation keeps memory files curated and relevant.
+- **Memory hygiene** — noise reduction matters regardless of window size.
+  Dream consolidation prunes stale entries and merges duplicates.
 - **Checkpoint/resume** — orthogonal to context size
 - **Phase 1b (PRD injection)** — already shipped, still saves a tool call.
   Not worth reverting, just not worth optimising further.
@@ -860,7 +869,7 @@ feedback (~50 lines). No new packages.
 
 ## Phase 4: Agent Specialization ✅ COMPLETE
 
-**Impact: High | Complexity: Medium | Dependencies: Phase 1 (story state for plan handoff), Phase 2 (vector memory for architect context)**
+**Impact: High | Complexity: Medium | Dependencies: Phase 1 (story state for plan handoff), Phase 5.8 (markdown memory for architect context)**
 
 > **Status: Complete** (completed 2026-03-16).
 > Phase 4 has been fully implemented. Key deliverables:
@@ -943,7 +952,7 @@ Modify the story execution flow:
 
 ```
 Story Start
-  ├─ Architect agent runs (reads codebase + vector memory, writes plan)
+  ├─ Architect agent runs (reads codebase + learned context, writes plan)
   ├─ Plan stored in .ralph/stories/{id}/plan.md
   ├─ Implementer agent runs (reads plan, writes code)
   ├─ [If stuck] → Debugger agent runs (specialized stuck context)
@@ -990,21 +999,28 @@ worker, coordinator, and TUI.
 
 ---
 
-## Phase 5: Learning Loop / Self-Improving System (Revised) ✅ COMPLETE
+## Phase 5: Learning Loop / Self-Improving System (Revised) ✅ COMPLETE → ⚠️ PARTIALLY SUPERSEDED BY PHASE 2.1
 
-**Impact: Medium-High | Complexity: Medium | Dependencies: Phase 2 (vector DB — already complete), Phase 3 (run history — already complete)**
+**Impact: Medium-High | Complexity: Medium | Dependencies: Phase 5.8 (markdown memory — supersedes Phase 2), Phase 3 (run history — already complete)**
 
-> **Status: Implemented** (completed 2026-03-23 on branch `ralph/phase5-learning-loop`).
-> All 12 stories passed. Key deliverables:
-> - `ralph_lessons` and `ralph_prd_lessons` ChromaDB collections with full dedup/decay/cap hygiene
-> - `SynthesizeRunLessons()` — post-run Gemini analysis extracting cross-story lessons
-> - `EmbedLessons()` — stores lessons in ChromaDB with confidence tracking and dedup
-> - `DetectAntiPatterns()` — aggregates `ralph_errors` to flag fragile areas, flaky tests, common oversights
-> - Anti-pattern warnings injected into `BuildPrompt()` for stories touching flagged files
-> - Anti-patterns displayed in TUI Usage tab
-> - PRD-quality lessons extracted and stored in `ralph_prd_lessons` for `/ralph` skill feedback
-> - `/ralph` skill reads `.ralph/lessons.json` to incorporate learned constraints into PRD generation
-> - Confidence-weighted ranking in retrieval pipeline for lessons
+> **Status: Implemented** (completed 2026-03-23), **partially superseded** by
+> Phase 5.8 (2026-03-26). The memory storage and retrieval portions of Phase 5
+> (ChromaDB collections, Gemini synthesis, confidence-weighted ranking) are
+> replaced by Phase 5.8's markdown memory and Claude-based dream consolidation.
+> The conceptual contributions survive: post-run synthesis, anti-pattern
+> detection, and the `/ralph` skill feedback loop are preserved in Phase 5.8's
+> design — just backed by markdown files and Claude instead of ChromaDB and
+> Gemini.
+>
+> **Original deliverables (storage replaced by Phase 5.8, concepts preserved):**
+> - ~~`ralph_lessons` and `ralph_prd_lessons` ChromaDB collections~~ → `learnings.md` and `prd-learnings.md`
+> - ~~`SynthesizeRunLessons()` via Gemini~~ → Post-run synthesis via Claude (Phase 5.8b)
+> - ~~`EmbedLessons()` with ChromaDB dedup~~ → Markdown append with dream consolidation (Phase 5.8d)
+> - `DetectAntiPatterns()` — concept preserved, implementation updated to read from markdown
+> - Anti-pattern warnings injected into `BuildPrompt()` — preserved
+> - Anti-patterns displayed in TUI Usage tab — preserved
+> - `/ralph` skill reads `prd-learnings.md` (was `.ralph/lessons.json`) — preserved
+> - ~~Confidence-weighted ranking in retrieval pipeline~~ → LLM-native relevance filtering
 
 > **Revision note (2026-03-19):** The original Phase 5 was written before
 > Phase 2 was implemented. The memory pipeline already provides cross-run
@@ -1014,6 +1030,13 @@ worker, coordinator, and TUI.
 > anti-pattern detection, and closing the skill feedback loop. Prompt
 > refinement (original 5d) has been cut — the base prompt is hand-tuned
 > and working; auto-suggesting edits is a footgun.
+>
+> **Revision note (2026-03-26):** Phase 5.8 supersedes the storage and
+> retrieval portions of this phase. Post-run synthesis now writes to
+> markdown files instead of ChromaDB collections, uses Claude instead of
+> Gemini, and relies on dream consolidation instead of numeric confidence
+> decay. Anti-pattern detection and skill feedback loop concepts are
+> preserved but their backing store changes from vector DB to markdown.
 
 ### Goal
 
@@ -1023,10 +1046,11 @@ the `/ralph` skill generates better PRDs over time.
 
 ### Context for Builder
 
-The memory pipeline (`internal/memory/pipeline.go`) already embeds patterns,
-completions, errors, and decisions into ChromaDB on story completion. These
-are retrieved by `BuildPrompt()` via `internal/memory/retrieval.go` and
-injected into future iterations. This is per-story learning and it works.
+The memory pipeline (previously `internal/memory/pipeline.go` with ChromaDB,
+now replaced by Phase 5.8's markdown memory) captures patterns, completions,
+errors, and decisions. Per-story knowledge is now handled by Claude's
+built-in auto-memory. Cross-story orchestration knowledge is written to
+`.ralph/memory/` markdown files and injected by `BuildPrompt()`.
 
 What's missing:
 1. **Holistic analysis** — no step synthesizes cross-story insights after a
@@ -1054,10 +1078,11 @@ holistically:
 - Which stories were rejected by judge and what was missing?
 - What cross-story patterns emerged that individual story embeddings miss?
 
-Output: synthesized lessons stored in a new `ralph_lessons` ChromaDB
-collection (high-signal, cross-story insights only — not duplicating what's
-already in `ralph_patterns`, `ralph_errors`, etc.) and persisted to
-`.ralph/lessons.json` for human review.
+Output: synthesized lessons appended to `.ralph/memory/learnings.md`
+(high-signal, cross-story insights only) and persisted for human review.
+**Note (2026-03-26):** Phase 5.8 replaces this with Claude-based synthesis
+writing to markdown files. The `ralph_lessons` ChromaDB collection and
+Gemini dependency are removed.
 
 ```json
 {
@@ -1077,19 +1102,20 @@ already in `ralph_patterns`, `ralph_errors`, etc.) and persisted to
 
 **Key design rule: `ralph-prompt.md` stays static and hand-tuned. Lessons
 are NEVER appended to it.** Lessons are injected dynamically at prompt build
-time via the same vector retrieval pipeline — subject to the existing
-`--memory-max-tokens` budget. Lessons gain confidence as confirmed across
-runs. Low-confidence lessons (single occurrence) are injected with lower
-priority.
+time by reading `.ralph/memory/learnings.md` directly into the prompt. The
+LLM performs relevance filtering natively — no vector search or token budget
+needed with 1M context. Lessons gain confirmation counts as confirmed across
+runs. The dream consolidation cycle (Phase 5.8d) handles dedup and pruning.
 
-**Collection hygiene:** `ralph_lessons` follows the same dedup, decay, and
-cap rules as other collections. Max 100 documents. Dedup at >0.9 cosine
-similarity. Confidence decay of 0.85 per unconfirmed run.
+**Hygiene:** Dream consolidation (Phase 5.8d) replaces numeric decay.
+Entries with zero confirmations are dropped after N runs. Duplicate entries
+are merged. Files are kept under 50 entries each.
 
 #### 5b. Anti-Pattern Detection
 
-Query `ralph_errors` and `ralph_completions` collections to detect recurring
-failure modes across runs:
+Analyse run history and memory files to detect recurring failure modes
+across runs (previously queried `ralph_errors` and `ralph_completions`
+ChromaDB collections — now reads from run history and learnings):
 - Same file causing stuck detection repeatedly → flag as **fragile area**
 - Same test failing across stories → flag as **flaky test**
 - Same judge rejection reason → flag as **common oversight**
@@ -1107,8 +1133,8 @@ of the last 5 stories that modified it. Common root cause: test database
 not running. Ensure test DB is available before running integration tests.
 ```
 
-Anti-pattern data is derived from existing collections — no new embedding
-needed, just aggregation queries.
+Anti-pattern data is derived from run history (`run-history.json`) and
+memory files — no embedding or vector queries needed.
 
 #### 5c. Skill Feedback Loop
 
@@ -1120,7 +1146,8 @@ and acceptance criteria.
 **Close the loop:**
 
 After post-run synthesis (5a), extract lessons specifically relevant to PRD
-quality and store them in a `ralph_prd_lessons` ChromaDB collection:
+quality and append them to `.ralph/memory/prd-learnings.md` (previously
+stored in `ralph_prd_lessons` ChromaDB collection):
 
 - **Story sizing lessons**: "Stories touching `internal/api/` fail when they
   mix schema changes with endpoint logic — split by concern, not file count"
@@ -1134,50 +1161,50 @@ quality and store them in a `ralph_prd_lessons` ChromaDB collection:
 **Skill integration:**
 
 The skill itself (`SKILL.md`) stays static — same principle as
-`ralph-prompt.md`. When the skill runs, it reads `.ralph/lessons.json`
-(or queries `ralph_prd_lessons` if ChromaDB is available) and injects
-relevant lessons as additional constraints before generating the PRD.
+`ralph-prompt.md`. When the skill runs, it reads
+`.ralph/memory/prd-learnings.md` and injects relevant lessons as
+additional constraints before generating the PRD.
 
 **Example injection into skill context:**
 ```
 ## Learned PRD Constraints (from previous ralph runs)
 - Stories modifying internal/auth/ should split schema vs middleware vs UI
-  concerns (confidence: 0.9, confirmed 3 times)
+  concerns (confirmed 3 times)
 - Always include "Tests pass" for stories touching internal/db/
-  (confidence: 0.85, confirmed 2 times)
+  (confirmed 2 times)
 - Stories mixing unrelated acceptance criteria (e.g., UI + API + schema)
   tend to produce lower quality — split by concern instead
-  (confidence: 0.75, confirmed 2 times)
+  (confirmed 2 times)
 ```
 
-**Collection hygiene:** `ralph_prd_lessons` max 50 documents. Same dedup
-and decay rules. These lessons are inherently slower to accumulate (one
-batch per PRD run) so a smaller cap is appropriate.
+**Hygiene:** Dream consolidation (Phase 5.8d) keeps `prd-learnings.md`
+under 50 entries. These lessons accumulate slowly (one batch per PRD run)
+so a smaller cap is appropriate.
 
 ### Acceptance Criteria
 
 - [ ] Post-run synthesis generates cross-story lessons automatically after PRD completion
-- [ ] Lessons are stored in `ralph_lessons` collection and `.ralph/lessons.json`
-- [ ] Relevant lessons are injected into prompts for new stories via existing retrieval pipeline
-- [ ] Confidence scoring tracks lesson reliability across runs
-- [ ] Anti-patterns are detected by aggregating `ralph_errors` and surfaced in TUI Usage tab
+- [ ] Lessons are stored in `.ralph/memory/learnings.md` (was `ralph_lessons` ChromaDB collection)
+- [ ] Relevant lessons are injected into prompts by reading markdown files directly
+- [ ] Confirmation counts track lesson reliability across runs (dream consolidation prunes stale entries)
+- [ ] Anti-patterns are detected from run history and memory files, surfaced in TUI Usage tab
 - [ ] Anti-pattern warnings are injected into prompts for stories touching flagged areas
-- [ ] PRD-quality lessons are extracted and stored in `ralph_prd_lessons` collection
-- [ ] `/ralph` skill reads learned lessons before generating prd.json
+- [ ] PRD-quality lessons are stored in `.ralph/memory/prd-learnings.md` (was `ralph_prd_lessons` collection)
+- [ ] `/ralph` skill reads `prd-learnings.md` before generating prd.json
 - [ ] Generated PRDs reflect learned sizing, ordering, and criteria patterns
 
 ### Estimated Scope
 
-~500-700 lines of Go code. One new analysis prompt template. Extends
-existing memory pipeline. Modifications to runner (prompt injection), TUI
-(anti-pattern display), and skill invocation. Two new ChromaDB collections
-(`ralph_lessons`, `ralph_prd_lessons`).
+~300-400 lines of Go code (reduced from original estimate — markdown
+files are simpler than ChromaDB collections). One new analysis prompt
+template. Modifications to runner (prompt injection), TUI (anti-pattern
+display), and skill invocation. Two new markdown files in `.ralph/memory/`.
 
 ---
 
 ## Phase 5.5: Interactive Task Mode ✅ COMPLETE
 
-**Impact: High | Complexity: Medium | Dependencies: Phase 4 (agent roles — already complete), Phase 1 (story state — already complete), Phase 5 (learning loop — already complete, memory system used for interactive tasks)**
+**Impact: High | Complexity: Medium | Dependencies: Phase 4 (agent roles — already complete), Phase 1 (story state — already complete), Phase 5 (learning loop — already complete, learned context used for interactive tasks)**
 
 > **Status: Complete** (completed 2026-03-23).
 > All 11 stories passed (P55-001 through P55-011). Key deliverables:
@@ -1339,7 +1366,7 @@ sequential step but a persistent capability.
 - [x] Interactive tasks work alongside PRD stories when prd.json is provided
 - [x] Interactive tasks are included in the checkpoint for crash recovery
 - [x] Multiple tasks can run in parallel when `--workers N > 1`
-- [x] Memory system works with interactive tasks (patterns embedded, context retrieved)
+- [x] Memory system works with interactive tasks (learned context injected into prompts)
 
 ### Estimated Scope
 
@@ -1414,6 +1441,318 @@ Update `cmd/ralph/main.go` `printHistory()` to show two new columns:
 
 ~100 lines of Go code. Modifications to history.go (struct), model.go
 (persistence), main.go (display). One new test file update.
+
+---
+
+## Phase 5.8: Markdown Memory — Replace Vector DB with Dream-Based Consolidation
+
+**Impact: High (simplification) | Complexity: Medium | Dependencies: Phase 2 (supersedes), Phase 5 (supersedes memory portions)**
+
+> **Added 2026-03-26.** Phase 2 built a comprehensive semantic memory system
+> using ChromaDB, Voyage AI embeddings, and ~2600 lines of Go infrastructure.
+> With 1M context windows now standard on Claude Max, the core justification
+> for vector search — context scarcity — no longer applies. An LLM reading
+> markdown files in-context performs better relevance filtering than cosine
+> similarity, understands *why* something is stale (not just that it hasn't
+> been confirmed), and requires zero external dependencies.
+>
+> This phase replaces the entire vector DB stack with structured markdown
+> files and a dream-based consolidation cycle inspired by Claude Code's
+> [Auto Dream](https://claudefa.st/blog/guide/mechanics/auto-dream) system.
+> The result is ~300 lines of Go replacing ~2600, with three fewer external
+> dependencies (ChromaDB, Python/conda, Voyage AI).
+>
+> **Key insight:** Ralph's workers ARE Claude Code instances. They already
+> have auto-memory natively. The only knowledge that requires custom handling
+> is orchestration-level cross-story insights that no single worker sees —
+> specifically post-run synthesis and PRD quality lessons. Everything else
+> (per-story patterns, error/resolution pairs, codebase navigation) is
+> handled by the workers' built-in auto-memory.
+
+### Goal
+
+Replace the ChromaDB/Voyage AI vector memory system with a lightweight
+markdown-based memory that leverages LLM-native comprehension for relevance
+filtering and a periodic dream/consolidation cycle for maintenance.
+
+### Context for Builder
+
+The current memory system (`internal/memory/`) consists of:
+- `client.go` (529 lines) — ChromaDB REST API wrapper
+- `embedder.go` (209 lines) — Voyage AI embedding client
+- `retrieval.go` (311 lines) — Vector search with ranking
+- `pipeline.go` (416 lines) — Extraction and embedding pipeline
+- `scanner.go` (379 lines) — AST-based codebase indexing
+- `sidecar.go` (181 lines) — ChromaDB subprocess management
+- `maintenance.go` (144 lines) — Numeric confidence decay
+- `synthesis.go` — Post-run lesson generation via Gemini
+- `setup.go` — Python/conda environment setup
+- `types.go` (180 lines) — Data structures and 7 collections
+- `commands.go` (254 lines) — CLI commands
+
+This system manages 7 ChromaDB collections (patterns, completions, errors,
+decisions, codebase, lessons, prd_lessons) with a total cap of ~950
+documents. It requires a ChromaDB sidecar process on port 9876, a Python
+environment (conda or venv), and Voyage AI API access for embeddings.
+
+Key integration points:
+- `internal/worker/worker.go`: Workers receive `ChromaClient` and `Embedder`
+  from coordinator, build memory-augmented prompts
+- `internal/runner/runner.go`: `BuildPrompt()` accepts `Memory` retriever
+  and `MemoryOpts` for semantic injection
+- `internal/coordinator/coordinator.go`: `SetMemory()` configures memory
+  for all workers
+- `internal/config/config.go`: `MemoryConfig` with TopK, MinScore,
+  MaxTokens, Disabled, Port
+
+### What to Build
+
+#### 5.8a. Markdown Memory Files
+
+Replace 7 ChromaDB collections with 2 structured markdown files in
+`.ralph/memory/`:
+
+```
+.ralph/memory/
+├── learnings.md       # cross-story lessons from post-run synthesis
+└── prd-learnings.md   # PRD quality lessons (sizing, ordering, criteria)
+```
+
+**Why only 2 files, not 7:**
+- `ralph_patterns`, `ralph_errors`, `ralph_completions`, `ralph_decisions`
+  — Per-story knowledge that Claude's built-in auto-memory captures
+  natively. Each worker is a Claude Code instance; it saves relevant
+  patterns, errors, and decisions to its own auto-memory during execution.
+- `ralph_codebase` — Redundant. Workers have the codebase right there and
+  can read files directly. Embedding Go AST summaries so an LLM can search
+  them is unnecessary when the LLM can just `Read` the files.
+- `ralph_lessons` → `learnings.md` — Cross-story insights that only the
+  orchestration layer sees. This is the one thing auto-memory can't capture
+  because no single Claude instance has the full-run view.
+- `ralph_prd_lessons` → `prd-learnings.md` — PRD quality feedback for the
+  `/ralph` skill.
+
+**Entry format** (structured markdown with metadata headers):
+
+```markdown
+### lesson-2026-03-26-auth-retry
+- **Run:** feature-auth (2026-03-26)
+- **Stories:** P55-003, P55-007
+- **Confirmed:** 2 times
+- **Category:** testing
+
+When auth tokens expire mid-request, retry with backoff rather than
+failing the story. The token refresh endpoint has a 2s cold-start delay.
+Always include `ensure auth token is fresh` in implementation plans for
+stories touching internal/auth/.
+```
+
+#### 5.8b. Post-Run Synthesis (Write Path)
+
+After a PRD run completes, Ralph spawns a Claude instance (not Gemini —
+removing that dependency) to analyse the full run and write structured
+entries to the memory files.
+
+The synthesis prompt receives:
+- Summary of all stories: ID, title, status, iteration count, judge results
+- Events from the run (stuck detections, errors, judge rejections)
+- Existing contents of `learnings.md` and `prd-learnings.md`
+
+The synthesis Claude call:
+1. Analyses cross-story patterns the individual workers couldn't see
+2. Appends new entries to `learnings.md` (general lessons) and
+   `prd-learnings.md` (PRD quality lessons)
+3. Updates confirmation counts on existing entries that were re-confirmed
+4. Does NOT modify existing entries beyond confirmation bumps — that's
+   the dream cycle's job
+
+**Implementation:** Create `internal/memory/synthesis.go` (~100 lines).
+Reuse the existing `runner.RunClaude()` infrastructure with a synthesis
+prompt template at `prompts/synthesis.md`.
+
+#### 5.8c. Prompt Injection (Read Path)
+
+Modify `BuildPrompt()` in `internal/runner/runner.go`:
+- Read `.ralph/memory/learnings.md` and `.ralph/memory/prd-learnings.md`
+- Inject contents as a `## Learned Context` section in the prompt
+- No embedding, no query, no scoring — the LLM reads the full files and
+  determines relevance itself
+
+With consolidation keeping files pruned (5.8d), both files should stay
+well under 50k tokens combined — trivial within a 1M context window.
+
+#### 5.8d. Dream Consolidation Cycle
+
+Every N runs (configurable, default 5), Ralph spawns a Claude instance
+to consolidate the memory files. Adapted from Claude Code's Auto Dream
+system prompt:
+
+```
+# Dream: Memory Consolidation
+
+You are performing a dream — a reflective pass over Ralph's memory files.
+Consolidate accumulated learnings into durable, well-organized memories
+so future runs benefit from cleaner, more relevant context.
+
+Memory directory: {.ralph/memory/}
+
+## Phase 1 — Orient
+
+- Read learnings.md and prd-learnings.md
+- Understand current entries, categories, and confirmation counts
+
+## Phase 2 — Gather Signal
+
+- Review the last {N} run summaries from .ralph/run-history.json
+- Identify which existing learnings were confirmed or contradicted
+- Note any new patterns not yet captured
+
+## Phase 3 — Consolidate
+
+For each memory file, produce an updated version that:
+- Merges duplicate or overlapping lessons into single entries
+- Removes lessons contradicted by more recent evidence
+- Drops lessons with zero confirmations older than {M} runs (default: 10)
+- Updates confirmation counts based on recent run evidence
+- Converts any relative dates to absolute dates
+- Preserves high-confidence, repeatedly-confirmed lessons
+
+## Phase 4 — Prune
+
+- Keep each file under {max_entries} entries (default: 50)
+- If over limit, drop lowest-confirmation entries first
+- Ensure entries remain well-categorised and clearly written
+
+Return a brief summary of what you consolidated, updated, or pruned.
+```
+
+**Implementation:** Create `internal/memory/dream.go` (~100 lines).
+Track run count in `.ralph/run-meta.json` (increment after each run,
+reset after consolidation). The dream runs as a Claude invocation via
+`runner.RunClaude()`.
+
+**Manual trigger:** `ralph memory consolidate` command.
+
+#### 5.8e. Size Warning System
+
+Track memory file sizes and warn when they grow too large:
+
+```go
+const (
+    WarnTokenThreshold = 50_000  // ~200KB — consolidation should prevent this
+    CritTokenThreshold = 150_000 // ~600KB — something is wrong
+)
+```
+
+On each run start, check combined size of `.ralph/memory/` files:
+- **Above warn:** Log warning in TUI — "Memory files are large ({X}
+  tokens). Run `ralph memory consolidate` or check dream cycle."
+- **Above crit:** Log error — "Memory files exceed {X} tokens. This may
+  degrade worker quality. Run `ralph memory consolidate` or
+  `ralph memory reset`."
+
+This prevents silent quality degradation — if memory grows unchecked,
+you'll see it immediately rather than debugging mysterious regressions
+months later.
+
+**Implementation:** Create `internal/memory/size.go` (~50 lines). Check
+runs at TUI startup and before `BuildPrompt()`.
+
+#### 5.8f. Delete Vector DB Infrastructure
+
+Remove the following files entirely:
+- `internal/memory/client.go` — ChromaDB REST wrapper
+- `internal/memory/embedder.go` — Voyage AI client
+- `internal/memory/retrieval.go` — Vector search + ranking
+- `internal/memory/sidecar.go` — ChromaDB subprocess management
+- `internal/memory/scanner.go` — AST-based codebase indexing
+- `internal/memory/maintenance.go` — Numeric decay cycle
+- `internal/memory/setup.go` — Python/conda environment setup
+- `internal/memory/pipeline.go` — Extraction and embedding pipeline
+- `memory/chroma/` — HNSW vector index data
+- `memory/conda-env/` or `memory/.venv/` — Python environment
+
+Update the following:
+- `internal/memory/types.go` — Remove `Document`, `Collection`,
+  `QueryResult` types and all collection definitions. Replace with
+  simple `LearningEntry` struct.
+- `internal/memory/commands.go` — Replace `stats`/`search`/`prune`/`reset`
+  with `consolidate`/`stats`/`reset` commands.
+- `internal/worker/worker.go` — Remove `ChromaClient` and `Embedder`
+  fields from Worker struct. Remove memory retriever construction.
+- `internal/runner/runner.go` — Replace `Memory` retriever interface in
+  `BuildPromptOpts` with direct file reading.
+- `internal/coordinator/coordinator.go` — Remove `SetMemory()` method.
+- `internal/config/config.go` — Replace `MemoryConfig` (TopK, MinScore,
+  MaxTokens, Port) with simplified config (Disabled, DreamEveryNRuns,
+  MaxEntries, WarnTokenThreshold).
+- `go.mod` / `go.sum` — Remove any ChromaDB or Voyage AI dependencies.
+
+#### 5.8g. CLI Commands
+
+Update `ralph memory` subcommand:
+
+- `ralph memory stats` — Show file sizes, entry counts, last
+  consolidation date, runs since last consolidation
+- `ralph memory consolidate` — Manually trigger dream cycle
+- `ralph memory reset` — Clear all memory files (with confirmation)
+
+### Technical Decisions
+
+**Why markdown over a simpler JSON file:**
+- Human-readable and editable — you can manually review and curate
+  learnings by opening the file
+- Naturally structured with headers and metadata
+- Claude comprehends markdown natively — no parsing layer needed
+- Diffs are meaningful in version control (even though `.ralph/` is
+  gitignored, the format supports it if desired)
+
+**Why Claude for synthesis instead of Gemini:**
+- Removes the Gemini CLI dependency, which has been unreliable
+- Ralph already spawns Claude instances — no new infrastructure
+- Claude's comprehension of its own memory format is naturally better
+- Consistent model family across the entire pipeline
+
+**Why no index file:**
+- With only 2 topic files and consolidation keeping them under 50 entries
+  each, an index adds complexity without value
+- If files grow beyond expectations, the size warning system (5.8e) will
+  surface it before quality degrades
+- An index can be added later if needed — it's additive, not architectural
+
+**What about per-worker auto-memory:**
+- Ralph's workers are Claude Code instances with built-in auto-memory
+- Per-story patterns, errors, and decisions are captured natively by
+  each worker during execution
+- Workers sharing the same project directory share auto-memory files
+- Auto-dream consolidates worker memories periodically
+- This phase focuses only on orchestration-level knowledge that no single
+  worker has — the gap auto-memory can't fill
+
+### Acceptance Criteria
+
+- [ ] ChromaDB, Voyage AI, and Python environment dependencies fully removed
+- [ ] `internal/memory/` reduced from ~2600 lines to ~300 lines
+- [ ] Post-run synthesis writes cross-story lessons to `.ralph/memory/learnings.md`
+- [ ] PRD quality lessons written to `.ralph/memory/prd-learnings.md`
+- [ ] `BuildPrompt()` injects memory file contents into worker prompts
+- [ ] Dream consolidation runs automatically every N runs (default: 5)
+- [ ] Dream cycle merges duplicates, drops stale entries, updates confirmations
+- [ ] `ralph memory consolidate` manually triggers dream cycle
+- [ ] `ralph memory stats` shows file sizes, entry counts, consolidation status
+- [ ] Size warning emitted when memory files exceed warn threshold (50k tokens)
+- [ ] Size error emitted when memory files exceed critical threshold (150k tokens)
+- [ ] `/ralph` skill continues to read learned PRD lessons from `prd-learnings.md`
+- [ ] Worker struct no longer carries ChromaClient or Embedder
+- [ ] Existing tests updated or replaced to cover new memory system
+- [ ] `make build` succeeds with all vector DB code removed
+
+### Estimated Scope
+
+~300 lines of new Go code across 4 files (`files.go`, `synthesis.go`,
+`dream.go`, `size.go`). ~2600 lines deleted. One new prompt template
+(`prompts/synthesis.md`). Modifications to worker, runner, coordinator,
+config, and TUI. Net reduction of ~2300 lines and 3 external dependencies.
 
 ---
 
@@ -1502,7 +1841,7 @@ Straightforward wiring — the role system already has the Model field.
 
 ## Phase 7: MCP Tool Server (Revised — Scoped Down)
 
-**Impact: Medium | Complexity: Medium | Dependencies: Phase 2 (vector memory — already complete), Phase 1 (story state — already complete)**
+**Impact: Medium | Complexity: Medium | Dependencies: Phase 5.8 (markdown memory), Phase 1 (story state — already complete)**
 
 > **Revision note (2026-03-19):** With 1M context, `BuildPrompt()` already
 > injects memory, story state, PRD context, and events effectively. The
@@ -1551,9 +1890,10 @@ ralph_report_blocker(description: string, blocked_by_story: string)
 
 ralph_report_pattern(pattern: string, category: string)
   → Agent proactively pushes a discovered pattern for immediate
-    embedding into the vector DB. Currently patterns are only
-    extracted on story *completion* — this enables real-time sharing
-    between parallel workers mid-execution.
+    append to `.ralph/memory/learnings.md`. Currently patterns are
+    only extracted on story *completion* — this enables real-time
+    sharing between parallel workers mid-execution. Other workers
+    pick up new entries on their next `BuildPrompt()` cycle.
 ```
 
 #### 7b. Server Lifecycle
@@ -1593,7 +1933,7 @@ When an agent reports a blocker via `ralph_report_blocker`:
 - [ ] MCP server starts and stops cleanly with ralph lifecycle
 - [ ] Claude instances can check live sibling story status via MCP
 - [ ] Blocker coordination pauses/resumes workers dynamically
-- [ ] Pattern reporting from agents flows into vector DB in real-time
+- [ ] Pattern reporting from agents appends to memory files in real-time
 - [ ] MCP server handles concurrent requests from parallel workers safely
 - [ ] Agents use MCP tools appropriately (not excessively)
 
@@ -1610,19 +1950,21 @@ handling).
 **Impact: Medium | Complexity: Medium-High | Dependencies: Phase 7 (MCP for exposing graph queries)**
 
 > **Note:** Phase 7.5 (Activate `ralph_codebase`) was added on 2026-03-19
-> but removed the same day after audit confirmed that `ralph_codebase` is
-> **already fully operational** — `ScanCodebase()` in `internal/memory/scanner.go`
-> runs on startup, parses Go AST, and upserts into the collection.
-> `RetrieveContext()` queries all 5 collections including codebase. No work needed.
+> but removed the same day after audit confirmed that `ralph_codebase` was
+> fully operational. **Update (2026-03-26):** The `ralph_codebase` ChromaDB
+> collection is removed by Phase 5.8. With 1M context, workers can read
+> codebase files directly — semantic search over AST summaries is redundant.
+> The knowledge graph's value proposition is now purely **structural
+> relationships** (imports, calls, implements) that neither file reading
+> nor markdown memory can provide.
 
-> **Revision note (2026-03-19):** The `ralph_codebase` collection provides
-> semantic search over codebase entities. The knowledge graph adds
-> **structural relationships** (imports, calls, implements) that vector
-> search can't represent. This is genuinely new capability — but it's also
-> significant complexity. Gate this phase on evidence: if Phase 7.5's
-> semantic codebase context measurably improves architect plans, the
-> knowledge graph may not be needed. Build it only if architect agents are
-> still missing structural dependencies.
+> **Revision note (2026-03-19/2026-03-26):** The original justification
+> referenced the `ralph_codebase` vector collection. With Phase 5.8
+> removing all vector DB infrastructure, the gating question changes: do
+> architect agents need structural relationship data (import chains, call
+> graphs, interface implementations) that they can't get by reading the
+> codebase directly? Gate on evidence from actual runs — if architects are
+> missing ripple effects, this phase fills the gap.
 
 ### Goal
 
@@ -1633,10 +1975,10 @@ uses this for impact analysis.
 
 ### Context for Builder
 
-After Phase 7.5, `ralph_codebase` provides semantic codebase context. But
-it can't answer structural queries like "what depends on this interface?"
-or "if I change this function's signature, what breaks?" The knowledge graph
-fills this gap.
+With 1M context, workers can read codebase files directly, and Claude's
+auto-memory captures codebase patterns natively. But neither can answer
+structural queries like "what depends on this interface?" or "if I change
+this function's signature, what breaks?" The knowledge graph fills this gap.
 
 ### What to Build
 
@@ -1663,8 +2005,9 @@ CREATE TABLE relationships (
 );
 ```
 
-Note: AI-generated summaries are already in `ralph_codebase` collection.
-The graph stores only structural data — no duplication with ChromaDB.
+Note: With Phase 5.8, the `ralph_codebase` ChromaDB collection no longer
+exists. The graph stores purely structural data — relationships that
+can't be derived from reading individual files.
 
 #### 8b. Graph Builder
 
@@ -1701,8 +2044,8 @@ compact summary of the target module's imports, dependents, and interfaces.
 ### Estimated Scope
 
 ~800-1000 lines of Go code. Go AST parsing, SQLite schema, MCP tool
-addition. Smaller than original estimate because AI summaries are handled
-by `ralph_codebase` collection, not the graph.
+addition. The graph handles only structural relationships — codebase
+comprehension is handled natively by workers reading files with 1M context.
 
 ---
 
@@ -1901,8 +2244,8 @@ over-specified dependencies.
 #### 9a. Smarter DAG Analysis Prompt
 
 Improve the DAG analysis prompt in `internal/dag/dag.go`:
-- Provide structural codebase context (from Phase 8 knowledge graph or
-  Phase 7.5 codebase collection) so the analysis has actual import/dependency
+- Provide structural codebase context (from Phase 8 knowledge graph if
+  available) so the analysis has actual import/dependency
   information rather than guessing
 - Explicitly ask the model to distinguish "touches the same module" from
   "actually depends on the other story's output"
@@ -1929,7 +2272,7 @@ Track DAG accuracy in run history:
 - [ ] Parallel utilization improves (more stories scheduled concurrently)
 - [ ] No increase in merge conflicts from relaxed dependencies
 - [ ] DAG quality metrics tracked in run history
-- [ ] Analysis uses codebase context when available (Phase 7.5/8)
+- [ ] Analysis uses structural codebase context when available (Phase 8)
 
 ### Estimated Scope
 
@@ -2028,11 +2371,13 @@ and they want a shared view. Not on the critical path.
 ```
 Phase 1 (Story State + Checkpoint) ✅
   │
-  ├──→ Phase 2 (Vector Memory) ✅  [ralph_codebase collection active]
+  ├──→ Phase 2 (Vector Memory) ✅ → SUPERSEDED
+  │      │
+  │      ├──→ Phase 5.8 (Markdown Memory — replaces vector DB) ← NEXT
   │      │
   │      ├──→ Phase 4 (Agent Specialization) ✅
   │      │
-  │      ├──→ Phase 5 (Learning Loop) ✅
+  │      ├──→ Phase 5 (Learning Loop) ✅ [partially superseded by 5.8]
   │      │      │
   │      │      ├──→ Phase 5.5 (Interactive Task Mode) ✅
   │      │      │
@@ -2044,7 +2389,7 @@ Phase 1 (Story State + Checkpoint) ✅
   │      │      │
   │      │      └──→ Phase 9 (Improved DAG Accuracy)
   │      │
-  │      └──→ Phase 7 (MCP Server — scoped)
+  │      └──→ Phase 7 (MCP Server — scoped) ← depends on Phase 5.8
   │
   Phase 3 (Usage Tracking) ✅
   │
@@ -2061,24 +2406,27 @@ Phase 1 (Story State + Checkpoint) ✅
 |-------|-------|-------|------------------|
 | 1st   | Phase 1: Story State + Checkpoint ✅ | Done | Foundation for everything |
 | 2nd   | Phase 3: Usage Tracking ✅ | Done | Quick win, high visibility |
-| 3rd   | Phase 2: Vector Memory ✅ | Done | Transformative capability |
+| 3rd   | Phase 2: Vector Memory ✅ (superseded) | Done | Was transformative, now replaced |
 | 4th   | Phase 3.1: 1M Context Recalibration ✅ | Done | Recalibrate defaults + TUI improvements |
 | 5th   | Phase 4: Agent Specialization ✅ | Done | Quality step-change |
 | 6th   | Phase 5: Learning Loop (revised) ✅ | Done | Compounding cross-run improvement, anti-patterns, skill feedback |
 | 7th   | Phase 5.5: Interactive Task Mode ✅ | Done | On-the-fly task dispatch, no PRD required |
 | 8th   | Phase 5.7: Run History Observability ✅ | Done | Baseline metrics for model comparison |
-| **9th** | **Phase 6: Multi-Model (simplified)** | ~4-5 stories | Speed + quality allocation per role |
-| **10th** | **Phase 7: MCP Server (scoped)** | ~6-8 stories | Real-time parallel coordination |
-| **11th** | **Phase 8: Knowledge Graph (if needed)** | ~8-10 stories | Structural intelligence — gate on evidence |
-| **12th** | **Phase 8.5: Deep Code Review Mode** | ~4-5 stories | Read-only code review via Ralph loop |
-| **13th** | **Phase 9: Improved DAG Accuracy** | ~3-4 stories | Better parallelism without speculation |
-| **14th** | **Phase 10: Auto-Split Stuck Stories** | ~5-7 stories | Reduce wasted iterations on stuck stories |
+| **9th** | **Phase 5.8: Markdown Memory** | ~6-8 stories | Delete ~2600 lines, remove 3 dependencies, simpler + better memory |
+| **10th** | **Phase 6: Multi-Model (simplified)** | ~4-5 stories | Speed + quality allocation per role |
+| **11th** | **Phase 7: MCP Server (scoped)** | ~6-8 stories | Real-time parallel coordination |
+| **12th** | **Phase 8: Knowledge Graph (if needed)** | ~8-10 stories | Structural intelligence — gate on evidence |
+| **13th** | **Phase 8.5: Deep Code Review Mode** | ~4-5 stories | Read-only code review via Ralph loop |
+| **14th** | **Phase 9: Improved DAG Accuracy** | ~3-4 stories | Better parallelism without speculation |
+| **15th** | **Phase 10: Auto-Split Stuck Stories** | ~5-7 stories | Reduce wasted iterations on stuck stories |
 | Stretch | Web Dashboard | — | Team visibility (if needed) |
 
-Phase 6 is the recommended next phase — it has no incomplete
-dependencies and is relatively independent. Phase 8 is explicitly evidence-gated
-— only build if `ralph_codebase` semantic context isn't sufficient for
-architect quality.
+Phase 5.8 is the recommended next phase — it simplifies the memory
+system dramatically (removing ChromaDB, Voyage AI, and Python dependencies)
+while improving retrieval quality via LLM-native comprehension. Phase 6
+follows as it has no incomplete dependencies. Phase 8 is explicitly
+evidence-gated — only build if architects are missing structural dependency
+information that they can't get by reading codebase files directly.
 
 ---
 
@@ -2086,14 +2434,17 @@ architect quality.
 
 After full rollout, ralph should demonstrate:
 
-- **Context efficiency**: Agent prompts contain only relevant context, not
-  everything (measurable via token reduction per iteration) ✅ (Phases 1-2)
+- **Context efficiency**: Agent prompts contain curated learned context
+  via markdown memory, not raw dumps. Dream consolidation keeps memory
+  files lean. ✅ (Phases 1-2, refined by Phase 5.8)
 - **Story success rate**: >90% first-attempt pass rate (up from current baseline)
 - **Speed allocation**: Architect uses Opus, implementer uses Sonnet — right
   model for each role (replaces cost reduction metric — user is on Claude Max)
 - **Crash resilience**: Any interruption recoverable via checkpoint + resume ✅ (Phase 1)
 - **Cross-run learning**: Measurable improvement in success rate across
-  successive PRD runs on the same codebase ✅ (Phase 5)
+  successive PRD runs on the same codebase ✅ (Phase 5, simplified by Phase 5.8)
+- **Minimal dependencies**: No external ML/vector infrastructure required.
+  Memory system runs on markdown files + LLM comprehension (Phase 5.8)
 - **Parallel efficiency**: DAG analysis produces fewer false dependencies,
   enabling more concurrent story execution (Phase 9)
 - **Stuck recovery**: Stuck stories are automatically split rather than
