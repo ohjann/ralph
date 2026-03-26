@@ -28,6 +28,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/events"
 	"github.com/eoghanhynes/ralph/internal/interactive"
 	"github.com/eoghanhynes/ralph/internal/judge"
+	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/quality"
 	"github.com/eoghanhynes/ralph/internal/roles"
@@ -1953,6 +1954,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeContent += fmt.Sprintf("── Synthesis error (non-fatal): %v ──\n", msg.Err)
 		} else {
 			m.claudeContent += "── Post-run synthesis complete ──\n"
+		}
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+
+		// Increment run counter and check if dream consolidation is needed
+		runCount, err := memory.IncrementRunCount(m.cfg.ProjectDir)
+		if err != nil {
+			debuglog.Log("run counter increment error (non-fatal): %v", err)
+		}
+		if memory.ShouldDream(m.cfg.ProjectDir, m.cfg.Memory.DreamEveryNRuns) {
+			debuglog.Log("dream consolidation triggered (run_count=%d, threshold=%d)", runCount, m.cfg.Memory.DreamEveryNRuns)
+			m.claudeContent += "── Running dream consolidation... ──\n"
+			m.claudeVP.SetContent(m.claudeContent)
+			m.prevClaudeLen = len(m.claudeContent)
+			return m, dreamCmd(m.ctx, m.cfg)
+		}
+		return m.finishSummary()
+
+	case dreamDoneMsg:
+		if msg.Err != nil {
+			debuglog.Log("dream consolidation error (non-fatal): %v", msg.Err)
+			m.claudeContent += fmt.Sprintf("── Dream error (non-fatal): %v ──\n", msg.Err)
+		} else {
+			m.claudeContent += "── Dream consolidation complete ──\n"
 		}
 		m.claudeVP.SetContent(m.claudeContent)
 		m.claudeVP.GotoBottom()

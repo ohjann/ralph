@@ -13,7 +13,6 @@ import (
 	"github.com/eoghanhynes/ralph/internal/autofix"
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/coordinator"
-	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/debuglog"
@@ -598,6 +597,17 @@ func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 		}
 		err := memory.SynthesizeRun(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, p, runClaude)
 		return synthesisDoneMsg{Err: err}
+	})
+}
+
+func dreamCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
+			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath)
+			return err
+		}
+		err := memory.RunDream(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, cfg.Memory.MaxEntries, cfg.Memory.DreamEveryNRuns, runClaude)
+		return dreamDoneMsg{Err: err}
 	})
 }
 

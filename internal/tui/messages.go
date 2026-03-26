@@ -92,6 +92,9 @@ type summaryDoneMsg struct {
 type synthesisDoneMsg struct {
 	Err error
 }
+type dreamDoneMsg struct {
+	Err error
+}
 
 // Memory stats message
 type memoryStatsMsg struct {
