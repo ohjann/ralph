@@ -479,7 +479,7 @@ func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 			}
 		}
 
-		d, err := dag.Analyze(ctx, cfg.ProjectDir, incomplete)
+		d, err := dag.Analyze(ctx, cfg.ProjectDir, incomplete, cfg.UtilityModel)
 		if err != nil {
 			// Fallback to linear
 			d = dag.LinearFallback(incomplete)
@@ -594,7 +594,7 @@ func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
 		p, _ := prd.Load(cfg.PRDFile)
 		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath)
+			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
 			return err
 		}
 		err := memory.SynthesizeRun(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, p, runClaude)
@@ -605,7 +605,7 @@ func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 func dreamCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
 		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath)
+			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
 			return err
 		}
 		err := memory.RunDream(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, cfg.Memory.MaxEntries, cfg.Memory.DreamEveryNRuns, runClaude)

@@ -44,7 +44,8 @@ func FromPRD(stories []prd.UserStory) *DAG {
 }
 
 // Analyze uses Claude Code CLI to explore the codebase and determine story dependencies.
-func Analyze(ctx context.Context, projectDir string, stories []prd.UserStory) (*DAG, error) {
+// If model is non-empty, it is passed as --model to the claude CLI.
+func Analyze(ctx context.Context, projectDir string, stories []prd.UserStory, model string) (*DAG, error) {
 	storiesJSON, err := json.Marshal(stories)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling stories: %w", err)
@@ -67,11 +68,15 @@ Return ONLY a JSON array with no other text, no markdown fences, no explanation:
 If a story has no dependencies, use an empty array for dependsOn.
 Every story ID from the input must appear exactly once in the output.`, string(storiesJSON))
 
-	cmd := exec.CommandContext(ctx, "claude",
+	args := []string{
 		"--dangerously-skip-permissions",
 		"-p",
 		"--output-format", "text",
-	)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = projectDir
 	cmd.Stdin = strings.NewReader(prompt)
 

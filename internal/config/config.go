@@ -55,6 +55,8 @@ type Config struct {
 	ModelOverride      string // --model: override model for all roles
 	ArchitectModel     string // --architect-model: override model for architect role only
 	ImplementerModel   string // --implementer-model: override model for implementer role only
+	UtilityModel       string // --utility-model: model for DAG analysis and other utility tasks (default: haiku)
+
 
 	// Derived paths
 	PRDFile        string
@@ -74,6 +76,7 @@ func Parse(args []string) (*Config, error) {
 		QualityWorkers:     3,
 		QualityMaxIters:    2,
 		SpriteEnabled:      true,
+		UtilityModel:       "haiku",
 		Memory: DefaultMemoryConfig(),
 	}
 
@@ -323,6 +326,13 @@ func Parse(args []string) (*Config, error) {
 			}
 			cfg.ImplementerModel = args[i+1]
 			i += 2
+		case "--utility-model":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--utility-model requires a model name")
+			}
+			cfg.UtilityModel = args[i+1]
+			i += 2
+
 		default:
 			// Check for --key=value forms
 			if len(args[i]) > 6 && args[i][:6] == "--dir=" {
@@ -419,6 +429,12 @@ func Parse(args []string) (*Config, error) {
 				i++
 				continue
 			}
+			if strings.HasPrefix(args[i], "--utility-model=") {
+				cfg.UtilityModel = args[i][len("--utility-model="):]
+				i++
+				continue
+			}
+
 			return nil, fmt.Errorf("unknown argument %q. Use --help for usage", args[i])
 		}
 	}
@@ -613,6 +629,7 @@ Execution:
   --workers <n>                   Number of parallel workers (default: 1 = serial)
   --workspace-base <path>         Base directory for workspaces (default: /tmp/ralph-workspaces)
   --no-architect                  Skip architect phase for all stories (go straight to implementer)
+  --utility-model <name>          Model for DAG analysis and utility tasks (default: haiku)
 
 Model Selection:
   --model <name>                  Override model for all roles (e.g. opus, sonnet, haiku)

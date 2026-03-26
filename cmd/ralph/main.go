@@ -473,7 +473,7 @@ func runMemoryConsolidate(cfg *config.Config) error {
 	}
 
 	runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath)
+		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
 		return err
 	}
 
