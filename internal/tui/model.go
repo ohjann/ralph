@@ -1946,6 +1946,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prevClaudeLen = len(m.claudeContent)
 		cmds = append(cmds, qualityReviewCmd(m.ctx, m.cfg, m.qualityIteration))
 
+	case synthesisDoneMsg:
+		if msg.Err != nil {
+			debuglog.Log("post-run synthesis error (non-fatal): %v", msg.Err)
+			m.claudeContent += fmt.Sprintf("── Synthesis error (non-fatal): %v ──\n", msg.Err)
+		} else {
+			m.claudeContent += "── Post-run synthesis complete ──\n"
+		}
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		return m.finishSummary()
+
 	case summaryDoneMsg:
 		if msg.Err != nil {
 			m.claudeContent += fmt.Sprintf("\n── Summary generation error: %v ──\n", msg.Err)
@@ -1992,10 +2004,16 @@ func (m *Model) transitionToComplete() (tea.Model, tea.Cmd) {
 	return m.transitionToSummary()
 }
 
-// transitionToSummary starts post-run synthesis (if memory is available),
+// transitionToSummary starts post-run synthesis (if memory is enabled),
 // then generates a final summary of all changes.
 func (m *Model) transitionToSummary() (tea.Model, tea.Cmd) {
 	m.notifier.RunComplete(m.ctx, m.completedStories, m.totalStories, m.totalCost())
+	if !m.cfg.Memory.Disabled {
+		m.claudeContent += "── Running post-run synthesis... ──\n"
+		m.claudeVP.SetContent(m.claudeContent)
+		m.prevClaudeLen = len(m.claudeContent)
+		return m, synthesisCmd(m.ctx, m.cfg)
+	}
 	return m.finishSummary()
 }
 

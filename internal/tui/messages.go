@@ -88,6 +88,9 @@ type summaryDoneMsg struct {
 	Content string
 	Err     error
 }
+type synthesisDoneMsg struct {
+	Err error
+}
 
 // Memory stats message (placeholder - memory tab empty until P58-003)
 type memoryStatsMsg struct {

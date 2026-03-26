@@ -13,6 +13,7 @@ import (
 	"github.com/eoghanhynes/ralph/internal/autofix"
 	"github.com/eoghanhynes/ralph/internal/config"
 	"github.com/eoghanhynes/ralph/internal/coordinator"
+	"github.com/eoghanhynes/ralph/internal/memory"
 	"github.com/eoghanhynes/ralph/internal/costs"
 	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/debuglog"
@@ -577,6 +578,18 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 		content, _ := os.ReadFile(summaryPath)
 
 		return summaryDoneMsg{Content: string(content), Err: err}
+	})
+}
+
+func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		p, _ := prd.Load(cfg.PRDFile)
+		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
+			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath)
+			return err
+		}
+		err := memory.SynthesizeRun(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, p, runClaude)
+		return synthesisDoneMsg{Err: err}
 	})
 }
 
