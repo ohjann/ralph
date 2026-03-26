@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eoghanhynes/ralph/internal/dag"
 	"github.com/eoghanhynes/ralph/internal/prd"
 	"github.com/eoghanhynes/ralph/internal/storystate"
 	"github.com/eoghanhynes/ralph/internal/worker"
@@ -28,13 +30,108 @@ type StoryDisplayInfo struct {
 	IsInteractive  bool   // true for T-prefix interactive tasks
 }
 
+// treeEntry holds layout info for a story in the DAG tree.
+type treeEntry struct {
+	storyIdx  int    // index into the stories slice
+	depth     int    // nesting depth (0 = root)
+	connector string // box-drawing prefix: "├─", "└─", "│ ", "  "
+}
+
+// treeLayout computes tree positions for stories based on DAG dependencies.
+// Stories with no dependencies are roots. Each dependent story nests under its
+// last/primary dependency. Returns entries in display order.
+func treeLayout(stories []StoryDisplayInfo, d *dag.DAG) []treeEntry {
+	if d == nil || len(d.Nodes) == 0 {
+		// No DAG: flat list
+		entries := make([]treeEntry, len(stories))
+		for i := range stories {
+			entries[i] = treeEntry{storyIdx: i, depth: 0, connector: ""}
+		}
+		return entries
+	}
+
+	// Build story ID -> index map
+	idToIdx := make(map[string]int, len(stories))
+	for i, s := range stories {
+		idToIdx[s.ID] = i
+	}
+
+	// Build children map: parent -> list of child IDs
+	// A story's primary parent is its last dependency.
+	children := make(map[string][]string)
+	var roots []string
+	for _, s := range stories {
+		node, ok := d.Nodes[s.ID]
+		if !ok || len(node.DependsOn) == 0 {
+			roots = append(roots, s.ID)
+			continue
+		}
+		parent := node.DependsOn[len(node.DependsOn)-1]
+		children[parent] = append(children[parent], s.ID)
+	}
+
+	// Sort children by their index in stories (preserves original order)
+	for k, ch := range children {
+		sort.Slice(ch, func(i, j int) bool {
+			return idToIdx[ch[i]] < idToIdx[ch[j]]
+		})
+		children[k] = ch
+	}
+
+	// DFS to produce display order
+	var entries []treeEntry
+	var walk func(id string, depth int, isLast bool, parentPrefixes string)
+	walk = func(id string, depth int, isLast bool, parentPrefixes string) {
+		idx, ok := idToIdx[id]
+		if !ok {
+			return
+		}
+
+		var connector string
+		if depth == 0 {
+			connector = ""
+		} else {
+			if isLast {
+				connector = parentPrefixes + "└─"
+			} else {
+				connector = parentPrefixes + "├─"
+			}
+		}
+
+		entries = append(entries, treeEntry{
+			storyIdx:  idx,
+			depth:     depth,
+			connector: connector,
+		})
+
+		ch := children[id]
+		childPrefix := parentPrefixes
+		if depth > 0 {
+			if isLast {
+				childPrefix += "  "
+			} else {
+				childPrefix += "│ "
+			}
+		}
+		for i, childID := range ch {
+			walk(childID, depth+1, i == len(ch)-1, childPrefix)
+		}
+	}
+
+	for i, rootID := range roots {
+		walk(rootID, 0, i == len(roots)-1, "")
+	}
+
+	return entries
+}
+
 func newStoriesViewport(width, height int) viewport.Model {
 	vp := viewport.New(width, height)
 	vp.SetContent("")
 	return vp
 }
 
-func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active bool, width, height int, animFrame int, selectedIdx int, expandedID string, prdFile string) string {
+func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active bool, width, height int, animFrame int, selectedIdx int, expandedID string, prdFile string, storyDAG *dag.DAG) string {
 	icon := styleClaudeSparkle.Render("◆")
 	title := fmt.Sprintf("%s %s", icon, stylePanelTitle.Render("Stories"))
 
@@ -50,7 +147,7 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	vp.Height = vpH
 
 	projectDir := filepath.Dir(prdFile)
-	content := renderStoryList(stories, contentW, animFrame, active, selectedIdx, expandedID, projectDir)
+	content := renderStoryList(stories, contentW, animFrame, active, selectedIdx, expandedID, projectDir, storyDAG)
 	prevOffset := vp.YOffset
 	vp.SetContent(content)
 	vp.SetYOffset(prevOffset)
@@ -61,7 +158,7 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	return style.MaxHeight(height).Render(body)
 }
 
-func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panelActive bool, selectedIdx int, expandedID string, projectDir string) string {
+func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panelActive bool, selectedIdx int, expandedID string, projectDir string, storyDAG *dag.DAG) string {
 	if len(stories) == 0 {
 		return styleMuted.Render("  No stories loaded")
 	}
@@ -87,7 +184,12 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 
 	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("#313244")) // Surface0
 
-	for i, s := range stories {
+	// Compute tree layout from DAG
+	entries := treeLayout(stories, storyDAG)
+
+	for _, entry := range entries {
+		i := entry.storyIdx
+		s := stories[i]
 		var statusIcon string
 		var idStyle, titleStyle func(string) string
 
@@ -141,11 +243,22 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 			}
 		}
 
-		// Build the line: icon ID title [worker badge] [elapsed]
-		line := fmt.Sprintf(" %s %s %s",
+		// Build the line: [tree prefix] icon ID title [worker badge] [elapsed]
+		prefix := ""
+		if entry.connector != "" {
+			prefix = styleMuted.Render(entry.connector)
+		} else {
+			prefix = " "
+		}
+		availWidth := width - len(s.ID) - 15 - (entry.depth * 2)
+		if availWidth < 5 {
+			availWidth = 5
+		}
+		line := fmt.Sprintf("%s%s %s %s",
+			prefix,
 			statusIcon,
 			idStyle(s.ID),
-			titleStyle(truncate(s.Title, width-len(s.ID)-15)),
+			titleStyle(truncate(s.Title, availWidth)),
 		)
 
 		// Role and iteration count for running stories
@@ -175,7 +288,7 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 
 		// Highlight selected row when panel is active
 		if panelActive && i == selectedIdx {
-			// Cursor indicator
+			// Cursor indicator — replace first visible char with ▸
 			line = "▸" + line[1:]
 			line = selectedStyle.Width(width).Render(line)
 		}

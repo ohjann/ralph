@@ -2268,6 +2268,7 @@ func (m *Model) View() string {
 		m.storiesSelectedIdx,
 		m.storiesExpandedID,
 		m.cfg.PRDFile,
+		m.storyDAG,
 	)
 
 	// Context panel
