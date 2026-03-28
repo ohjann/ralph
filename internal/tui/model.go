@@ -1454,6 +1454,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeContent += tsLog("── Interactive mode — no PRD stories found ──\n")
 			m.claudeVP.SetContent(m.claudeContent)
 			m.prevClaudeLen = len(m.claudeContent)
+		} else if p.AllComplete() {
+			// All stories already complete — skip straight to quality check / summary
+			m.totalStories = p.TotalCount()
+			m.completedStories = m.totalStories
+			m.claudeContent += tsLog("── All %d stories already complete ──\n", m.totalStories)
+			m.claudeVP.SetContent(m.claudeContent)
+			m.prevClaudeLen = len(m.claudeContent)
+			return m.transitionToComplete()
 		} else if m.cfg.Workers > 1 {
 			m.phase = phaseDagAnalysis
 			cmds = append(cmds, dagAnalyzeCmd(m.ctx, m.cfg))
@@ -1845,7 +1853,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Try to schedule more
 				m.coord.ScheduleReady(m.ctx)
 				if m.coord.AllDone() && m.phase != phaseInteractive {
-					if m.coord.CompletedCount() == m.totalStories {
+					if m.coord.CompletedCount() == m.totalStories || m.checkPRDAllComplete() {
+						m.completedStories = m.totalStories
 						return m.transitionToComplete()
 					}
 					m.phase = phaseDone
@@ -1877,6 +1886,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevClaudeLen = len(m.claudeContent)
 			m.coord.ScheduleReady(m.ctx)
 			if m.coord.AllDone() && m.phase != phaseInteractive {
+				if m.checkPRDAllComplete() {
+					m.completedStories = m.totalStories
+					return m.transitionToComplete()
+				}
 				m.phase = phaseDone
 				m.exitCode = 1
 				m.completionReason = fmt.Sprintf("Worker failed and all work done (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
@@ -1894,16 +1907,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// phaseDone yet; let them run and check completion afterwards.
 		} else if m.coord.AllDone() && m.phase != phaseInteractive {
 			// No active workers and nothing left to schedule — we're done
-			m.phase = phaseDone
-			m.allComplete = m.coord.CompletedCount() == m.totalStories
-			if !m.allComplete {
-				m.exitCode = 1
-				m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
-				debuglog.Log("entering phaseDone: %s", m.completionReason)
-				m.showCompletionReport()
-			} else {
-				m.persistRunHistory()
+			m.allComplete = m.coord.CompletedCount() == m.totalStories || m.checkPRDAllComplete()
+			if m.allComplete {
+				m.completedStories = m.totalStories
+				return m.transitionToComplete()
 			}
+			m.phase = phaseDone
+			m.exitCode = 1
+			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
+			debuglog.Log("entering phaseDone: %s", m.completionReason)
+			m.showCompletionReport()
 			return m, nil
 		}
 
@@ -1941,7 +1954,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.coord.AllDone() {
 			// Final sync of story counts
 			m.completedStories = m.coord.CompletedCount()
-			if m.completedStories == m.totalStories {
+			if m.completedStories == m.totalStories || m.checkPRDAllComplete() {
+				m.completedStories = m.totalStories
 				return m.transitionToComplete()
 			}
 			m.phase = phaseDone
@@ -2148,6 +2162,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// checkPRDAllComplete checks the PRD file directly to see if all stories
+// are marked as passing. This is a fallback for when the coordinator's
+// completed count doesn't match totalStories (e.g. after a restart without
+// a valid checkpoint, where only the remaining stories were dispatched).
+func (m *Model) checkPRDAllComplete() bool {
+	p, err := prd.Load(m.cfg.PRDFile)
+	if err != nil {
+		return false
+	}
+	return p.AllComplete()
 }
 
 // transitionToComplete handles the "all stories done" transition.
