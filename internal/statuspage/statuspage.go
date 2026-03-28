@@ -116,19 +116,29 @@ func New() *StatusServer {
 	}
 }
 
-// Start starts the HTTP server on the given port.
-func (s *StatusServer) Start(port int) error {
+// Start starts the HTTP server on the given port. If the port is already in
+// use, it tries up to 10 consecutive ports before giving up. It returns the
+// actual port the server is listening on.
+func (s *StatusServer) Start(port int) (int, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/api/status", s.handleAPIStatus)
 
-	addr := fmt.Sprintf(":%d", port)
-
-	// Try to bind the port early so we can return an error if it's in use.
-	ln, err := net.Listen("tcp", addr)
+	const maxRetries = 10
+	var ln net.Listener
+	var err error
+	actualPort := port
+	for i := 0; i < maxRetries; i++ {
+		addr := fmt.Sprintf(":%d", actualPort)
+		ln, err = net.Listen("tcp", addr)
+		if err == nil {
+			break
+		}
+		actualPort++
+	}
 	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
+		return 0, fmt.Errorf("listen on ports %d–%d: all in use", port, port+maxRetries-1)
 	}
 
 	s.server = &http.Server{
@@ -142,7 +152,7 @@ func (s *StatusServer) Start(port int) error {
 		}
 	}()
 
-	return nil
+	return actualPort, nil
 }
 
 // Stop gracefully shuts down the server.

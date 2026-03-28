@@ -185,11 +185,13 @@ func NewModel(cfg *config.Config, version string) *Model {
 	var ss *statuspage.StatusServer
 	if cfg.StatusPort > 0 {
 		ss = statuspage.New()
-		if err := ss.Start(cfg.StatusPort); err != nil {
+		actualPort, err := ss.Start(cfg.StatusPort)
+		if err != nil {
 			debuglog.Log("warning: status page failed to start on port %d: %v", cfg.StatusPort, err)
 			ss = nil
 		} else {
-			debuglog.Log("Status page: http://localhost:%d", cfg.StatusPort)
+			cfg.StatusPort = actualPort
+			debuglog.Log("Status page: http://localhost:%d", actualPort)
 		}
 	}
 
@@ -1162,13 +1164,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					port = 8080
 				}
 				ss := statuspage.New()
-				if err := ss.Start(port); err != nil {
+				actualPort, err := ss.Start(port)
+				if err != nil {
 					m.claudeContent += "\n" + tsLog("── Status page failed to start on port %d: %v ──\n", port, err)
 				} else {
 					m.statusServer = ss
-					m.cfg.StatusPort = port
+					m.cfg.StatusPort = actualPort
 					m.updateStatusPage()
-					m.claudeContent += "\n" + tsLog("── Status page started: http://localhost:%d ──\n", port)
+					m.claudeContent += "\n" + tsLog("── Status page started: http://localhost:%d ──\n", actualPort)
 				}
 				m.notifier.SetDisabled(false)
 				m.claudeContent += tsLog("── Notifications enabled ──\n")
