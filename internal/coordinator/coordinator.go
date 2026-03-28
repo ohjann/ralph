@@ -25,7 +25,6 @@ import (
 )
 
 const maxRetries = 3
-const maxStoryRetries = 1 // retries for stories that ran but didn't pass
 
 // PlanQuality tracks metrics about how well the PRD plan translates to successful builds.
 type PlanQuality struct {
@@ -234,18 +233,15 @@ func (c *Coordinator) HandleUpdate(u worker.WorkerUpdate) bool {
 				c.firstPass[u.StoryID] = true
 			}
 		} else {
+			// Always retry — the judge auto-pass (--judge-max-rejections) is the
+			// safety valve that guarantees eventual completion.
 			errMsg := "story did not pass"
 			if u.Err != nil {
 				errMsg = u.Err.Error()
 			}
-			if c.storyRetries[u.StoryID] < maxStoryRetries {
-				c.storyRetries[u.StoryID]++
-				c.failedErrors[u.StoryID] = errMsg
-				shouldRetry = true
-			} else {
-				c.failed[u.StoryID] = true
-				c.failedErrors[u.StoryID] = errMsg
-			}
+			c.storyRetries[u.StoryID]++
+			c.failedErrors[u.StoryID] = errMsg
+			shouldRetry = true
 		}
 	case worker.WorkerFailed:
 		delete(c.inProgress, u.StoryID)
