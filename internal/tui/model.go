@@ -307,6 +307,41 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 		state.Badges = append(state.Badges, statuspage.Badge{Label: "ntfy", Icon: "🔔"})
 	}
 
+	// Completion reason and plan quality
+	state.CompletionReason = m.completionReason
+	if m.coord != nil {
+		pq := m.coord.GetPlanQuality()
+		if pq.TotalStories > 0 {
+			state.PlanQuality = &statuspage.PlanQualityStatus{
+				Score:          pq.Score(),
+				FirstPassCount: pq.FirstPassCount,
+				RetryCount:     pq.RetryCount,
+				FailedCount:    pq.FailedCount,
+				TotalStories:   pq.TotalStories,
+			}
+		}
+	}
+
+	// Settings
+	for _, e := range m.settings.Entries {
+		var val string
+		switch e.Type {
+		case settingBool:
+			val = fmt.Sprintf("%t", e.BoolVal)
+		case settingInt:
+			val = fmt.Sprintf("%d", e.IntVal)
+		case settingFloat:
+			val = fmt.Sprintf("%.2f", e.FloatVal)
+		}
+		state.Settings = append(state.Settings, statuspage.SettingStatus{
+			Label: e.Label,
+			Value: val,
+		})
+	}
+
+	// Current task description (plain text version of renderCurrentTask)
+	state.CurrentTask = m.buildCurrentTaskText()
+
 	// Context panel content (all tabs)
 	state.ProgressContent = m.progressContent
 	state.WorktreeContent = m.worktreeContent
@@ -371,18 +406,28 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 		state.Total = len(p.UserStories)
 		for _, s := range p.UserStories {
 			ss := statuspage.StoryStatus{
-				ID:    s.ID,
-				Title: s.Title,
+				ID:            s.ID,
+				Title:         s.Title,
+				IsInteractive: strings.HasPrefix(s.ID, "T-"),
 			}
 			if s.Passes {
 				ss.Status = "done"
 				state.Completed++
+				if ss.IsInteractive {
+					ss.TaskStatus = "done"
+				}
 			} else if s.ID == m.currentStoryID && m.phase == phaseClaudeRun {
 				ss.Status = "running"
 				ss.Iteration = m.iteration
 				ss.Role = string(m.currentRole)
+				if ss.IsInteractive {
+					ss.TaskStatus = "running"
+				}
 			} else {
 				ss.Status = "queued"
+				if ss.IsInteractive {
+					ss.TaskStatus = "queued"
+				}
 			}
 
 			// In parallel mode, check coordinator for running/failed status
@@ -392,8 +437,23 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 					ss.WorkerID = workerAssignments[s.ID]
 					ss.Iteration = workerIterations[s.ID]
 					ss.Role = workerRoles[s.ID]
+					if ss.IsInteractive {
+						ss.TaskStatus = "running"
+					}
 				} else if m.coord.IsFailed(s.ID) {
 					ss.Status = "failed"
+					if ss.IsInteractive {
+						ss.TaskStatus = "failed"
+					}
+				}
+			}
+
+			// DAG dependencies — prefer the PRD's own DependsOn, fall back to runtime DAG
+			if len(s.DependsOn) > 0 {
+				ss.DependsOn = s.DependsOn
+			} else if m.storyDAG != nil && len(m.storyDAG.Nodes) > 0 {
+				if node, ok := m.storyDAG.Nodes[s.ID]; ok && len(node.DependsOn) > 0 {
+					ss.DependsOn = node.DependsOn
 				}
 			}
 
@@ -407,6 +467,67 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 	state.AllComplete = state.Completed == state.Total && state.Total > 0
 
 	return state
+}
+
+// buildCurrentTaskText returns a plain-text version of renderCurrentTask for the status page.
+func (m *Model) buildCurrentTaskText() string {
+	switch m.phase {
+	case phaseIdle:
+		return "Idle mode"
+	case phasePlanning:
+		return "Generating prd.json from plan..."
+	case phaseReview:
+		return "Review prd.json — press Enter to execute"
+	case phaseDagAnalysis:
+		return "Analyzing story dependencies..."
+	case phaseQualityReview:
+		return fmt.Sprintf("Quality review (round %d)...", m.qualityIteration)
+	case phaseQualityFix:
+		return fmt.Sprintf("Fixing quality issues (round %d)...", m.qualityIteration)
+	case phaseQualityPrompt:
+		return "Issues remain — Enter to continue, q to finish"
+	case phasePaused:
+		return "Usage limit — press Enter to resume"
+	case phaseDone:
+		if m.allComplete {
+			return "All stories complete!"
+		} else if m.completionReason != "" {
+			return m.completionReason
+		}
+		return "Some failed stories"
+	case phaseParallel:
+		if m.coord != nil {
+			active := m.coord.ActiveStoryIDs()
+			if len(active) > 0 {
+				return strings.Join(active, ", ")
+			}
+			return "Scheduling..."
+		}
+		return "Starting workers..."
+	case phaseInit:
+		return "Initializing..."
+	case phaseSummary:
+		return "Generating summary..."
+	case phaseResumePrompt:
+		return "Resume from checkpoint? Press Enter to continue, q to restart"
+	case phaseInteractive:
+		return "Interactive — press t to add a task"
+	default:
+		if m.currentStoryID != "" {
+			s := m.currentStoryID
+			if m.currentRole != "" {
+				s += " · " + string(m.currentRole)
+			}
+			if m.currentStoryTitle != "" {
+				s += " " + m.currentStoryTitle
+			}
+			if strings.HasPrefix(m.currentStoryID, "FIX-") {
+				s += " [AUTO-FIX]"
+			}
+			return s
+		}
+		return "Preparing next story..."
+	}
 }
 
 // phaseIcon returns a unicode icon for the phase.

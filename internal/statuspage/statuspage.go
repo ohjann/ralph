@@ -12,14 +12,32 @@ import (
 
 // StoryStatus represents the status of a single story.
 type StoryStatus struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Status    string  `json:"status"` // queued, running, done, failed, stuck
-	Cost      float64 `json:"cost"`
-	Iteration int     `json:"iteration,omitempty"`
-	Role      string  `json:"role,omitempty"`   // e.g. "implementer", "architect"
-	Detail    string  `json:"detail,omitempty"` // custom detail text
-	WorkerID  int     `json:"worker_id,omitempty"`
+	ID            string   `json:"id"`
+	Title         string   `json:"title"`
+	Status        string   `json:"status"` // queued, running, done, failed, stuck
+	Cost          float64  `json:"cost"`
+	Iteration     int      `json:"iteration,omitempty"`
+	Role          string   `json:"role,omitempty"`   // e.g. "implementer", "architect"
+	Detail        string   `json:"detail,omitempty"` // custom detail text
+	WorkerID      int      `json:"worker_id,omitempty"`
+	DependsOn     []string `json:"depends_on,omitempty"`     // DAG dependency list
+	IsInteractive bool     `json:"is_interactive,omitempty"` // T- prefix interactive task
+	TaskStatus    string   `json:"task_status,omitempty"`    // interactive task status
+}
+
+// PlanQualityStatus holds plan quality metrics for the status page.
+type PlanQualityStatus struct {
+	Score          float64 `json:"score"`
+	FirstPassCount int     `json:"first_pass_count"`
+	RetryCount     int     `json:"retry_count"`
+	FailedCount    int     `json:"failed_count"`
+	TotalStories   int     `json:"total_stories"`
+}
+
+// SettingStatus holds a single setting's label and display value.
+type SettingStatus struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
 // Badge represents an enabled feature badge.
@@ -56,12 +74,16 @@ type StatusState struct {
 	QualityContent  string          `json:"quality_content,omitempty"`
 	MemoryContent   string          `json:"memory_content,omitempty"`
 	CostsContent    string          `json:"costs_content,omitempty"`
-	ClaudeActivity  string          `json:"claude_activity,omitempty"`
-	StuckAlert      string          `json:"stuck_alert,omitempty"`
-	RateLimit       RateLimitStatus `json:"rate_limit"`
-	Version         string          `json:"version,omitempty"`
-	HasTokenData    bool            `json:"has_token_data"`
-	CostDisplay     string          `json:"cost_display,omitempty"`
+	ClaudeActivity   string              `json:"claude_activity,omitempty"`
+	StuckAlert       string              `json:"stuck_alert,omitempty"`
+	RateLimit        RateLimitStatus     `json:"rate_limit"`
+	Version          string              `json:"version,omitempty"`
+	HasTokenData     bool                `json:"has_token_data"`
+	CostDisplay      string              `json:"cost_display,omitempty"`
+	CompletionReason string              `json:"completion_reason,omitempty"`
+	PlanQuality      *PlanQualityStatus  `json:"plan_quality,omitempty"`
+	Settings         []SettingStatus     `json:"settings,omitempty"`
+	CurrentTask      string              `json:"current_task,omitempty"`
 }
 
 type sseClient struct {
@@ -530,11 +552,17 @@ body {
 
 .story-row {
   display: grid;
-  grid-template-columns: 2ch minmax(6ch, auto) 1fr;
-  gap: 0 1ch;
+  grid-template-columns: auto 2ch minmax(6ch, auto) 1fr;
+  gap: 0 0.5ch;
   padding: 0.15rem 0;
   align-items: baseline;
   min-height: 1.45em;
+}
+
+.story-tree {
+  color: var(--overlay0);
+  white-space: pre;
+  font-size: 0.9em;
 }
 
 .story-icon {
@@ -576,7 +604,7 @@ body {
 }
 
 .story-meta {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
   color: var(--overlay0);
   font-size: 0.85em;
   padding-left: 0;
@@ -594,6 +622,71 @@ body {
 .story-meta .iter-tag {
   color: var(--overlay0);
 }
+
+.story-meta .task-status-tag {
+  color: var(--overlay0);
+  font-size: 0.9em;
+}
+
+.story-icon.interactive { color: var(--yellow); font-weight: 700; }
+.story-id.interactive { color: var(--yellow); }
+
+/* ── Current task & plan quality ─────────── */
+
+.current-task {
+  color: var(--subtext1);
+  font-size: 0.9em;
+}
+
+.plan-quality {
+  font-weight: 700;
+  font-size: 0.9em;
+}
+
+.plan-quality.good { color: var(--green); }
+.plan-quality.ok { color: var(--peach); }
+.plan-quality.poor { color: var(--red); }
+
+.plan-quality-detail {
+  color: var(--overlay0);
+  font-size: 0.85em;
+}
+
+.completion-reason {
+  color: var(--red);
+  font-size: 0.9em;
+}
+
+.completion-reason.success {
+  color: var(--green);
+}
+
+/* ── Settings tab ────────────────────────── */
+
+.settings-list {
+  padding: 0.25rem 0;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 2ch;
+  padding: 0.1rem 0;
+  font-size: 0.9em;
+}
+
+.settings-label {
+  color: var(--subtext1);
+}
+
+.settings-value {
+  color: var(--text);
+  font-weight: 700;
+  text-align: right;
+}
+
+.settings-value.val-true { color: var(--green); }
+.settings-value.val-false { color: var(--red); }
 
 /* Spinner for running stories */
 .spinner {
@@ -815,7 +908,7 @@ body {
   html { font-size: 13px; }
   .shell { padding: 0.35rem; }
   .story-row {
-    grid-template-columns: 2ch auto 1fr;
+    grid-template-columns: auto 2ch auto 1fr;
   }
   .ctx-tab { padding: 0.1rem 0.5ch; font-size: 0.85em; }
 }
@@ -860,6 +953,10 @@ body {
       <span class="version" id="version">%s</span>
       <span style="color:var(--surface2)">┃</span>
       <span id="phase" class="phase-badge%s">%s %s</span>
+      <span style="color:var(--surface2)">│</span>
+      <span id="current-task" class="current-task">%s</span>
+      <span id="plan-quality"></span>
+      <span id="completion-reason"></span>
     </div>
     <div class="header-line2">
       <span class="progress-bar">
@@ -912,6 +1009,7 @@ body {
             <button class="ctx-tab" data-tab="quality">◇ Quality</button>
             <button class="ctx-tab" data-tab="memory">⧫ Memory</button>
             <button class="ctx-tab" data-tab="usage">◎ Usage</button>
+            <button class="ctx-tab" data-tab="settings">⚙ Settings</button>
           </div>
           <div id="ctx-content" class="ctx-content">%s</div>
         </div>
@@ -950,7 +1048,7 @@ body {
 
   // State
   var currentTab = "progress";
-  var ctxData = { progress: "", worktree: "", judge: "", quality: "", memory: "", usage: "" };
+  var ctxData = { progress: "", worktree: "", judge: "", quality: "", memory: "", usage: "", settings: "" };
 
   // Elements
   var $ = function(id){ return document.getElementById(id); };
@@ -983,7 +1081,8 @@ body {
            ' <span class="mini-label">' + done + '/' + total + '</span>';
   }
 
-  function storyIcon(status) {
+  function storyIcon(status, isInteractive) {
+    if (isInteractive) return "⚡";
     switch(status) {
       case "done": return "✓";
       case "running": return '<span class="spinner"></span>';
@@ -993,22 +1092,114 @@ body {
     }
   }
 
-  function renderStoryRow(s) {
+  // treeLayout computes tree positions from story dependency data (mirrors TUI treeLayout)
+  function treeLayout(stories) {
+    if (!stories || stories.length === 0) return [];
+
+    var hasDeps = false;
+    for (var i = 0; i < stories.length; i++) {
+      if (stories[i].depends_on && stories[i].depends_on.length > 0) { hasDeps = true; break; }
+    }
+    if (!hasDeps) {
+      // Flat list — no tree
+      var flat = [];
+      for (var i = 0; i < stories.length; i++) flat.push({ idx: i, depth: 0, connector: "" });
+      return flat;
+    }
+
+    // Build index and children map
+    var idToIdx = {};
+    for (var i = 0; i < stories.length; i++) idToIdx[stories[i].id] = i;
+
+    var children = {};
+    var roots = [];
+    for (var i = 0; i < stories.length; i++) {
+      var s = stories[i];
+      var deps = s.depends_on;
+      if (!deps || deps.length === 0) {
+        roots.push(s.id);
+        continue;
+      }
+      var parent = deps[deps.length - 1];
+      if (!children[parent]) children[parent] = [];
+      children[parent].push(s.id);
+    }
+
+    // Sort children by original index
+    for (var k in children) {
+      children[k].sort(function(a, b) { return (idToIdx[a] || 0) - (idToIdx[b] || 0); });
+    }
+
+    var entries = [];
+    function walk(id, depth, isLast, parentPrefixes) {
+      var idx = idToIdx[id];
+      if (idx === undefined) return;
+
+      var connector = "";
+      if (depth > 0) {
+        connector = parentPrefixes + (isLast ? "└─" : "├─");
+      }
+
+      entries.push({ idx: idx, depth: depth, connector: connector });
+
+      var ch = children[id] || [];
+      var childPrefix = parentPrefixes;
+      if (depth > 0) {
+        childPrefix += isLast ? "  " : "│ ";
+      }
+      for (var i = 0; i < ch.length; i++) {
+        walk(ch[i], depth + 1, i === ch.length - 1, childPrefix);
+      }
+    }
+
+    for (var i = 0; i < roots.length; i++) {
+      walk(roots[i], 0, i === roots.length - 1, "");
+    }
+
+    return entries;
+  }
+
+  function renderStoryRow(s, treeConnector) {
+    var isInteractive = s.is_interactive || false;
+    var iconClass = isInteractive ? "interactive" : esc(s.status);
+    var idClass = isInteractive ? "interactive" : esc(s.status);
+
     var meta = "";
     var metaParts = [];
     if (s.role) metaParts.push('<span class="role-tag">' + esc(s.role) + '</span>');
     if (s.iteration > 0) metaParts.push('<span class="iter-tag">iter ' + s.iteration + '</span>');
     if (s.worker_id > 0) metaParts.push('<span class="worker-tag">W' + s.worker_id + '</span>');
+    if (isInteractive && s.task_status && s.status !== "running") {
+      metaParts.push('<span class="task-status-tag">[' + esc(s.task_status) + ']</span>');
+    }
     if (metaParts.length > 0) {
       meta = '<div class="story-meta">' + metaParts.join(" · ") + '</div>';
     }
 
+    var treeHTML = '<span class="story-tree">' + esc(treeConnector || "") + '</span>';
+
     return '<div class="story-row">' +
-      '<span class="story-icon ' + esc(s.status) + '">' + storyIcon(s.status) + '</span>' +
-      '<span class="story-id ' + esc(s.status) + '">' + esc(s.id) + '</span>' +
+      treeHTML +
+      '<span class="story-icon ' + iconClass + '">' + storyIcon(s.status, isInteractive) + '</span>' +
+      '<span class="story-id ' + idClass + '">' + esc(s.id) + '</span>' +
       '<span class="story-title ' + esc(s.status) + '">' + esc(s.title) + '</span>' +
       meta +
     '</div>';
+  }
+
+  function renderSettingsContent(settings) {
+    if (!settings || settings.length === 0) return '<span class="ctx-placeholder">No settings data</span>';
+    var html = '<div class="settings-list">';
+    for (var i = 0; i < settings.length; i++) {
+      var s = settings[i];
+      var valClass = "settings-value";
+      if (s.value === "true") valClass += " val-true";
+      else if (s.value === "false") valClass += " val-false";
+      html += '<div class="settings-row"><span class="settings-label">' + esc(s.label) +
+        '</span><span class="' + valClass + '">' + esc(s.value) + '</span></div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   function phaseClass(phase) {
@@ -1035,6 +1226,10 @@ body {
 
   function showTab() {
     var el = $("ctx-content");
+    if (currentTab === "settings") {
+      el.innerHTML = ctxData.settings || '<span class="ctx-placeholder">Waiting for data...</span>';
+      return;
+    }
     var content = ctxData[currentTab] || "";
     if (content) {
       el.textContent = content;
@@ -1122,6 +1317,36 @@ body {
     $("phase").textContent = (d.phase_icon || "") + " " + (d.phase || "");
     $("phase").className = "phase-badge" + phaseClass(d.phase);
 
+    // Current task
+    $("current-task").textContent = d.current_task || "";
+
+    // Plan quality (shown when data exists)
+    var pqEl = $("plan-quality");
+    if (d.plan_quality && d.plan_quality.total_stories > 0) {
+      var score = d.plan_quality.score;
+      var pqClass = "plan-quality";
+      if (score >= 0.8) pqClass += " good";
+      else if (score >= 0.5) pqClass += " ok";
+      else pqClass += " poor";
+      pqEl.className = pqClass;
+      pqEl.innerHTML = "Plan: " + Math.round(score * 100) + "%%" +
+        ' <span class="plan-quality-detail">(' +
+        d.plan_quality.first_pass_count + " first-pass, " +
+        d.plan_quality.retry_count + " retried, " +
+        d.plan_quality.failed_count + " failed)</span>";
+    } else {
+      pqEl.innerHTML = "";
+    }
+
+    // Completion reason
+    var crEl = $("completion-reason");
+    if (d.completion_reason && d.phase === "Complete") {
+      crEl.textContent = d.completion_reason;
+      crEl.className = d.all_complete ? "completion-reason success" : "completion-reason";
+    } else {
+      crEl.textContent = "";
+    }
+
     // Header line 2
     var bar = buildBar(d.completed || 0, d.total || 0, 16);
     $("bar-track").innerHTML = bar.track;
@@ -1173,13 +1398,16 @@ body {
       rlEl.classList.remove("visible");
     }
 
-    // Stories
+    // Stories with tree layout
     var storiesHTML = "";
     var done = 0;
     if (d.stories) {
-      for (var i = 0; i < d.stories.length; i++) {
-        storiesHTML += renderStoryRow(d.stories[i]);
-        if (d.stories[i].status === "done") done++;
+      var layout = treeLayout(d.stories);
+      for (var i = 0; i < layout.length; i++) {
+        var entry = layout[i];
+        var s = d.stories[entry.idx];
+        storiesHTML += renderStoryRow(s, entry.connector);
+        if (s.status === "done") done++;
       }
     }
     $("stories").innerHTML = storiesHTML;
@@ -1187,13 +1415,14 @@ body {
     // Mini progress
     $("mini-progress").innerHTML = buildMiniBar(d.completed || 0, d.total || 0);
 
-    // Context tab data — all 6 tabs mirroring the TUI
+    // Context tab data — all 7 tabs mirroring the TUI
     if (d.progress_content !== undefined) ctxData.progress = d.progress_content;
     if (d.worktree_content !== undefined) ctxData.worktree = d.worktree_content;
     if (d.judge_content !== undefined) ctxData.judge = d.judge_content;
     if (d.quality_content !== undefined) ctxData.quality = d.quality_content;
     if (d.memory_content !== undefined) ctxData.memory = d.memory_content;
     if (d.costs_content !== undefined) ctxData.usage = d.costs_content;
+    if (d.settings !== undefined) ctxData.settings = renderSettingsContent(d.settings);
     showTab();
 
     // Claude activity
@@ -1227,6 +1456,7 @@ body {
 		esc(state.PRDName), esc(state.Phase),
 		runningClass(state.Running), esc(state.Version),
 		phaseClass(state.Phase), esc(state.PhaseIcon), esc(state.Phase),
+		esc(state.CurrentTask),
 		renderBarTrack(state.Completed, state.Total, 16),
 		state.Completed, state.Total,
 		esc(state.RunDuration),
@@ -1406,7 +1636,13 @@ func renderInitialCtxContent(progress string) string {
 }
 
 func renderStoryRow(st StoryStatus) string {
-	icon := storyIconHTML(st.Status)
+	iconClass := esc(st.Status)
+	idClass := esc(st.Status)
+	if st.IsInteractive {
+		iconClass = "interactive"
+		idClass = "interactive"
+	}
+	icon := storyIconHTML(st.Status, st.IsInteractive)
 	meta := ""
 	var parts []string
 	if st.Role != "" {
@@ -1418,20 +1654,26 @@ func renderStoryRow(st StoryStatus) string {
 	if st.WorkerID > 0 {
 		parts = append(parts, fmt.Sprintf(`<span class="worker-tag">W%d</span>`, st.WorkerID))
 	}
+	if st.IsInteractive && st.TaskStatus != "" && st.Status != "running" {
+		parts = append(parts, fmt.Sprintf(`<span class="task-status-tag">[%s]</span>`, esc(st.TaskStatus)))
+	}
 	if len(parts) > 0 {
 		meta = `<div class="story-meta">` + joinStrings(parts, " · ") + `</div>`
 	}
 
 	return fmt.Sprintf(
-		`<div class="story-row"><span class="story-icon %s">%s</span><span class="story-id %s">%s</span><span class="story-title %s">%s</span>%s</div>`,
-		esc(st.Status), icon,
-		esc(st.Status), esc(st.ID),
+		`<div class="story-row"><span class="story-tree"></span><span class="story-icon %s">%s</span><span class="story-id %s">%s</span><span class="story-title %s">%s</span>%s</div>`,
+		iconClass, icon,
+		idClass, esc(st.ID),
 		esc(st.Status), esc(st.Title),
 		meta,
 	)
 }
 
-func storyIconHTML(status string) string {
+func storyIconHTML(status string, isInteractive bool) string {
+	if isInteractive {
+		return "⚡"
+	}
 	switch status {
 	case "done":
 		return "✓"
