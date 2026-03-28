@@ -1274,10 +1274,15 @@ body {
   window.addEventListener("resize", fillPanels);
 
   // ── SSE Connection ──
+  // Browsers keep the entire SSE response body in memory. Reconnecting
+  // periodically releases that buffer and prevents unbounded growth.
   var es;
   var retryDelay = 1000;
+  var msgCount = 0;
+  var MAX_MSGS = 200; // reconnect every ~200 messages to flush browser buffer
 
   function connect() {
+    msgCount = 0;
     es = new EventSource("/events");
 
     es.onopen = function() {
@@ -1291,6 +1296,11 @@ body {
         var d = JSON.parse(e.data);
         applyState(d);
       } catch(err) {}
+      msgCount++;
+      if (msgCount >= MAX_MSGS) {
+        es.close();
+        setTimeout(connect, 50);
+      }
     };
 
     es.onerror = function() {

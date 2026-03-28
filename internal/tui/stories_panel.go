@@ -147,10 +147,15 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	vp.Height = vpH
 
 	projectDir := filepath.Dir(prdFile)
-	content := renderStoryList(stories, contentW, animFrame, active, selectedIdx, expandedID, projectDir, storyDAG)
-	prevOffset := vp.YOffset
+	content, selectedLine := renderStoryList(stories, contentW, animFrame, active, selectedIdx, expandedID, projectDir, storyDAG)
 	vp.SetContent(content)
-	vp.SetYOffset(prevOffset)
+
+	// Auto-scroll to keep selected item visible
+	if selectedLine < vp.YOffset {
+		vp.SetYOffset(selectedLine)
+	} else if selectedLine >= vp.YOffset+vpH {
+		vp.SetYOffset(selectedLine - vpH + 1)
+	}
 
 	body := title + "\n" + vp.View()
 	body = clampLines(body, height-2)
@@ -158,9 +163,11 @@ func renderStoriesPanel(vp *viewport.Model, stories []StoryDisplayInfo, active b
 	return style.MaxHeight(height).Render(body)
 }
 
-func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panelActive bool, selectedIdx int, expandedID string, projectDir string, storyDAG *dag.DAG) string {
+// renderStoryList renders the story list and returns the content string and the
+// line number where the selected story starts (0-based, relative to content).
+func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panelActive bool, selectedIdx int, expandedID string, projectDir string, storyDAG *dag.DAG) (string, int) {
 	if len(stories) == 0 {
-		return styleMuted.Render("  No stories loaded")
+		return styleMuted.Render("  No stories loaded"), 0
 	}
 
 	var sb strings.Builder
@@ -186,6 +193,9 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 
 	// Compute tree layout from DAG
 	entries := treeLayout(stories, storyDAG)
+
+	currentLine := 1 // line 0 is the mini progress bar
+	selectedLine := 0
 
 	for _, entry := range entries {
 		i := entry.storyIdx
@@ -288,6 +298,7 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 
 		// Highlight selected row when panel is active
 		if panelActive && i == selectedIdx {
+			selectedLine = currentLine
 			// Cursor indicator — replace first visible char with ▸
 			line = "▸" + line[1:]
 			line = selectedStyle.Width(width).Render(line)
@@ -295,15 +306,18 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 
 		sb.WriteString(line)
 		sb.WriteString("\n")
+		currentLine++
 
 		// Render expanded details if this story is expanded
 		if s.ID == expandedID {
-			sb.WriteString(renderStoryDetails(s.ID, projectDir, width))
+			details := renderStoryDetails(s.ID, projectDir, width)
+			sb.WriteString(details)
 			sb.WriteString("\n")
+			currentLine += strings.Count(details, "\n") + 1
 		}
 	}
 
-	return strings.TrimRight(sb.String(), "\n")
+	return strings.TrimRight(sb.String(), "\n"), selectedLine
 }
 
 // renderStoryDetails renders inline details for an expanded story.

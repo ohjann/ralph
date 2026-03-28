@@ -342,22 +342,17 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 	// Current task description (plain text version of renderCurrentTask)
 	state.CurrentTask = m.buildCurrentTaskText()
 
-	// Context panel content (all tabs)
-	state.ProgressContent = m.progressContent
-	state.WorktreeContent = m.worktreeContent
-	state.JudgeContent = m.judgeContent
-	state.QualityContent = m.qualityContent
-	state.MemoryContent = m.memoryContent
-	state.CostsContent = m.costsContent
+	// Context panel content (all tabs) — tail-truncate to keep SSE payloads bounded.
+	const maxContentLen = 8000
+	state.ProgressContent = tailTruncate(m.progressContent, maxContentLen)
+	state.WorktreeContent = tailTruncate(m.worktreeContent, maxContentLen)
+	state.JudgeContent = tailTruncate(m.judgeContent, maxContentLen)
+	state.QualityContent = tailTruncate(m.qualityContent, maxContentLen)
+	state.MemoryContent = tailTruncate(m.memoryContent, maxContentLen)
+	state.CostsContent = tailTruncate(m.costsContent, maxContentLen)
 
 	// Claude activity (last portion to keep payload reasonable)
-	if m.claudeContent != "" {
-		activity := m.claudeContent
-		if len(activity) > 4000 {
-			activity = activity[len(activity)-4000:]
-		}
-		state.ClaudeActivity = activity
-	}
+	state.ClaudeActivity = tailTruncate(m.claudeContent, 4000)
 
 	// Stuck alert
 	if m.stuckAlert != nil {
@@ -2580,6 +2575,14 @@ func (m *Model) rebuildStoryDisplayInfos() {
 }
 
 // clampLines truncates or pads a string to exactly n lines.
+// tailTruncate returns the last maxLen bytes of s, or s unchanged if shorter.
+func tailTruncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[len(s)-maxLen:]
+}
+
 func clampLines(s string, n int) string {
 	lines := strings.Split(s, "\n")
 	if len(lines) > n {
