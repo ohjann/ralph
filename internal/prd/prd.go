@@ -20,12 +20,13 @@ type UserStory struct {
 }
 
 type PRD struct {
-	Project     string      `json:"project"`
-	BranchName  string      `json:"branchName"`
-	Description string      `json:"description"`
-	Repos       []string    `json:"repos,omitempty"`
-	Constraints []string    `json:"constraints,omitempty"`
-	UserStories []UserStory `json:"userStories"`
+	Project      string      `json:"project"`
+	BranchName   string      `json:"branchName"`
+	Description  string      `json:"description"`
+	BuildCommand string      `json:"buildCommand,omitempty"`
+	Repos        []string    `json:"repos,omitempty"`
+	Constraints  []string    `json:"constraints,omitempty"`
+	UserStories  []UserStory `json:"userStories"`
 }
 
 // HasExplicitDependencies returns true if any story in the PRD has a non-empty DependsOn field.

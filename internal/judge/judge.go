@@ -65,7 +65,7 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	}
 
 	// Pre-judge compilation gate: fast local check before expensive judge call
-	if buildErr := preBuildCheck(ctx, projectDir); buildErr != "" {
+	if buildErr := preBuildCheck(ctx, projectDir, p.BuildCommand); buildErr != "" {
 		debuglog.Log("judge pre-build failed for %s: %s", storyID, buildErr)
 		writeFeedback(projectDir, storyID, &Verdict{
 			Verdict:        "FAIL",
@@ -355,14 +355,16 @@ Address the failed criteria above. Do not repeat the same approach that was reje
 
 // preBuildCheck runs a fast compilation check before invoking the judge.
 // Returns empty string on success, or a trimmed error message on failure.
-func preBuildCheck(ctx context.Context, projectDir string) string {
-	// Try "make build" first (respects project's build config), fall back to "go build ./..."
-	var cmd *exec.Cmd
-	if _, err := os.Stat(filepath.Join(projectDir, "Makefile")); err == nil {
-		cmd = exec.CommandContext(ctx, "make", "build")
-	} else {
-		cmd = exec.CommandContext(ctx, "go", "build", "./...")
+// Uses buildCommand from prd.json if set, otherwise detects from marker files.
+// If no build command can be determined, the check is skipped (returns success).
+func preBuildCheck(ctx context.Context, projectDir, buildCommand string) string {
+	name, args := parseBuildCommand(buildCommand)
+	if name == "" {
+		debuglog.Log("preBuildCheck: no build command configured or detected in %s, skipping", projectDir)
+		return ""
 	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = projectDir
 
 	output, err := cmd.CombinedOutput()
@@ -378,4 +380,14 @@ func preBuildCheck(ctx context.Context, projectDir string) string {
 		return msg
 	}
 	return ""
+}
+
+// parseBuildCommand splits the buildCommand from prd.json into name and args.
+// Returns empty name if buildCommand is not set.
+func parseBuildCommand(buildCommand string) (string, []string) {
+	if buildCommand == "" {
+		return "", nil
+	}
+	parts := strings.Fields(buildCommand)
+	return parts[0], parts[1:]
 }
