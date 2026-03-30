@@ -1,9 +1,13 @@
-.PHONY: build clean test test-e2e
+.PHONY: build install clean test test-e2e
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 build:
 	go build -ldflags "-X main.Version=$(VERSION)" -o build/ralph ./cmd/ralph
+
+install: build
+	@mkdir -p $(firstword $(GOPATH) $(HOME)/go)/bin
+	cp build/ralph $(firstword $(GOPATH) $(HOME)/go)/bin/ralph
 
 clean:
 	rm -rf build/

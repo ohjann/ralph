@@ -33,23 +33,28 @@ Memory between iterations comes from jj history, `progress.md`, `prd.json` statu
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** installed and authenticated (`npm install -g @anthropic-ai/claude-code`)
 - **[jj (Jujutsu)](https://martinvonz.github.io/jj/)** for version control. Ralph uses jj, not git. The workspace isolation and mutable commit model make parallel workers much simpler, but it means you need jj installed and initialized in your project (`jj git init --colocate` in an existing git repo)
 
-No vector databases or ML infrastructure needed. Memory is plain markdown files.
 
 ## Quick Start
 
 ```bash
-# Build
-make build
+# Install to $GOPATH/bin (make sure this is on your PATH)
+make install
 
-# Option 1: Plan-driven (recommended)
-# Create a plan using Claude Code's /plan command, then:
+# Or just build locally
+make build
+./build/ralph
+```
+
+Then in your project:
+
+```bash
+# Plan-driven (recommended): create a plan with Claude Code's /plan, then:
 ralph --plan .claude/plans/my-plan.md
 
-# Option 2: Existing prd.json
+# Existing prd.json
 ralph
 
-# Option 3: Interactive mode (no prd.json needed)
-# Just run ralph without a prd.json — it auto-detects and presents an input bar
+# Interactive mode (no prd.json needed, auto-detected)
 ralph
 ```
 
