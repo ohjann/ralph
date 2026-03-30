@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 type StoryNode struct {

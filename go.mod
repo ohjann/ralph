@@ -1,4 +1,4 @@
-module github.com/eoghanhynes/ralph
+module github.com/ohjann/ralph
 
 go 1.25.0
 

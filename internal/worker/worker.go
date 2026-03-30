@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/config"
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/judge"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/roles"
-	"github.com/eoghanhynes/ralph/internal/runner"
-	"github.com/eoghanhynes/ralph/internal/storystate"
-	"github.com/eoghanhynes/ralph/internal/workspace"
+	"github.com/ohjann/ralph/internal/config"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/judge"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/roles"
+	"github.com/ohjann/ralph/internal/runner"
+	"github.com/ohjann/ralph/internal/storystate"
+	"github.com/ohjann/ralph/internal/workspace"
 )
 
 type WorkerID int

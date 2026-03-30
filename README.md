@@ -1,5 +1,7 @@
 # Ralph
 
+[![CI](https://github.com/ohjann/ralph/actions/workflows/ci.yml/badge.svg)](https://github.com/ohjann/ralph/actions/workflows/ci.yml)
+
 ![Ralph](ralph.webp)
 
 Ralph is an autonomous AI agent that runs [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a loop until all user stories in a PRD are complete. Each iteration gets a fresh context window. Memory persists via version control history, `progress.md`, `prd.json`, and semantic vector retrieval.
@@ -13,6 +15,8 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - **Crash-resilient checkpoints** — orchestration state saved to `.ralph/checkpoint.json` after every story event; on restart Ralph detects the checkpoint and offers to resume
 - **Parallel execution** — DAG analysis determines story dependencies; independent stories run across N workers in isolated jj workspaces
 - **Gemini judge** — an independent LLM reviews each story after Claude marks it complete, rejecting subpar implementations
+- **Per-story simplification pass** — after implementation but before judge verification, a fast code quality review scans diffs for duplicated logic, unnecessary complexity, dead code, and missed reuse — then fixes issues without changing behavior
+- **Fusion mode** — complex stories (architectural decisions, many files, design trade-offs) automatically spawn competing implementations in parallel; the judge selects the best passing result
 - **Quality review gate** — five parallel "lens" reviewers (security, efficiency, DRY, error handling, testing) examine the full changeset after all stories pass
 - **Markdown memory** — cross-run learnings and PRD quality lessons stored as markdown files in `.ralph/memory/`, injected into worker prompts via LLM-native comprehension
 - **Dream consolidation** — periodic consolidation cycle merges duplicates, drops stale entries, and keeps memory files lean (inspired by Claude Code's Auto Dream)
@@ -105,11 +109,25 @@ When stories are independent, Ralph can run them in parallel:
 
 ```bash
 ralph --workers 3
+ralph --workers auto    # scale to DAG width (max 5)
 ```
 
 If stories have `dependsOn` fields in prd.json, Ralph uses them directly for scheduling. Otherwise, it runs a DAG analysis step where Claude examines the codebase to determine dependencies. Independent stories are scheduled across N workers, each in an isolated jj workspace.
 
-Use `1-9` keys in the TUI to switch between worker output panels.
+Use `1-9` keys in the TUI to switch between worker output panels, or `<`/`>` to cycle through them.
+
+### Simplification Pass (enabled by default)
+
+After each story is implemented but before judge verification, a fast simplification pass scans the diff for duplicated logic, unnecessary complexity, dead code, and missed reuse opportunities — then fixes issues without changing behavior or expanding scope. Disable with `--no-simplify`.
+
+### Fusion Mode (enabled by default)
+
+For complex stories (architectural decisions with multiple valid approaches, many files, design trade-offs), Ralph automatically spawns competing implementations in parallel. A lightweight LLM call assesses story complexity, and complex stories get multiple independent workers that each implement the story differently. The judge then selects the best passing result.
+
+```bash
+ralph --no-fusion                   # disable fusion mode
+ralph --fusion-workers 3            # 3 competing implementations (default: 2)
+```
 
 ### Judge Mode (enabled by default)
 
@@ -168,23 +186,28 @@ Usage: ralph [options] [max_iterations]
 Options:
   --dir <path>                    Project directory (default: current directory)
   --plan <path>                   Generate prd.json from a plan file, review, then execute
-  --workers <n>                   Parallel workers (default: 1 = serial)
+  --workers <n|auto>              Parallel workers, or 'auto' to scale to DAG width (default: 1 = serial)
+  --workspace-base <path>         Base directory for worker workspaces (default: /tmp/ralph-workspaces)
+  --no-architect                  Skip architect phase for all stories
+  --no-simplify                   Skip per-story simplification pass
+  --no-fusion                     Disable automatic fusion mode for complex stories
+  --fusion-workers <n>            Competing implementations per complex story (default: 2)
   --no-judge                      Disable Gemini judge verification (enabled by default)
   --judge-max-rejections <n>      Max rejections before auto-pass (default: 2)
-  --workspace-base <path>         Base directory for worker workspaces (default: /tmp/ralph-workspaces)
   --no-quality-review             Disable final quality review (enabled by default)
   --quality-workers <n>           Parallel quality reviewers (default: 3)
   --quality-max-iterations <n>    Max review-fix cycles (default: 2)
-  --notify <topic>                Send push notifications via ntfy.sh to given topic
-  --ntfy-server <url>             Self-hosted ntfy server URL (default: https://ntfy.sh)
-  --status-port <port>            Start remote status page on given port (disabled by default)
-  --enable-monitoring             Enable ntfy + status page using .ralph/.env config
   --model <name>                  Override model for all roles
   --architect-model <name>        Override model for architect role only
   --implementer-model <name>      Override model for implementer role only
   --utility-model <name>          Override model for utility tasks (default: haiku)
   --story-timeout <minutes>       Max wall clock minutes per story before cancellation (default: 0 = no limit)
   --memory-disable                Disable memory injection
+  --notify <topic>                Send push notifications via ntfy.sh to given topic
+  --ntfy-server <url>             Self-hosted ntfy server URL (default: https://ntfy.sh)
+  --status-port <port>            Start remote status page on given port (disabled by default)
+  --enable-monitoring             Enable ntfy + status page using .ralph/.env config
+  --no-guy                        Disable sprite mascot overlay
   --idle                          Launch TUI without executing (display only)
   --help, -h                      Show help
 
@@ -205,6 +228,7 @@ Examples:
   ralph 5                                       Run with max 5 iterations
   ralph --plan .claude/plans/my-plan.md         Plan, review, then execute
   ralph --workers 3                             Run up to 3 stories in parallel
+  ralph --workers auto                          Scale workers to DAG width (max 5)
   ralph --no-judge                               Run without Gemini judge
   ralph --no-quality-review                     Run without final quality gate
   ralph --plan plan.md --workers 2              Full pipeline
@@ -218,13 +242,21 @@ Examples:
 | `q` | Quit (press twice during execution) |
 | `Ctrl+C` | Force quit (cancels all workers) |
 | `Tab` | Switch active panel |
-| `j/k` | Scroll active panel |
+| `j/k` or `↑/↓` | Scroll active panel / select story |
 | `PgUp/PgDn` | Page scroll |
+| `Enter/l/→` | Expand story details (stories panel) |
+| `h/←` | Collapse story details (stories panel) |
 | `[/]` | Cycle context panel tabs |
 | `1-9` | Switch worker view (parallel mode) |
-| `Enter` | Start execution (review phase) / Submit task (interactive mode) |
-| `Esc` | Clear task input |
+| `</>` or `,/.` | Cycle previous/next worker tab |
+| `t` | Enter task input mode |
 | `i` | Inject hint (when stuck bar is showing) |
+| `s` | Enter settings mode |
+| `m` | Toggle monitoring on/off |
+| `p` | Enter interactive sprite mode |
+| `y/n` | Resume from checkpoint / start fresh |
+| `Enter` | Start execution (review phase) / Submit task / Resume |
+| `Esc` | Exit input mode / cancel |
 
 ## Configuration
 
@@ -304,6 +336,7 @@ Then on your phone:
   "project": "MyApp",
   "branchName": "ralph/feature-name",
   "description": "Short description of the work",
+  "buildCommand": "make build",
   "constraints": [
     "Use existing Drizzle ORM patterns for all migrations"
   ],
@@ -343,11 +376,12 @@ Then on your phone:
 
 | Field | Level | Purpose |
 |-------|-------|---------|
+| `buildCommand` | PRD | Custom build/compile command used in pre-judge compilation gate (default: `make build`) |
 | `constraints` | PRD | Cross-cutting architectural decisions injected into every agent prompt |
 | `dependsOn` | Story | Explicit dependency graph — skips the Claude DAG analysis call when present |
 | `approach` | Story | Implementation strategy hint — guides the architect/implementer agents |
 
-All three fields are optional. When `dependsOn` is provided on any story, Ralph uses it directly for parallel scheduling instead of running a Claude analysis pass.
+All fields are optional. When `dependsOn` is provided on any story, Ralph uses it directly for parallel scheduling instead of running a Claude analysis pass.
 
 ### Story Sizing
 
@@ -408,6 +442,8 @@ internal/
   worker/           Worker goroutine lifecycle
   dag/              Dependency analysis via Claude CLI
   workspace/        jj workspace create/destroy/merge
+  fusion/           Competing implementations for complex stories
+  roles/            Role-based model configuration
   judge/            Gemini judge integration
   archive/          Run archiving (previous prd.json + progress.md)
   autofix/          Stuck loop detection and fix story generation
@@ -488,6 +524,16 @@ Ralph creates and manages these files in the project directory:
 | `.ralph/run-history.json` | Accumulated run summaries with cost data |
 | `.ralph/workspace-setup.sh` | (Optional) Custom worker workspace initialization |
 | `.ralph/workspace-teardown.sh` | (Optional) Custom worker workspace cleanup |
+
+## Contributing
+
+Ralph is a personal project — it works for my workflow but comes with no guarantees. It uses [Jujutsu (jj)](https://martinvonz.github.io/jj/) for version control, not git, which is a deliberate choice but limits portability.
+
+If you find Ralph useful, **fork it and make it your own**. Bug reports, PRs, and feature requests are welcome but may not be accepted if they don't align with the project's direction. No hard feelings either way.
+
+## Acknowledgements
+
+This project started as a fork of [snarktank/ralph](https://github.com/snarktank/ralph) — thanks to Ryan Carson for the initial foundations. The core concept comes from [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
 ## References
 

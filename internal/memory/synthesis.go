@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/debuglog"
-	"github.com/eoghanhynes/ralph/internal/events"
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralph/internal/events"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 // RunClaudeFunc is the signature for invoking Claude. This avoids an import

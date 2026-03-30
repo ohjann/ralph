@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
-	rexec "github.com/eoghanhynes/ralph/internal/exec"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/ohjann/ralph/internal/costs"
+	rexec "github.com/ohjann/ralph/internal/exec"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/runner"
 )
 
 // EscalationContext provides rich context about why a story got stuck,

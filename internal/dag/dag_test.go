@@ -3,7 +3,7 @@ package dag
 import (
 	"testing"
 
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 func TestFromCheckpoint(t *testing.T) {

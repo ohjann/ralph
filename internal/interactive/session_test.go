@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 func TestSaveSession_InteractiveTasksOnly(t *testing.T) {

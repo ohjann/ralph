@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/memory"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/roles"
-	"github.com/eoghanhynes/ralph/internal/storystate"
+	"github.com/ohjann/ralph/internal/memory"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/roles"
+	"github.com/ohjann/ralph/internal/storystate"
 )
 
 func TestBuildStoryStateContextIncludesHint(t *testing.T) {

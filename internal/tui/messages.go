@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/judge"
-	"github.com/eoghanhynes/ralph/internal/memory"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/quality"
-	"github.com/eoghanhynes/ralph/internal/roles"
-	"github.com/eoghanhynes/ralph/internal/runner"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/judge"
+	"github.com/ohjann/ralph/internal/memory"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/quality"
+	"github.com/ohjann/ralph/internal/roles"
+	"github.com/ohjann/ralph/internal/runner"
 )
 
 // Phase transitions

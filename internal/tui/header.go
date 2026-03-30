@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/costs"
 )
 
 func renderHeader(m *Model, width int) string {

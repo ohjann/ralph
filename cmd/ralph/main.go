@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eoghanhynes/ralph/internal/config"
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/debuglog"
-	"github.com/eoghanhynes/ralph/internal/memory"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/runner"
-	"github.com/eoghanhynes/ralph/internal/tui"
+	"github.com/ohjann/ralph/internal/config"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralph/internal/memory"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/runner"
+	"github.com/ohjann/ralph/internal/tui"
 )
 
 var Version = "dev"

@@ -10,19 +10,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/debuglog"
+	"github.com/ohjann/ralph/internal/debuglog"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eoghanhynes/ralph/internal/checkpoint"
-	"github.com/eoghanhynes/ralph/internal/config"
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/dag"
-	"github.com/eoghanhynes/ralph/internal/fusion"
-	"github.com/eoghanhynes/ralph/internal/notify"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/runner"
-	"github.com/eoghanhynes/ralph/internal/worker"
-	"github.com/eoghanhynes/ralph/internal/workspace"
+	"github.com/ohjann/ralph/internal/checkpoint"
+	"github.com/ohjann/ralph/internal/config"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/dag"
+	"github.com/ohjann/ralph/internal/fusion"
+	"github.com/ohjann/ralph/internal/notify"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/runner"
+	"github.com/ohjann/ralph/internal/worker"
+	"github.com/ohjann/ralph/internal/workspace"
 )
 
 const maxRetries = 3

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"github.com/eoghanhynes/ralph/internal/debuglog"
+	"github.com/ohjann/ralph/internal/debuglog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/events"
-	"github.com/eoghanhynes/ralph/internal/memory"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/roles"
-	"github.com/eoghanhynes/ralph/internal/storystate"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/events"
+	"github.com/ohjann/ralph/internal/memory"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/roles"
+	"github.com/ohjann/ralph/internal/storystate"
 )
 
 // BuildPromptOpts holds optional parameters for BuildPrompt.

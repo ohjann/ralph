@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/exec"
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/exec"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 // CompareCandidate represents one competing implementation for comparison.

@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eoghanhynes/ralph/internal/debuglog"
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 // clarifyPromptTemplate is the prompt sent to Claude (Sonnet) to assess whether

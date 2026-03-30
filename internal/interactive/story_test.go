@@ -3,8 +3,8 @@ package interactive
 import (
 	"testing"
 
-	"github.com/eoghanhynes/ralph/internal/dag"
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/dag"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 func TestCreateStory_IDAutoIncrement(t *testing.T) {

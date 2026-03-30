@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/costs"
 )
 
 // RunClaudeUtility runs a lightweight Claude CLI call for utility tasks

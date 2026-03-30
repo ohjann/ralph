@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/costs"
 )
 
 // GeminiResult holds the output text and token usage from a Gemini invocation.

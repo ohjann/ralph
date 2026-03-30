@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/costs"
 )
 
 const claudeJudgeModel = "claude-sonnet-4-6"

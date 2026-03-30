@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/costs"
 )
 
 // Checkpoint represents the saved state of a ralph run for resume capability.

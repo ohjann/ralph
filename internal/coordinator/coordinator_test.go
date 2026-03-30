@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/eoghanhynes/ralph/internal/checkpoint"
-	"github.com/eoghanhynes/ralph/internal/config"
-	"github.com/eoghanhynes/ralph/internal/dag"
-	"github.com/eoghanhynes/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/checkpoint"
+	"github.com/ohjann/ralph/internal/config"
+	"github.com/ohjann/ralph/internal/dag"
+	"github.com/ohjann/ralph/internal/prd"
 )
 
 func TestNewFromCheckpoint(t *testing.T) {

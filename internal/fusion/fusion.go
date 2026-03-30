@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eoghanhynes/ralph/internal/costs"
-	"github.com/eoghanhynes/ralph/internal/exec"
-	"github.com/eoghanhynes/ralph/internal/judge"
-	"github.com/eoghanhynes/ralph/internal/prd"
-	"github.com/eoghanhynes/ralph/internal/worker"
+	"github.com/ohjann/ralph/internal/costs"
+	"github.com/ohjann/ralph/internal/exec"
+	"github.com/ohjann/ralph/internal/judge"
+	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralph/internal/worker"
 )
 
 // FusionGroup tracks competing implementations of the same story.
