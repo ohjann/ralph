@@ -99,11 +99,19 @@ func RunTeardown(ctx context.Context, wsDir string) {
 // AbandonChange removes a change from the jj graph. Use this to clean up
 // commits from failed or non-passing workers that will never be merged back,
 // preventing orphaned side branches in the history.
+//
+// Uses a revset glob (changeID+) to catch all divergent versions of the change,
+// preventing orphaned side branches when jj has created multiple versions of
+// the same change ID from concurrent workspace operations.
 func AbandonChange(ctx context.Context, projectDir, changeID string) error {
 	if changeID == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "jj", "abandon", changeID)
+	// Use change_id() revset to match all divergent versions of this change.
+	// A plain changeID fails if jj has created divergent versions (e.g. from
+	// concurrent workspace operations), leaving orphaned commits in the graph.
+	revset := fmt.Sprintf("change_id(%s)", changeID)
+	cmd := exec.CommandContext(ctx, "jj", "abandon", "-r", revset)
 	cmd.Dir = projectDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

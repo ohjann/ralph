@@ -86,7 +86,12 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	// Get diffs from all repos
 	diff := getDiffs(ctx, preRevs)
 	if diff == "" {
-		return Result{Passed: true, Warning: "no diff available"}
+		return Result{
+			Passed:         false,
+			Reason:         "No code changes were produced for this story",
+			CriteriaFailed: []string{"Implementation produces code changes"},
+			Suggestion:     "The worker did not produce any diff. The story needs to be re-attempted.",
+		}
 	}
 
 	// Build prompt from template
