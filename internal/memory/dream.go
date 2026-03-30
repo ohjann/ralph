@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ohjann/ralph/internal/costs"
-	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
 
 // RunMeta tracks run count and last dream consolidation time.

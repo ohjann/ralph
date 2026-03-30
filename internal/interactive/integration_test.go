@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ohjann/ralph/internal/checkpoint"
-	"github.com/ohjann/ralph/internal/dag"
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/checkpoint"
+	"github.com/ohjann/ralphplusplus/internal/dag"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 // TestFullLifecycle_CreateStory_DAG_Checkpoint exercises the complete interactive

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ohjann/ralph/internal/runner"
+	"github.com/ohjann/ralphplusplus/internal/runner"
 )
 
 // Lens defines a quality review perspective.

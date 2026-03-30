@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ohjann/ralph/internal/costs"
-	"github.com/ohjann/ralph/internal/memory"
+	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/memory"
 )
 
 // contextMode determines what the context panel shows.

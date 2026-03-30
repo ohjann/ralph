@@ -3,7 +3,7 @@ package notify
 import (
 	"context"
 	"fmt"
-	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"net/http"
 	"os/exec"
 	"runtime"

@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ohjann/ralph/internal/costs"
-	"github.com/ohjann/ralph/internal/debuglog"
-	rexec "github.com/ohjann/ralph/internal/exec"
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
+	rexec "github.com/ohjann/ralphplusplus/internal/exec"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 // DirRev associates a directory with revisions for diffing.

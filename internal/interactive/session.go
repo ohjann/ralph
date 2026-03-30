@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 // SessionTask records an interactive task's state for the session file.

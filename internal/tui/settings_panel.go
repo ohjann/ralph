@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ohjann/ralph/internal/config"
+	"github.com/ohjann/ralphplusplus/internal/config"
 )
 
 // settingType describes the kind of value a setting holds.

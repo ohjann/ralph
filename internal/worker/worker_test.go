@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ohjann/ralph/internal/config"
-	"github.com/ohjann/ralph/internal/costs"
-	"github.com/ohjann/ralph/internal/prd"
-	"github.com/ohjann/ralph/internal/roles"
-	"github.com/ohjann/ralph/internal/runner"
+	"github.com/ohjann/ralphplusplus/internal/config"
+	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/roles"
+	"github.com/ohjann/ralphplusplus/internal/runner"
 )
 
 func TestShouldRunArchitect(t *testing.T) {

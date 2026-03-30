@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ohjann/ralph/internal/dag"
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/dag"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 // StoryCreator manages the creation of interactive task stories with

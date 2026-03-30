@@ -9,10 +9,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ohjann/ralph/internal/dag"
-	"github.com/ohjann/ralph/internal/prd"
-	"github.com/ohjann/ralph/internal/storystate"
-	"github.com/ohjann/ralph/internal/worker"
+	"github.com/ohjann/ralphplusplus/internal/dag"
+	"github.com/ohjann/ralphplusplus/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/storystate"
+	"github.com/ohjann/ralphplusplus/internal/worker"
 )
 
 // StoryDisplayInfo holds everything needed to render a story row.

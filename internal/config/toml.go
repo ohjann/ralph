@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
-	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
 
 // tomlConfig mirrors the tunable subset of Config.

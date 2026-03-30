@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ohjann/ralph/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
 
 // MemoryConfig holds configuration for the markdown-based memory system.

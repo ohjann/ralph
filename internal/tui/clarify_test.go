@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 func TestBuildStorySummary_Empty(t *testing.T) {

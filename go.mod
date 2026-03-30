@@ -1,4 +1,4 @@
-module github.com/ohjann/ralph
+module github.com/ohjann/ralphplusplus
 
 go 1.25.0
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ohjann/ralph/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
 // CheckAndArchive detects a branch change and archives the previous run's prd.json and progress.md.

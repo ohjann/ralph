@@ -1,8 +1,8 @@
-# Ralph
+# Ralph++
 
-[![CI](https://github.com/ohjann/ralph/actions/workflows/ci.yml/badge.svg)](https://github.com/ohjann/ralph/actions/workflows/ci.yml)
+[![CI](https://github.com/ohjann/ralphplusplus/actions/workflows/ci.yml/badge.svg)](https://github.com/ohjann/ralphplusplus/actions/workflows/ci.yml)
 
-![Ralph](ralph.webp)
+[GitHub](https://github.com/ohjann/ralphplusplus) | [Radicle](https://app.radicle.xyz/nodes/iris.radicle.xyz/rad:z3hUHk2YiryoaHTS7jkbpAwGw3qd8)
 
 Ralph is an autonomous AI agent that runs [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a loop until all user stories in a PRD are complete. Each iteration gets a fresh context window. Memory persists via version control history, `progress.md`, `prd.json`, and markdown-based cross-run memory.
 
