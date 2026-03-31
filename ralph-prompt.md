@@ -190,6 +190,10 @@ When your context is compacted (long sessions), the system preserves a summary. 
 
 If you lose track of any of these after a long session, re-read `.ralph/stories/{id}/state.json` and `.ralph/stories/{id}/plan.md` to recover your context.
 
+## Completion Checklist
+
+Before committing, walk through each acceptance criterion one by one. For each criterion, confirm there is specific code in your changes that satisfies it. If any criterion is not addressed, implement it before committing. Do not assume partial completion will pass the judge — every criterion is checked individually.
+
 ## Important
 
 - Work on ONE story per iteration

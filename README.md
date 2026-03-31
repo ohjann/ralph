@@ -37,18 +37,21 @@ Memory between iterations comes from jj history, `progress.md`, `prd.json` statu
 ## Quick Start
 
 ```bash
-# Install to $GOPATH/bin (make sure this is on your PATH)
+# Install to $GOPATH/bin (make sure this is on your PATH) + Claude Code skill
 make install
 
 # Or just build locally
 make build
 ./build/ralph
+
+# Install the skill manually (make install does this automatically)
+cp -r skills/ralph ~/.claude/skills/ralph
 ```
 
 Then in your project:
 
 ```bash
-# Plan-driven (recommended): create a plan with Claude Code's /plan, then:
+# Plan-driven: create a plan with Claude Code's /plan, then:
 ralph --plan .claude/plans/my-plan.md
 
 # Existing prd.json
@@ -57,6 +60,8 @@ ralph
 # Interactive mode (no prd.json needed, auto-detected)
 ralph
 ```
+
+`--plan` goes from a Claude Code plan to running stories. If you want more control over `prd.json`, the `/ralph` skill in Claude Code converts plans to Ralph's format without starting execution.
 
 ## What it does
 

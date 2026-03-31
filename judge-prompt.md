@@ -42,8 +42,11 @@ Evaluate the diff ONLY against the acceptance criteria listed above.
 - Existing tests
 - Browser verification (if applicable)
 
-### Bias toward PASS
-Only return FAIL if there is **clear, specific evidence** that an acceptance criterion is not met by the diff. When in doubt, PASS.
+### Completeness is non-negotiable
+Every acceptance criterion must map to a specific code change in the diff. Walk through each criterion one by one and confirm there is corresponding implementation. If any criterion has no matching code in the diff, FAIL — even if the rest of the implementation is excellent.
+
+### Bias toward PASS on style and approach
+Only return FAIL for style, approach, or quality reasons if there is **clear, specific evidence** that an acceptance criterion is not met by the diff. When in doubt about *how* something was implemented, PASS. When in doubt about *whether* something was implemented, FAIL.
 
 ## Required Output
 
