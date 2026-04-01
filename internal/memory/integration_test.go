@@ -79,7 +79,7 @@ func TestRunMetaIncrementAndReset(t *testing.T) {
 // TestMemoryFilesSurviveMultipleRuns simulates multiple runs appending learnings,
 // then verifies all entries are present when read back.
 func TestMemoryFilesSurviveMultipleRuns(t *testing.T) {
-	ralphHome := t.TempDir()
+	projectDir := t.TempDir()
 
 	// Simulate 3 runs, each appending learnings
 	runs := []struct {
@@ -103,13 +103,13 @@ func TestMemoryFilesSurviveMultipleRuns(t *testing.T) {
 			Category:  r.category,
 			Content:   r.content,
 		}
-		if err := AppendLearning(ralphHome, entry); err != nil {
+		if err := AppendLearning(projectDir, entry); err != nil {
 			t.Fatalf("AppendLearning(%s): %v", r.id, err)
 		}
 	}
 
 	// Read back and verify all entries survive
-	content, err := ReadLearnings(ralphHome)
+	content, err := ReadLearnings(projectDir)
 	if err != nil {
 		t.Fatalf("ReadLearnings: %v", err)
 	}
@@ -129,8 +129,9 @@ func TestMemoryFilesSurviveMultipleRuns(t *testing.T) {
 		}
 	}
 
-	// Verify entry count
-	stats := MemoryStats(ralphHome)
+	// Verify entry count — learnings are project-specific, PRD learnings are global
+	// Pass empty ralphHome since we only care about project learnings here
+	stats := MemoryStats(projectDir, "")
 	var learningsInfo MemoryFileInfo
 	for _, s := range stats {
 		if s.Name == "learnings.md" {
@@ -147,12 +148,12 @@ func TestMemoryFilesSurviveMultipleRuns(t *testing.T) {
 }
 
 // TestFullMemoryLifecycle is an end-to-end integration test: append entries,
-// read them back, verify BuildPrompt helper includes them, and check size.
+// read them back, verify sizes, and check run counter.
 func TestFullMemoryLifecycle(t *testing.T) {
-	ralphHome := t.TempDir()
 	projectDir := t.TempDir()
+	ralphHome := t.TempDir()
 
-	// Step 1: Append learnings and PRD learnings
+	// Step 1: Append project-specific learning and global PRD learning
 	learning := LearningEntry{
 		ID:        "lifecycle-L1",
 		Run:       "lifecycle-run-01",
@@ -170,7 +171,7 @@ func TestFullMemoryLifecycle(t *testing.T) {
 		Content:   "Stories with >5 subtasks should be split.",
 	}
 
-	if err := AppendLearning(ralphHome, learning); err != nil {
+	if err := AppendLearning(projectDir, learning); err != nil {
 		t.Fatalf("AppendLearning: %v", err)
 	}
 	if err := AppendPRDLearning(ralphHome, prdLearning); err != nil {
@@ -178,7 +179,7 @@ func TestFullMemoryLifecycle(t *testing.T) {
 	}
 
 	// Step 2: Read back and verify round-trip
-	learnings, err := ReadLearnings(ralphHome)
+	learnings, err := ReadLearnings(projectDir)
 	if err != nil {
 		t.Fatalf("ReadLearnings: %v", err)
 	}
@@ -197,20 +198,8 @@ func TestFullMemoryLifecycle(t *testing.T) {
 		t.Error("prd-learnings should contain lifecycle-PL1")
 	}
 
-	// Step 3: CheckSize should report non-zero for the memory files
-	// CheckSize uses projectDir/.ralph/memory, so we need to create a symlink-like
-	// setup or just write files directly there.
-	memDir := filepath.Join(projectDir, ".ralph", "memory")
-	if err := os.MkdirAll(memDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Copy memory files to projectDir/.ralph/memory/ for CheckSize
-	learningsData, _ := os.ReadFile(filepath.Join(ralphHome, "memory", "learnings.md"))
-	prdData, _ := os.ReadFile(filepath.Join(ralphHome, "memory", "prd-learnings.md"))
-	os.WriteFile(filepath.Join(memDir, "learnings.md"), learningsData, 0o644)
-	os.WriteFile(filepath.Join(memDir, "prd-learnings.md"), prdData, 0o644)
-
-	result, err := CheckSize(projectDir)
+	// Step 3: CheckSize should report non-zero for both memory locations
+	result, err := CheckSize(projectDir, ralphHome)
 	if err != nil {
 		t.Fatalf("CheckSize: %v", err)
 	}
@@ -222,7 +211,7 @@ func TestFullMemoryLifecycle(t *testing.T) {
 	}
 
 	// Step 4: MemoryStats should report correct counts
-	stats := MemoryStats(ralphHome)
+	stats := MemoryStats(projectDir, ralphHome)
 	if len(stats) != 2 {
 		t.Fatalf("expected 2 memory file stats, got %d", len(stats))
 	}
@@ -236,6 +225,14 @@ func TestFullMemoryLifecycle(t *testing.T) {
 		if s.SizeBytes == 0 {
 			t.Errorf("memory file %s: expected non-zero size", s.Name)
 		}
+	}
+
+	// Verify learnings.md is in project dir, prd-learnings.md is in ralphHome
+	if !strings.Contains(stats[0].Path, ".ralph") {
+		t.Errorf("learnings.md path should be under .ralph, got %s", stats[0].Path)
+	}
+	if strings.Contains(stats[1].Path, ".ralph") {
+		t.Errorf("prd-learnings.md path should NOT be under .ralph, got %s", stats[1].Path)
 	}
 
 	// Step 5: Run counter lifecycle
@@ -256,10 +253,6 @@ func TestFullMemoryLifecycle(t *testing.T) {
 // TestCheckSizeWithAppendedEntries verifies CheckSize reports correct sizes
 // after appending entries through the normal API.
 func TestCheckSizeWithAppendedEntries(t *testing.T) {
-	// Use a single dir that serves as both ralphHome and has .ralph/memory
-	// We need CheckSize to look at projectDir/.ralph/memory
-	// and AppendLearning to write to ralphHome/memory
-	// In production these could be different, so we test the CheckSize path independently.
 	projectDir := t.TempDir()
 
 	// Create the structure CheckSize expects: projectDir/.ralph/memory/
@@ -274,7 +267,7 @@ func TestCheckSizeWithAppendedEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(projectDir)
+	result, err := CheckSize(projectDir, "")
 	if err != nil {
 		t.Fatalf("CheckSize: %v", err)
 	}
@@ -288,7 +281,7 @@ func TestCheckSizeWithAppendedEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err = CheckSize(projectDir)
+	result, err = CheckSize(projectDir, "")
 	if err != nil {
 		t.Fatalf("CheckSize: %v", err)
 	}
@@ -303,7 +296,7 @@ func TestCheckSizeWithAppendedEntries(t *testing.T) {
 // TestAppendLearningFormatIsReadable verifies that entries written by AppendLearning
 // produce well-formed markdown that can be parsed back by counting headers.
 func TestAppendLearningFormatIsReadable(t *testing.T) {
-	ralphHome := t.TempDir()
+	projectDir := t.TempDir()
 
 	entries := []LearningEntry{
 		{ID: "fmt-001", Run: "run-01", Stories: []string{"S-001"}, Confirmed: 1, Category: "testing", Content: "First entry."},
@@ -312,12 +305,12 @@ func TestAppendLearningFormatIsReadable(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		if err := AppendLearning(ralphHome, e); err != nil {
+		if err := AppendLearning(projectDir, e); err != nil {
 			t.Fatalf("AppendLearning(%s): %v", e.ID, err)
 		}
 	}
 
-	content, err := ReadLearnings(ralphHome)
+	content, err := ReadLearnings(projectDir)
 	if err != nil {
 		t.Fatalf("ReadLearnings: %v", err)
 	}

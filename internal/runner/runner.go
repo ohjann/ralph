@@ -83,7 +83,7 @@ func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...Buil
 
 	// Inject learned context from markdown memory files
 	if len(opts) == 0 || !opts[0].MemoryDisabled {
-		if section := buildLearnedContextSection(ralphHome); section != "" {
+		if section := buildLearnedContextSection(projectDir, ralphHome); section != "" {
 			prompt += section
 		}
 	}
@@ -271,11 +271,11 @@ func HasStuckInfo(projectDir, storyID string) bool {
 	return false
 }
 
-// buildLearnedContextSection reads learnings.md and prd-learnings.md from
-// {ralphHome}/memory/ and returns a formatted "Learned Context" section.
+// buildLearnedContextSection reads project-specific learnings from
+// {projectDir}/.ralph/memory/ and global PRD learnings from {ralphHome}/memory/.
 // Returns empty string if no memory files exist or all are empty.
-func buildLearnedContextSection(ralphHome string) string {
-	learnings, _ := memory.ReadLearnings(ralphHome)
+func buildLearnedContextSection(projectDir, ralphHome string) string {
+	learnings, _ := memory.ReadLearnings(projectDir)
 	prdLearnings, _ := memory.ReadPRDLearnings(ralphHome)
 
 	learnings = strings.TrimSpace(learnings)

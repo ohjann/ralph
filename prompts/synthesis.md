@@ -38,20 +38,20 @@ Output these as markdown entries in **exactly** this format (one per learning):
 {Description of the learning — what was observed, why it matters, and what to do differently.}
 ```
 
-### 2. PRD Quality Learnings
+### 2. PRD Quality Learnings (Global)
 
-Look for issues with how the PRD was structured: story sizing (too large/small), ordering problems (dependency not captured), unclear acceptance criteria, missing constraints. These help improve future PRD generation.
+These learnings are **shared across all projects** — they must be general principles about PRD structure, not tied to any specific project or story. Look for issues with how the PRD was structured: story sizing (too large/small), ordering problems (dependency not captured), unclear acceptance criteria, missing constraints.
+
+**Important:** Write these as universal, reusable lessons. Do NOT reference specific story IDs, file names, or project details. Instead of "P6-006 was a UI-only story that ran in parallel", write "Leaf UI stories with no upstream dependencies can safely run in parallel without blocking the main chain."
 
 Output these as markdown entries in **exactly** this format (one per learning):
 
 ```
 ### P-{NNN}
-- **Run:** {project_name}
-- **Stories:** {comma-separated story IDs that evidence this}
 - **Confirmed:** 1 times
 - **Category:** {one of: sizing, ordering, criteria, constraints, dependencies, scope}
 
-{Description of the PRD quality issue — what was wrong, what problems it caused, and how to write better PRDs.}
+{A general, reusable lesson about PRD structure — what pattern was observed, why it matters, and how to apply it to any future PRD.}
 ```
 
 ### 3. Confirmation Updates

@@ -30,7 +30,7 @@ func TestReadPRDLearningsFileNotExist(t *testing.T) {
 }
 
 func TestAppendAndReadLearningRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	projectDir := t.TempDir()
 
 	entry := LearningEntry{
 		ID:        "lesson-2026-03-26-auth-retry",
@@ -41,11 +41,11 @@ func TestAppendAndReadLearningRoundTrip(t *testing.T) {
 		Content:   "When auth tokens expire mid-request, retry with backoff.",
 	}
 
-	if err := AppendLearning(dir, entry); err != nil {
+	if err := AppendLearning(projectDir, entry); err != nil {
 		t.Fatalf("AppendLearning: %v", err)
 	}
 
-	content, err := ReadLearnings(dir)
+	content, err := ReadLearnings(projectDir)
 	if err != nil {
 		t.Fatalf("ReadLearnings: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestAppendAndReadLearningRoundTrip(t *testing.T) {
 }
 
 func TestAppendAndReadPRDLearningRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	ralphHome := t.TempDir()
 
 	entry := LearningEntry{
 		ID:        "prd-lesson-001",
@@ -82,11 +82,11 @@ func TestAppendAndReadPRDLearningRoundTrip(t *testing.T) {
 		Content:   "Stories over 5 subtasks should be split.",
 	}
 
-	if err := AppendPRDLearning(dir, entry); err != nil {
+	if err := AppendPRDLearning(ralphHome, entry); err != nil {
 		t.Fatalf("AppendPRDLearning: %v", err)
 	}
 
-	content, err := ReadPRDLearnings(dir)
+	content, err := ReadPRDLearnings(ralphHome)
 	if err != nil {
 		t.Fatalf("ReadPRDLearnings: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestAppendAndReadPRDLearningRoundTrip(t *testing.T) {
 }
 
 func TestMultipleAppends(t *testing.T) {
-	dir := t.TempDir()
+	projectDir := t.TempDir()
 
 	entries := []LearningEntry{
 		{ID: "L-001", Run: "run-01", Stories: []string{"S-001"}, Confirmed: 1, Category: "testing", Content: "First lesson."},
@@ -108,12 +108,12 @@ func TestMultipleAppends(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		if err := AppendLearning(dir, e); err != nil {
+		if err := AppendLearning(projectDir, e); err != nil {
 			t.Fatalf("AppendLearning(%s): %v", e.ID, err)
 		}
 	}
 
-	content, err := ReadLearnings(dir)
+	content, err := ReadLearnings(projectDir)
 	if err != nil {
 		t.Fatalf("ReadLearnings: %v", err)
 	}
@@ -133,14 +133,14 @@ func TestMultipleAppends(t *testing.T) {
 }
 
 func TestMemoryDirectoryCreated(t *testing.T) {
-	dir := t.TempDir()
+	projectDir := t.TempDir()
 
 	entry := LearningEntry{ID: "L-001", Run: "run-01", Stories: []string{"S-001"}, Confirmed: 1, Category: "testing", Content: "Test."}
-	if err := AppendLearning(dir, entry); err != nil {
+	if err := AppendLearning(projectDir, entry); err != nil {
 		t.Fatalf("AppendLearning: %v", err)
 	}
 
-	memDir := filepath.Join(dir, "memory")
+	memDir := filepath.Join(projectDir, ".ralph", "memory")
 	info, err := os.Stat(memDir)
 	if err != nil {
 		t.Fatalf("memory directory not created: %v", err)

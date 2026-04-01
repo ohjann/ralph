@@ -112,13 +112,14 @@ func buildDreamPrompt(projectDir, ralphHome string, maxEntries, lastNRuns int) (
 
 	prompt := string(tmpl)
 
-	// Inject existing learnings
-	learnings, _ := ReadLearnings(ralphHome)
+	// Inject existing learnings (project-specific, from .ralph/memory/)
+	learnings, _ := ReadLearnings(projectDir)
 	if learnings == "" {
 		learnings = "(none yet)"
 	}
 	prompt = strings.Replace(prompt, "{{LEARNINGS}}", learnings, 1)
 
+	// Inject existing PRD learnings (global, from ralphHome/memory/)
 	prdLearnings, _ := ReadPRDLearnings(ralphHome)
 	if prdLearnings == "" {
 		prdLearnings = "(none yet)"
@@ -132,19 +133,19 @@ func buildDreamPrompt(projectDir, ralphHome string, maxEntries, lastNRuns int) (
 	prompt = strings.Replace(prompt, "{{MAX_ENTRIES}}", fmt.Sprintf("%d", maxEntries), 1)
 
 	// Append output instructions telling Claude where to write
-	memDir := filepath.Join(ralphHome, "memory")
 	prompt += fmt.Sprintf(`
 
 ## Output Instructions
 
 Write the consolidated versions of the memory files using the Write tool. These are FULL replacements, not appends.
 
-- Learnings file: %s
-- PRD learnings file: %s
+- Learnings file (project-specific): %s
+- PRD learnings file (global): %s
 
-Create the memory/ directory if it doesn't exist.
+Create the directories if they don't exist.
 Write each file in its entirety — the old content will be replaced.
-`, filepath.Join(memDir, "learnings.md"), filepath.Join(memDir, "prd-learnings.md"))
+`, filepath.Join(projectDir, ".ralph", "memory", "learnings.md"),
+		filepath.Join(ralphHome, "memory", "prd-learnings.md"))
 
 	return prompt, nil
 }

@@ -55,7 +55,7 @@ func main() {
 		case "consolidate":
 			err = runMemoryConsolidate(cfg)
 		case "reset":
-			err = runMemoryReset(cfg.RalphHome)
+			err = runMemoryReset(cfg.ProjectDir, cfg.RalphHome)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -445,7 +445,7 @@ func printModelGroup(g *modelGroup) {
 func printMemoryStats(ralphHome, projectDir string) error {
 	fmt.Println("── Memory Stats ──")
 
-	stats := memory.MemoryStats(ralphHome)
+	stats := memory.MemoryStats(projectDir, ralphHome)
 	for _, s := range stats {
 		if !s.Exists {
 			fmt.Printf("  %s: (not created yet)\n", s.Name)
@@ -453,6 +453,7 @@ func printMemoryStats(ralphHome, projectDir string) error {
 		}
 		estTokens := s.SizeBytes * 4 / 3 // rough estimate: ~0.75 bytes per token
 		fmt.Printf("  %s: %d bytes (~%d tokens), %d entries\n", s.Name, s.SizeBytes, estTokens, s.EntryCount)
+		fmt.Printf("    → %s\n", s.Path)
 	}
 
 	meta, err := memory.LoadRunMeta(projectDir)
@@ -490,7 +491,7 @@ func runMemoryConsolidate(cfg *config.Config) error {
 	fmt.Println("Dream consolidation complete.")
 
 	// Print summary of what was consolidated
-	stats := memory.MemoryStats(cfg.RalphHome)
+	stats := memory.MemoryStats(cfg.ProjectDir, cfg.RalphHome)
 	for _, s := range stats {
 		if s.Exists {
 			fmt.Printf("  %s: %d entries (%d bytes)\n", s.Name, s.EntryCount, s.SizeBytes)
@@ -500,21 +501,13 @@ func runMemoryConsolidate(cfg *config.Config) error {
 }
 
 // runMemoryReset clears all memory files after confirmation.
-func runMemoryReset(ralphHome string) error {
-	memDir := filepath.Join(ralphHome, "memory")
-
-	// Check if directory exists
-	if _, err := os.Stat(memDir); os.IsNotExist(err) {
-		fmt.Println("No memory files to reset (directory does not exist).")
-		return nil
-	}
-
+func runMemoryReset(projectDir, ralphHome string) error {
 	// Show what will be deleted
-	stats := memory.MemoryStats(ralphHome)
+	stats := memory.MemoryStats(projectDir, ralphHome)
 	hasFiles := false
 	for _, s := range stats {
 		if s.Exists {
-			fmt.Printf("  Will delete: %s (%d bytes, %d entries)\n", s.Name, s.SizeBytes, s.EntryCount)
+			fmt.Printf("  Will delete: %s\n    → %s\n", s.Name, s.Path)
 			hasFiles = true
 		}
 	}
@@ -531,20 +524,14 @@ func runMemoryReset(ralphHome string) error {
 		return nil
 	}
 
-	// Delete all files in memory directory
-	entries, err := os.ReadDir(memDir)
-	if err != nil {
-		return fmt.Errorf("reading memory directory: %w", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
+	for _, s := range stats {
+		if !s.Exists {
 			continue
 		}
-		path := filepath.Join(memDir, e.Name())
-		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("removing %s: %w", e.Name(), err)
+		if err := os.Remove(s.Path); err != nil {
+			return fmt.Errorf("removing %s: %w", s.Name, err)
 		}
-		fmt.Printf("  Deleted: %s\n", e.Name())
+		fmt.Printf("  Deleted: %s\n", s.Path)
 	}
 
 	fmt.Println("Memory reset complete.")

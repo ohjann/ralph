@@ -671,7 +671,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 
 	// Check memory file sizes at startup (shown once via status bar).
-	memCheck := checkMemorySizeCmd(m.cfg.ProjectDir)
+	memCheck := checkMemorySizeCmd(m.cfg.ProjectDir, m.cfg.RalphHome)
 
 	if m.cfg.IdleMode {
 		m.phase = phaseIdle
@@ -1400,7 +1400,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tickCmd())
 		cmds = append(cmds, pollWorktreeCmd(m.ctx, m.cfg.ProjectDir))
 		cmds = append(cmds, reloadPRDCmd(m.cfg.PRDFile))
-		cmds = append(cmds, pollMemoryStatsCmd(m.cfg.RalphHome))
+		cmds = append(cmds, pollMemoryStatsCmd(m.cfg.ProjectDir, m.cfg.RalphHome))
 		// Auto-dismiss stuck alert after 30s
 		if m.stuckAlert != nil && time.Since(m.stuckAlertAt) > 30*time.Second {
 			m.stuckAlert = nil

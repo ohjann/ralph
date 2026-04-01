@@ -96,9 +96,9 @@ func usageLimitResumeCmd(resetsAt time.Time) tea.Cmd {
 	})
 }
 
-func checkMemorySizeCmd(projectDir string) tea.Cmd {
+func checkMemorySizeCmd(projectDir, ralphHome string) tea.Cmd {
 	return safeCmd(func() tea.Msg {
-		result, err := memory.CheckSize(projectDir)
+		result, err := memory.CheckSize(projectDir, ralphHome)
 		if err != nil {
 			debuglog.Log("memory size check error: %v", err)
 			return nil
@@ -140,9 +140,9 @@ func pollWorktreeCmd(ctx context.Context, dir string) tea.Cmd {
 	}
 }
 
-func pollMemoryStatsCmd(ralphHome string) tea.Cmd {
+func pollMemoryStatsCmd(projectDir, ralphHome string) tea.Cmd {
 	return func() tea.Msg {
-		stats := memory.MemoryStats(ralphHome)
+		stats := memory.MemoryStats(projectDir, ralphHome)
 		return memoryStatsMsg{Stats: stats}
 	}
 }
@@ -694,7 +694,7 @@ func pollWorkerActivityCmd(wID worker.WorkerID, activityPath string) tea.Cmd {
 
 func qualityReviewCmd(ctx context.Context, cfg *config.Config, iteration int) tea.Cmd {
 	return safeCmd(func() tea.Msg {
-		manifest, err := quality.GetDiffManifest(ctx, cfg.ProjectDir)
+		manifest, err := quality.GetDiffManifest(ctx, cfg.ProjectDir, cfg.PRDFile)
 		if err != nil || manifest == "" {
 			return qualityReviewDoneMsg{Err: fmt.Errorf("no changes to review: %v", err)}
 		}

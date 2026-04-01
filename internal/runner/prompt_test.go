@@ -590,15 +590,20 @@ func TestBuildPromptWithMemoryFilesIncludesLearnedContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create memory files
-	memDir := filepath.Join(ralphHome, "memory")
-	if err := os.MkdirAll(memDir, 0o755); err != nil {
+	// Create project-specific learnings in {projectDir}/.ralph/memory/
+	projectMemDir := filepath.Join(dir, ".ralph", "memory")
+	if err := os.MkdirAll(projectMemDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(memDir, "learnings.md"), []byte("### L-001\nAlways run tests before committing\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectMemDir, "learnings.md"), []byte("### L-001\nAlways run tests before committing\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(memDir, "prd-learnings.md"), []byte("### PL-001\nBreak large stories into subtasks\n"), 0o644); err != nil {
+	// Create global PRD learnings in {ralphHome}/memory/
+	globalMemDir := filepath.Join(ralphHome, "memory")
+	if err := os.MkdirAll(globalMemDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalMemDir, "prd-learnings.md"), []byte("### PL-001\nBreak large stories into subtasks\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

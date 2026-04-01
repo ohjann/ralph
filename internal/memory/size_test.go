@@ -13,7 +13,7 @@ func TestCheckSize_EmptyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestCheckSize_EmptyDir(t *testing.T) {
 
 func TestCheckSize_NoDir(t *testing.T) {
 	dir := t.TempDir()
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestCheckSize_KnownSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestCheckSize_WarnThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCheckSize_CritThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestCheckSize_SkipsSubdirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CheckSize(dir)
+	result, err := CheckSize(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -49,13 +49,14 @@ func buildSynthesisPrompt(projectDir, ralphHome string, p *prd.PRD) (string, err
 	// Build key events from events.jsonl
 	prompt = strings.Replace(prompt, "{{KEY_EVENTS}}", buildKeyEvents(projectDir), 1)
 
-	// Inject existing learnings
-	learnings, _ := ReadLearnings(ralphHome)
+	// Inject existing learnings (project-specific, from .ralph/memory/)
+	learnings, _ := ReadLearnings(projectDir)
 	if learnings == "" {
 		learnings = "(none yet)"
 	}
 	prompt = strings.Replace(prompt, "{{EXISTING_LEARNINGS}}", learnings, 1)
 
+	// Inject existing PRD learnings (global, from ralphHome/memory/)
 	prdLearnings, _ := ReadPRDLearnings(ralphHome)
 	if prdLearnings == "" {
 		prdLearnings = "(none yet)"
@@ -70,10 +71,10 @@ func buildSynthesisPrompt(projectDir, ralphHome string, p *prd.PRD) (string, err
 Write your new general learnings by appending to the file at: %s
 Write your new PRD learnings by appending to the file at: %s
 
-Use the Write tool or Edit tool to append entries. Create the memory/ directory if needed.
+Use the Write tool or Edit tool to append entries. Create the directories if needed.
 For confirmation updates, read the existing file, find the entry, and increment its "Confirmed: N times" count.
 `,
-		filepath.Join(ralphHome, "memory", "learnings.md"),
+		filepath.Join(projectDir, ".ralph", "memory", "learnings.md"),
 		filepath.Join(ralphHome, "memory", "prd-learnings.md"),
 	)
 

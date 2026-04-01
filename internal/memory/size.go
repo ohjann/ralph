@@ -3,7 +3,6 @@ package memory
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 const (
@@ -43,28 +42,34 @@ func (r SizeResult) WarnMessage() string {
 	}
 }
 
-// CheckSize reads all files in the .ralph/memory/ directory and returns
-// their combined size as an estimated token count (bytes / 4).
-func CheckSize(projectDir string) (SizeResult, error) {
-	memDir := filepath.Join(projectDir, ".ralph", "memory")
-	entries, err := os.ReadDir(memDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return SizeResult{}, nil
-		}
-		return SizeResult{}, err
+// CheckSize reads memory files from both project-specific ({projectDir}/.ralph/memory/)
+// and global ({ralphHome}/memory/) directories and returns their combined size
+// as an estimated token count (bytes / 4).
+func CheckSize(projectDir, ralphHome string) (SizeResult, error) {
+	dirs := []string{
+		projectMemoryDir(projectDir),
+		globalMemoryDir(ralphHome),
 	}
 
 	var totalBytes int64
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
+	for _, memDir := range dirs {
+		entries, err := os.ReadDir(memDir)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return SizeResult{}, err
 		}
-		totalBytes += info.Size()
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			totalBytes += info.Size()
+		}
 	}
 
 	return SizeResult{

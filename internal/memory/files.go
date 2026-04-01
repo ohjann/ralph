@@ -12,37 +12,41 @@ const (
 	prdLearningsFile = "prd-learnings.md"
 )
 
-// memoryDir returns the path to {ralphHome}/memory/.
-func memoryDir(ralphHome string) string {
+// projectMemoryDir returns the path to {projectDir}/.ralph/memory/ (project-specific learnings).
+func projectMemoryDir(projectDir string) string {
+	return filepath.Join(projectDir, ".ralph", "memory")
+}
+
+// globalMemoryDir returns the path to {ralphHome}/memory/ (global PRD learnings).
+func globalMemoryDir(ralphHome string) string {
 	return filepath.Join(ralphHome, "memory")
 }
 
-// ReadLearnings returns the contents of {ralphHome}/memory/learnings.md.
+// ReadLearnings returns the contents of {projectDir}/.ralph/memory/learnings.md.
 // Returns empty string (not error) if the file doesn't exist yet.
-func ReadLearnings(ralphHome string) (string, error) {
-	return readMemoryFile(ralphHome, learningsFile)
+func ReadLearnings(projectDir string) (string, error) {
+	return readFile(filepath.Join(projectMemoryDir(projectDir), learningsFile))
 }
 
 // ReadPRDLearnings returns the contents of {ralphHome}/memory/prd-learnings.md.
 // Returns empty string (not error) if the file doesn't exist yet.
 func ReadPRDLearnings(ralphHome string) (string, error) {
-	return readMemoryFile(ralphHome, prdLearningsFile)
+	return readFile(filepath.Join(globalMemoryDir(ralphHome), prdLearningsFile))
 }
 
-// AppendLearning appends a LearningEntry to {ralphHome}/memory/learnings.md.
-// Creates the memory/ directory if it doesn't exist.
-func AppendLearning(ralphHome string, entry LearningEntry) error {
-	return appendEntry(ralphHome, learningsFile, entry)
+// AppendLearning appends a LearningEntry to {projectDir}/.ralph/memory/learnings.md.
+// Creates the directory if it doesn't exist.
+func AppendLearning(projectDir string, entry LearningEntry) error {
+	return appendEntry(projectMemoryDir(projectDir), learningsFile, entry)
 }
 
 // AppendPRDLearning appends a LearningEntry to {ralphHome}/memory/prd-learnings.md.
-// Creates the memory/ directory if it doesn't exist.
+// Creates the directory if it doesn't exist.
 func AppendPRDLearning(ralphHome string, entry LearningEntry) error {
-	return appendEntry(ralphHome, prdLearningsFile, entry)
+	return appendEntry(globalMemoryDir(ralphHome), prdLearningsFile, entry)
 }
 
-func readMemoryFile(ralphHome, filename string) (string, error) {
-	path := filepath.Join(memoryDir(ralphHome), filename)
+func readFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -53,8 +57,7 @@ func readMemoryFile(ralphHome, filename string) (string, error) {
 	return string(data), nil
 }
 
-func appendEntry(ralphHome, filename string, entry LearningEntry) error {
-	dir := memoryDir(ralphHome)
+func appendEntry(dir, filename string, entry LearningEntry) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -74,23 +77,32 @@ func appendEntry(ralphHome, filename string, entry LearningEntry) error {
 // MemoryFileInfo holds summary info about a memory file.
 type MemoryFileInfo struct {
 	Name       string
+	Path       string // full path to the file
 	Exists     bool
 	SizeBytes  int64
 	EntryCount int
 }
 
-// MemoryStats returns summary info about memory files in {ralphHome}/memory/.
-func MemoryStats(ralphHome string) []MemoryFileInfo {
-	files := []string{learningsFile, prdLearningsFile}
+// MemoryStats returns summary info about memory files.
+// learnings.md is read from {projectDir}/.ralph/memory/ (project-specific).
+// prd-learnings.md is read from {ralphHome}/memory/ (global).
+func MemoryStats(projectDir, ralphHome string) []MemoryFileInfo {
+	type fileSpec struct {
+		name string
+		dir  string
+	}
+	specs := []fileSpec{
+		{learningsFile, projectMemoryDir(projectDir)},
+		{prdLearningsFile, globalMemoryDir(ralphHome)},
+	}
 	var stats []MemoryFileInfo
-	for _, f := range files {
-		path := filepath.Join(memoryDir(ralphHome), f)
-		info := MemoryFileInfo{Name: f}
+	for _, s := range specs {
+		path := filepath.Join(s.dir, s.name)
+		info := MemoryFileInfo{Name: s.name, Path: path}
 		fi, err := os.Stat(path)
 		if err == nil {
 			info.Exists = true
 			info.SizeBytes = fi.Size()
-			// Count entries by counting "### " prefixes
 			if data, err := os.ReadFile(path); err == nil {
 				info.EntryCount = strings.Count(string(data), "\n### ") + countLeadingEntry(data)
 			}

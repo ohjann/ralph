@@ -325,9 +325,24 @@ func FormatSummary(a Assessment) string {
 	return sb.String()
 }
 
-// GetDiffManifest returns a summary of changed files using jj diff --stat.
-func GetDiffManifest(ctx context.Context, projectDir string) (string, error) {
-	// Try jj diff --stat first
+// GetDiffManifest returns a summary of changed files for the current run.
+// It uses story IDs from the PRD to find the earliest story commit and diffs
+// from there to the current revision.
+func GetDiffManifest(ctx context.Context, projectDir, prdFile string) (string, error) {
+	// Derive the story prefix from the PRD (e.g. "P7-" from "P7-001").
+	prefix := storyPrefixFromPRD(prdFile)
+	if prefix != "" {
+		glob := fmt.Sprintf("story %s*", prefix)
+		from := fmt.Sprintf("roots(description(glob:\"%s\"))", glob)
+		cmd := exec.CommandContext(ctx, "jj", "diff", "--stat", "--from", from, "--to", "@")
+		cmd.Dir = projectDir
+		out, err := cmd.CombinedOutput()
+		if err == nil && len(out) > 0 {
+			return strings.TrimSpace(string(out)), nil
+		}
+	}
+
+	// Fallback: diff working copy (original behaviour)
 	cmd := exec.CommandContext(ctx, "jj", "diff", "--stat", "-r", "@")
 	cmd.Dir = projectDir
 	out, err := cmd.CombinedOutput()
@@ -335,7 +350,6 @@ func GetDiffManifest(ctx context.Context, projectDir string) (string, error) {
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	// Fallback to git
 	cmd = exec.CommandContext(ctx, "git", "diff", "--stat", "HEAD~1")
 	cmd.Dir = projectDir
 	out, err = cmd.CombinedOutput()
@@ -343,6 +357,33 @@ func GetDiffManifest(ctx context.Context, projectDir string) (string, error) {
 		return "", fmt.Errorf("could not get diff manifest: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// storyPrefixFromPRD extracts the common prefix from story IDs (e.g. "P7-" from "P7-001").
+func storyPrefixFromPRD(prdFile string) string {
+	data, err := os.ReadFile(prdFile)
+	if err != nil {
+		return ""
+	}
+	var raw struct {
+		UserStories []struct {
+			ID string `json:"id"`
+		} `json:"userStories"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.UserStories) == 0 {
+		return ""
+	}
+	// Take the first story ID and strip trailing digits to get the prefix.
+	// e.g. "P7-001" → "P7-"
+	id := raw.UserStories[0].ID
+	i := len(id)
+	for i > 0 && id[i-1] >= '0' && id[i-1] <= '9' {
+		i--
+	}
+	if i == 0 {
+		return ""
+	}
+	return id[:i]
 }
 
 // parseFindingsFromActivity reads the activity log and extracts findings from <findings> tags.

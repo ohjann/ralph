@@ -57,16 +57,14 @@ Learnings must follow this format:
 {Description}
 ```
 
-PRD learnings must follow this format:
+PRD learnings are **global** (shared across projects) and must be general principles, not tied to specific stories or projects. Strip out any project-specific references (story IDs, file names, project names) during consolidation.
 
 ```
 ### P-{NNN}
-- **Run:** {project_name}
-- **Stories:** {comma-separated story IDs}
 - **Confirmed:** {N} times
 - **Category:** {sizing, ordering, criteria, constraints, dependencies, scope}
 
-{Description}
+{A general, reusable lesson about PRD structure.}
 ```
 
 ## Rules
