@@ -20,6 +20,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/fusion"
 	"github.com/ohjann/ralphplusplus/internal/notify"
 	"github.com/ohjann/ralphplusplus/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/roles"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/worker"
 	"github.com/ohjann/ralphplusplus/internal/workspace"
@@ -199,17 +200,13 @@ func (c *Coordinator) ScheduleReady(ctx context.Context) int {
 				StoryID:  storyID,
 				Expected: c.cfg.FusionWorkers,
 			}
-			for fi := 0; fi < c.cfg.FusionWorkers; fi++ {
-				suffix := fmt.Sprintf("-f%d", fi)
-				w := c.spawnWorkerLocked(ctx, storyID, story, suffix)
-				fg.Workers = append(fg.Workers, w.ID)
-				go worker.Run(w, c.cfg, c.updateCh)
-				launched++
-				c.iterationCount++
-			}
 			c.fusionGroups[storyID] = fg
+			c.inProgress[storyID] = 0 // reserve slot while architect runs
 			slots -= c.cfg.FusionWorkers
-			debuglog.Log("fusion: spawned %d workers for complex story %s", c.cfg.FusionWorkers, storyID)
+			launched += c.cfg.FusionWorkers
+			c.iterationCount += c.cfg.FusionWorkers
+			go c.runFusionArchitectThenSpawn(ctx, storyID, story, fg)
+			debuglog.Log("fusion: launching shared architect then %d workers for %s", c.cfg.FusionWorkers, storyID)
 		} else {
 			w := c.spawnWorkerLocked(ctx, storyID, story, "")
 			go worker.Run(w, c.cfg, c.updateCh)
@@ -268,6 +265,91 @@ func (c *Coordinator) shouldUseFusionLocked(ctx context.Context, story *prd.User
 	c.complexityCache[story.ID] = complex
 	debuglog.Log("fusion: %s assessed as complex=%v (%s)", story.ID, complex, reason)
 	return complex
+}
+
+// runFusionArchitectThenSpawn runs a shared architect phase for fusion workers,
+// captures the session ID, then spawns fusion implementer workers that fork from
+// that session. If the architect fails or yields no session ID, falls back to
+// spawning regular fusion workers (each running their own architect).
+func (c *Coordinator) runFusionArchitectThenSpawn(ctx context.Context, storyID string, story *prd.UserStory, fg *fusion.FusionGroup) {
+	var architectSessionID string
+
+	// Attempt to run shared architect
+	if !c.cfg.NoArchitect {
+		architectSessionID = c.runSharedArchitect(ctx, storyID)
+	}
+
+	if architectSessionID != "" {
+		fg.ArchitectSessionID = architectSessionID
+		debuglog.Log("fusion: architect session captured for %s: %s", storyID, architectSessionID)
+	} else {
+		debuglog.Log("fusion: no architect session for %s, workers will run own architects", storyID)
+	}
+
+	// Spawn fusion workers
+	c.mu.Lock()
+	delete(c.inProgress, storyID) // remove placeholder
+	for fi := 0; fi < c.cfg.FusionWorkers; fi++ {
+		suffix := fmt.Sprintf("-f%d", fi)
+		w := c.spawnWorkerLocked(ctx, storyID, story, suffix)
+		w.ArchitectSessionID = architectSessionID
+		fg.Workers = append(fg.Workers, w.ID)
+		go worker.Run(w, c.cfg, c.updateCh)
+	}
+	c.mu.Unlock()
+}
+
+// runSharedArchitect creates a temporary workspace, runs the architect phase,
+// and returns the captured session ID. Returns empty string on any failure.
+func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) string {
+	ws, err := workspace.Create(ctx, c.cfg.ProjectDir, storyID, c.cfg.WorkspaceBase, "-arch")
+	if err != nil {
+		debuglog.Log("fusion: architect workspace create failed for %s: %v", storyID, err)
+		return ""
+	}
+	defer func() {
+		wsName := workspace.WorkspaceName(storyID) + "-arch"
+		_ = workspace.Destroy(ctx, c.cfg.ProjectDir, wsName, ws.Dir)
+	}()
+
+	if err := workspace.CopyState(c.cfg.ProjectDir, ws.Dir, storyID); err != nil {
+		debuglog.Log("fusion: architect copy state failed for %s: %v", storyID, err)
+		return ""
+	}
+	if _, err := workspace.RunSetup(ctx, ws.Dir); err != nil {
+		debuglog.Log("fusion: architect workspace setup failed for %s: %v", storyID, err)
+		return ""
+	}
+
+	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
+
+	archPrompt, err := runner.BuildPrompt(c.cfg.RalphHome, ws.Dir, storyID, wsPRD, runner.BuildPromptOpts{
+		Role:           roles.RoleArchitect,
+		MemoryDisabled: c.cfg.Memory.Disabled,
+	})
+	if err != nil {
+		debuglog.Log("fusion: architect prompt build failed for %s: %v", storyID, err)
+		return ""
+	}
+	archPrompt = worker.AppendParallelMode(archPrompt, storyID)
+
+	logDir := filepath.Join(ws.Dir, ".ralph", "logs")
+	_ = os.MkdirAll(logDir, 0o755)
+	logPath := runner.LogFilePath(logDir, 0) + ".architect"
+
+	archResult, err := runner.RunClaude(ctx, ws.Dir, archPrompt, logPath, runner.RunClaudeOpts{
+		StoryID: storyID,
+		Role:    roles.RoleArchitect,
+		Model:   worker.ResolveModel(roles.RoleArchitect, c.cfg),
+	})
+	if err != nil {
+		debuglog.Log("fusion: architect run failed for %s: %v", storyID, err)
+	}
+
+	if archResult != nil && archResult.SessionID != "" {
+		return archResult.SessionID
+	}
+	return ""
 }
 
 // HandleUpdate processes a worker update.

@@ -284,9 +284,9 @@ func TestResolveModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveModel(tt.role, tt.cfg)
+			got := ResolveModel(tt.role, tt.cfg)
 			if got != tt.wantModel {
-				t.Errorf("resolveModel(%s) = %s, want %s", tt.role, got, tt.wantModel)
+				t.Errorf("ResolveModel(%s) = %s, want %s", tt.role, got, tt.wantModel)
 			}
 		})
 	}

@@ -63,8 +63,9 @@ type Worker struct {
 	BaseChangeID   string     // jj change ID of the commit the workspace branched from
 	LogDir         string
 	Iteration      int
-	FusionSuffix   string     // non-empty for fusion workers (e.g., "-f0", "-f1")
-	SessionID      string     // captured from Claude stream for kill+resume
+	FusionSuffix       string // non-empty for fusion workers (e.g., "-f0", "-f1")
+	SessionID          string // captured from Claude stream for kill+resume
+	ArchitectSessionID string // if set, skip architect and fork from this session
 	Ctx            context.Context
 	Cancel         context.CancelFunc
 }
@@ -147,9 +148,9 @@ func accumulateUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
 	}
 }
 
-// resolveModel determines the model to use for a given role by applying the
+// ResolveModel determines the model to use for a given role by applying the
 // override precedence: config role-specific override > config global override > role default.
-func resolveModel(role roles.Role, cfg *config.Config) string {
+func ResolveModel(role roles.Role, cfg *config.Config) string {
 	// Check role-specific CLI overrides first
 	switch role {
 	case roles.RoleArchitect:
@@ -183,8 +184,8 @@ func shouldRunSimplify(storyID string, cfg *config.Config) bool {
 	return true
 }
 
-// appendParallelMode adds the parallel mode stop condition to a prompt.
-func appendParallelMode(prompt, storyID string) string {
+// AppendParallelMode adds the parallel mode stop condition to a prompt.
+func AppendParallelMode(prompt, storyID string) string {
 	return prompt + fmt.Sprintf(`
 
 ---
@@ -268,7 +269,8 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 
 	// 2. Architect phase: run architect agent if applicable
-	if !cfg.NoArchitect && shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
+	// Skip architect if this fusion worker already has a forked architect session
+	if w.ArchitectSessionID == "" && !cfg.NoArchitect && shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
 		send(WorkerRunning, roles.RoleArchitect, nil, false, "")
 
 		archPrompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled})
@@ -276,14 +278,14 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			send(WorkerFailed, roles.RoleArchitect, fmt.Errorf("build architect prompt: %w", err), false, "")
 			return
 		}
-		archPrompt = appendParallelMode(archPrompt, w.StoryID)
+		archPrompt = AppendParallelMode(archPrompt, w.StoryID)
 
 		archLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect"
 		archResult, err := runner.RunClaude(w.Ctx, ws.Dir, archPrompt, archLogPath, runner.RunClaudeOpts{
 			Iteration: w.Iteration,
 			StoryID:   w.StoryID,
 			Role:      roles.RoleArchitect,
-			Model:     resolveModel(roles.RoleArchitect, cfg),
+			Model:     ResolveModel(roles.RoleArchitect, cfg),
 		})
 		if archResult != nil {
 			claudeUsage = archResult.TokenUsage
@@ -335,15 +337,21 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		send(WorkerFailed, implRole, fmt.Errorf("build prompt: %w", err), false, "")
 		return
 	}
-	prompt = appendParallelMode(prompt, w.StoryID)
+	prompt = AppendParallelMode(prompt, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
-	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, runner.RunClaudeOpts{
+	implOpts := runner.RunClaudeOpts{
 		Iteration: w.Iteration,
 		StoryID:   w.StoryID,
 		Role:      implRole,
-		Model:     resolveModel(implRole, cfg),
-	})
+		Model:     ResolveModel(implRole, cfg),
+	}
+	// Fork from the shared architect session if available (fusion mode)
+	if w.ArchitectSessionID != "" {
+		implOpts.ResumeSessionID = w.ArchitectSessionID
+		implOpts.ForkSession = true
+	}
+	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, implOpts)
 	if implResult != nil {
 		claudeUsage = accumulateUsage(claudeUsage, implResult.TokenUsage)
 		if implResult.RateLimitInfo != nil {
@@ -394,13 +402,13 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			// Non-fatal: skip simplify if prompt build fails
 			w.State = WorkerRunning
 		} else {
-			simplifyPrompt = appendParallelMode(simplifyPrompt, w.StoryID)
+			simplifyPrompt = AppendParallelMode(simplifyPrompt, w.StoryID)
 			simplifyLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".simplify"
 			simplifyResult, simplifyErr := runner.RunClaude(w.Ctx, ws.Dir, simplifyPrompt, simplifyLogPath, runner.RunClaudeOpts{
 				Iteration: w.Iteration,
 				StoryID:   w.StoryID,
 				Role:      roles.RoleSimplify,
-				Model:     resolveModel(roles.RoleSimplify, cfg),
+				Model:     ResolveModel(roles.RoleSimplify, cfg),
 			})
 			if simplifyResult != nil {
 				claudeUsage = accumulateUsage(claudeUsage, simplifyResult.TokenUsage)

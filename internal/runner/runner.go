@@ -345,10 +345,12 @@ func buildDebuggerStuckContext(projectDir, storyID string) string {
 
 // RunClaudeOpts contains optional parameters for RunClaude.
 type RunClaudeOpts struct {
-	Iteration int
-	StoryID   string
-	Role      roles.Role
-	Model     string
+	Iteration        int
+	StoryID          string
+	Role             roles.Role
+	Model            string
+	ResumeSessionID  string // if set, adds --resume <id> to fork from an existing session
+	ForkSession      bool   // if true, adds --fork-session to create a new session from the resumed one
 }
 
 // RunClaudeResult holds the results from a RunClaude invocation.
@@ -389,6 +391,12 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	if len(opts) > 0 {
 		if disallowed := roles.DefaultConfig(opts[0].Role).DisallowedTools; len(disallowed) > 0 {
 			args = append(args, "--disallowedTools", strings.Join(disallowed, ","))
+		}
+		if opts[0].ResumeSessionID != "" {
+			args = append(args, "--resume", opts[0].ResumeSessionID)
+		}
+		if opts[0].ForkSession {
+			args = append(args, "--fork-session")
 		}
 	}
 	cmd := exec.CommandContext(ctx, "claude", args...)

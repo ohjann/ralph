@@ -15,10 +15,11 @@ import (
 
 // FusionGroup tracks competing implementations of the same story.
 type FusionGroup struct {
-	StoryID  string
-	Workers  []worker.WorkerID
-	Results  []FusionResult
-	Expected int
+	StoryID            string
+	Workers            []worker.WorkerID
+	Results            []FusionResult
+	Expected           int
+	ArchitectSessionID string // shared architect session ID for fork-session
 }
 
 // FusionResult holds the outcome of a single fusion worker.
