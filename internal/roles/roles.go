@@ -15,10 +15,11 @@ const (
 
 // AgentConfig holds role-specific configuration for an agent.
 type AgentConfig struct {
-	Role      Role
-	PromptFile string
-	Model     string
-	MaxTokens int
+	Role            Role
+	PromptFile      string
+	Model           string
+	MaxTokens       int
+	DisallowedTools []string
 }
 
 // ShouldSkipArchitect returns true for FIX- prefix stories or descriptions
@@ -36,10 +37,11 @@ func DefaultConfig(role Role) AgentConfig {
 	switch role {
 	case RoleArchitect:
 		return AgentConfig{
-			Role:      RoleArchitect,
-			PromptFile: "prompts/architect.md",
-			Model:     "opus",
-			MaxTokens: 16000,
+			Role:            RoleArchitect,
+			PromptFile:      "prompts/architect.md",
+			Model:           "opus",
+			MaxTokens:       16000,
+			DisallowedTools: []string{"Edit", "Write", "NotebookEdit"},
 		}
 	case RoleImplementer:
 		return AgentConfig{
@@ -64,10 +66,11 @@ func DefaultConfig(role Role) AgentConfig {
 		}
 	case RoleSimplify:
 		return AgentConfig{
-			Role:       RoleSimplify,
-			PromptFile: "prompts/simplify.md",
-			Model:      "sonnet",
-			MaxTokens:  16000,
+			Role:            RoleSimplify,
+			PromptFile:      "prompts/simplify.md",
+			Model:           "sonnet",
+			MaxTokens:       16000,
+			DisallowedTools: []string{"Write"},
 		}
 	default:
 		return AgentConfig{

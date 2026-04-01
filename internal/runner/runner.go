@@ -386,6 +386,11 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	if len(opts) > 0 && opts[0].Model != "" {
 		args = append(args, "--model", opts[0].Model)
 	}
+	if len(opts) > 0 {
+		if disallowed := roles.DefaultConfig(opts[0].Role).DisallowedTools; len(disallowed) > 0 {
+			args = append(args, "--disallowedTools", strings.Join(disallowed, ","))
+		}
+	}
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = projectDir
 	cmd.Stdin = strings.NewReader(prompt)
