@@ -763,6 +763,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextVP.Height = topHeight - 4 // extra line for tab bar
 		m.claudeVP.Width = m.width - 4
 		m.claudeVP.Height = claudeHeight - 3
+		// Re-wrap content at new width (SetContent moved out of View)
+		m.claudeVP.SetContent(m.claudeContent)
 
 		if m.mascot != nil {
 			m.mascot.Resize(sprite.LayoutParams{
@@ -1703,12 +1705,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Mark current story as passed in prd.json if agent reported it complete.
 		// The system owns the passes field — the agent no longer modifies prd.json.
 		if msg.Err == nil && m.currentStoryID != "" {
-			ss, _ := storystate.Load(m.cfg.ProjectDir, m.currentStoryID)
+			ss, ssErr := storystate.Load(m.cfg.ProjectDir, m.currentStoryID)
+			if ssErr != nil {
+				debuglog.Log("storystate.Load(%s): %v", m.currentStoryID, ssErr)
+			}
 			if ss.Status == storystate.StatusComplete {
 				m.notifyStoryComplete(m.currentStoryID, m.currentStoryTitle)
 				if p, err := prd.Load(m.cfg.PRDFile); err == nil {
 					p.SetPasses(m.currentStoryID, true)
-					_ = prd.Save(m.cfg.PRDFile, p)
+					if saveErr := prd.Save(m.cfg.PRDFile, p); saveErr != nil {
+						debuglog.Log("prd.Save after story pass: %v", saveErr)
+					}
 				}
 			}
 		}
@@ -1775,7 +1782,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(m.currentStoryID, "FIX-") {
 			if p, err := prd.Load(m.cfg.PRDFile); err == nil {
 				p.SetPasses(m.currentStoryID, false)
-				_ = prd.Save(m.cfg.PRDFile, p)
+				if saveErr := prd.Save(m.cfg.PRDFile, p); saveErr != nil {
+					debuglog.Log("prd.Save after FIX- stuck: %v", saveErr)
+				}
 			}
 			m.phase = phaseIterating
 			cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
@@ -2670,7 +2679,6 @@ func (m *Model) View() string {
 	claudePanel := renderClaudePanel(
 		&m.claudeVP,
 		m.spinner,
-		m.claudeContent,
 		claudeRunning,
 		m.activePanel == panelClaude,
 		m.width,

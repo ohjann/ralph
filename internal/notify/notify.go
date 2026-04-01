@@ -6,6 +6,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -105,10 +106,18 @@ func terminalNotify(title, message string) {
 
 	if runtime.GOOS == "darwin" {
 		// macOS: use osascript for native notification center
+		// Sanitize to printable ASCII to prevent AppleScript injection
 		script := fmt.Sprintf(`display notification %q with title "Ralph" subtitle %q`,
-			message, title)
+			sanitizeForNotification(message), sanitizeForNotification(title))
 		_ = exec.Command("osascript", "-e", script).Run()
 	}
+}
+
+var nonPrintableASCII = regexp.MustCompile(`[^\x20-\x7E]`)
+
+// sanitizeForNotification strips non-printable-ASCII characters from notification text.
+func sanitizeForNotification(s string) string {
+	return nonPrintableASCII.ReplaceAllString(s, "")
 }
 
 // Helper methods for common notification events.

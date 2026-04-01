@@ -9,6 +9,7 @@ import (
 
 	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"github.com/ohjann/ralphplusplus/internal/judge"
 	"github.com/ohjann/ralphplusplus/internal/prd"
 	"github.com/ohjann/ralphplusplus/internal/roles"
@@ -124,30 +125,8 @@ func shouldRunArchitect(storyID string, iteration int, workspaceDir string, p *p
 }
 
 // accumulateUsage merges token usage from two runs, summing token counts.
-// If either is nil, the other is returned. Duration and turns are summed.
-// Model is taken from the latest (b) phase when available, since different
-// phases may use different models and the last phase is the primary work.
 func accumulateUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
-	if a == nil {
-		return b
-	}
-	if b == nil {
-		return a
-	}
-	model := a.Model
-	if b.Model != "" {
-		model = b.Model
-	}
-	return &costs.TokenUsage{
-		InputTokens:  a.InputTokens + b.InputTokens,
-		OutputTokens: a.OutputTokens + b.OutputTokens,
-		CacheRead:    a.CacheRead + b.CacheRead,
-		CacheWrite:   a.CacheWrite + b.CacheWrite,
-		Model:        model,
-		Provider:     a.Provider,
-		NumTurns:     a.NumTurns + b.NumTurns,
-		DurationMS:   a.DurationMS + b.DurationMS,
-	}
+	return costs.CombineUsage(a, b)
 }
 
 // ResolveModel determines the model to use for a given role by applying the
@@ -367,7 +346,9 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 			// Persist to story state so TUI can read it
 			if ss, loadErr := storystate.Load(ws.Dir, w.StoryID); loadErr == nil {
 				ss.SessionID = implResult.SessionID
-				_ = storystate.Save(ws.Dir, ss)
+				if saveErr := storystate.Save(ws.Dir, ss); saveErr != nil {
+					debuglog.Log("worker: failed to save story state for session ID: %v", saveErr)
+				}
 			}
 		}
 	}

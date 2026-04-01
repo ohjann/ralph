@@ -547,23 +547,25 @@ func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) (
 	// Append workspace progress.md entries to main
 	wsProgress := filepath.Join(w.Workspace, "progress.md")
 	if data, readErr := os.ReadFile(wsProgress); readErr == nil && len(data) > 0 {
-		f, openErr := os.OpenFile(c.cfg.ProgressFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-		if openErr == nil {
-			f.Write(data)
-			f.Close()
+		if f, openErr := os.OpenFile(c.cfg.ProgressFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); openErr == nil {
+			defer f.Close()
+			if _, writeErr := f.Write(data); writeErr != nil {
+				debuglog.Log("coordinator: failed to append progress: %v", writeErr)
+			}
 		}
 	}
 
 	// Append workspace events.jsonl to main
 	wsEvents := filepath.Join(w.Workspace, ".ralph", "events.jsonl")
 	if data, readErr := os.ReadFile(wsEvents); readErr == nil && len(data) > 0 {
-		f, openErr := os.OpenFile(
+		if f, openErr := os.OpenFile(
 			filepath.Join(c.cfg.ProjectDir, ".ralph", "events.jsonl"),
 			os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644,
-		)
-		if openErr == nil {
-			f.Write(data)
-			f.Close()
+		); openErr == nil {
+			defer f.Close()
+			if _, writeErr := f.Write(data); writeErr != nil {
+				debuglog.Log("coordinator: failed to append events: %v", writeErr)
+			}
 		}
 	}
 

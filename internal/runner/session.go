@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
 
 // parseSessionJSONL reads a Claude Code JSONL session file and extracts
@@ -74,6 +76,11 @@ func parseSessionJSONL(sessionID string, projectDir string) string {
 				}
 			}
 		}
+	}
+	// Log scanner errors (I/O errors, buffer overflow) but don't fail —
+	// partial results are still useful for session context.
+	if err := scanner.Err(); err != nil {
+		debuglog.Log("parseSessionJSONL: scanner error: %v", err)
 	}
 
 	if len(toolCalls) == 0 && len(toolErrors) == 0 && len(reasoningBlocks) == 0 {
@@ -236,6 +243,9 @@ func extractTextContent(content interface{}) string {
 func truncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
+	}
+	if maxLen < 4 {
+		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
 }

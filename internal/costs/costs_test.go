@@ -291,6 +291,46 @@ func TestCacheHitRateIncludesJudgeCosts(t *testing.T) {
 	}
 }
 
+func TestCombineUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b *TokenUsage
+		want *TokenUsage
+	}{
+		{"both nil", nil, nil, nil},
+		{"a nil", nil, &TokenUsage{InputTokens: 10, Model: "m"}, &TokenUsage{InputTokens: 10, Model: "m"}},
+		{"b nil", &TokenUsage{InputTokens: 10, Model: "m"}, nil, &TokenUsage{InputTokens: 10, Model: "m"}},
+		{"sums fields", &TokenUsage{
+			InputTokens: 100, OutputTokens: 50, CacheRead: 10, CacheWrite: 5,
+			Model: "old", Provider: "p1", NumTurns: 3, DurationMS: 1000,
+		}, &TokenUsage{
+			InputTokens: 200, OutputTokens: 100, CacheRead: 20, CacheWrite: 10,
+			Model: "new", Provider: "p2", NumTurns: 5, DurationMS: 2000,
+		}, &TokenUsage{
+			InputTokens: 300, OutputTokens: 150, CacheRead: 30, CacheWrite: 15,
+			Model: "new", Provider: "p2", NumTurns: 8, DurationMS: 3000,
+		}},
+		{"b empty model keeps a model", &TokenUsage{Model: "kept"}, &TokenUsage{Model: ""}, &TokenUsage{Model: "kept"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CombineUsage(tt.a, tt.b)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("CombineUsage() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("CombineUsage() = nil, want %v", tt.want)
+			}
+			if *got != *tt.want {
+				t.Errorf("CombineUsage() = %+v, want %+v", *got, *tt.want)
+			}
+		})
+	}
+}
+
 func TestMultipleStoriesTrackedIndependently(t *testing.T) {
 	rc := NewRunCosting()
 

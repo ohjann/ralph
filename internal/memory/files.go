@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,13 +100,10 @@ func MemoryStats(projectDir, ralphHome string) []MemoryFileInfo {
 	for _, s := range specs {
 		path := filepath.Join(s.dir, s.name)
 		info := MemoryFileInfo{Name: s.name, Path: path}
-		fi, err := os.Stat(path)
-		if err == nil {
+		if data, err := os.ReadFile(path); err == nil {
 			info.Exists = true
-			info.SizeBytes = fi.Size()
-			if data, err := os.ReadFile(path); err == nil {
-				info.EntryCount = strings.Count(string(data), "\n### ") + countLeadingEntry(data)
-			}
+			info.SizeBytes = int64(len(data))
+			info.EntryCount = bytes.Count(data, []byte("\n### ")) + countLeadingEntry(data)
 		}
 		stats = append(stats, info)
 	}

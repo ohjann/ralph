@@ -318,22 +318,7 @@ func needsArchitect(projectDir, storyID string, story *prd.UserStory) bool {
 
 // combineTokenUsage merges two token usage values, summing all fields.
 func combineTokenUsage(a, b *costs.TokenUsage) *costs.TokenUsage {
-	if a == nil {
-		return b
-	}
-	if b == nil {
-		return a
-	}
-	return &costs.TokenUsage{
-		InputTokens:  a.InputTokens + b.InputTokens,
-		OutputTokens: a.OutputTokens + b.OutputTokens,
-		CacheRead:    a.CacheRead + b.CacheRead,
-		CacheWrite:   a.CacheWrite + b.CacheWrite,
-		Model:        b.Model, // use the later model (implementer)
-		Provider:     b.Provider,
-		NumTurns:     a.NumTurns + b.NumTurns,
-		DurationMS:   a.DurationMS + b.DurationMS,
-	}
+	return costs.CombineUsage(a, b)
 }
 
 func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, iteration int) tea.Cmd {
@@ -763,10 +748,7 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
 		p, _ := prd.Load(cfg.PRDFile)
-		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
-			return err
-		}
+		runClaude := utilityRunClaude(cfg)
 		err := memory.SynthesizeRun(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, p, runClaude)
 		return synthesisDoneMsg{Err: err}
 	})
@@ -774,12 +756,16 @@ func synthesisCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 
 func dreamCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
-		runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-			_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
-			return err
-		}
+		runClaude := utilityRunClaude(cfg)
 		err := memory.RunDream(ctx, cfg.ProjectDir, cfg.RalphHome, cfg.LogDir, cfg.Memory.MaxEntries, cfg.Memory.DreamEveryNRuns, runClaude)
 		return dreamDoneMsg{Err: err}
 	})
+}
+
+func utilityRunClaude(cfg *config.Config) func(context.Context, string, string, string) error {
+	return func(ctx context.Context, projectDir, prompt, logFilePath string) error {
+		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
+		return err
+	}
 }
 

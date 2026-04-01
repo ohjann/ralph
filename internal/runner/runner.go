@@ -465,6 +465,9 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 		fmt.Fprintln(logFile, line)
 		proc.processLine(line)
 	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		debuglog.Log("RunClaude: stdout scanner error: %v", scanErr)
+	}
 
 	usage := proc.tokenUsage()
 	result := &RunClaudeResult{

@@ -112,19 +112,7 @@ func buildDreamPrompt(projectDir, ralphHome string, maxEntries, lastNRuns int) (
 
 	prompt := string(tmpl)
 
-	// Inject existing learnings (project-specific, from .ralph/memory/)
-	learnings, _ := ReadLearnings(projectDir)
-	if learnings == "" {
-		learnings = "(none yet)"
-	}
-	prompt = strings.Replace(prompt, "{{LEARNINGS}}", learnings, 1)
-
-	// Inject existing PRD learnings (global, from ralphHome/memory/)
-	prdLearnings, _ := ReadPRDLearnings(ralphHome)
-	if prdLearnings == "" {
-		prdLearnings = "(none yet)"
-	}
-	prompt = strings.Replace(prompt, "{{PRD_LEARNINGS}}", prdLearnings, 1)
+	prompt = injectLearnings(prompt, projectDir, ralphHome, "{{LEARNINGS}}", "{{PRD_LEARNINGS}}")
 
 	// Inject recent run summaries
 	prompt = strings.Replace(prompt, "{{RUN_SUMMARIES}}", buildRecentRunSummaries(projectDir, lastNRuns), 1)

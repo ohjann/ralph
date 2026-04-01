@@ -12,6 +12,22 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/prd"
 )
 
+// injectLearnings loads project and PRD learnings and replaces placeholders in the prompt.
+func injectLearnings(prompt, projectDir, ralphHome, learningsPlaceholder, prdLearningsPlaceholder string) string {
+	learnings, _ := ReadLearnings(projectDir)
+	if learnings == "" {
+		learnings = "(none yet)"
+	}
+	prompt = strings.Replace(prompt, learningsPlaceholder, learnings, 1)
+
+	prdLearnings, _ := ReadPRDLearnings(ralphHome)
+	if prdLearnings == "" {
+		prdLearnings = "(none yet)"
+	}
+	prompt = strings.Replace(prompt, prdLearningsPlaceholder, prdLearnings, 1)
+	return prompt
+}
+
 // RunClaudeFunc is the signature for invoking Claude. This avoids an import
 // cycle between memory and runner.
 type RunClaudeFunc func(ctx context.Context, projectDir, prompt, logFilePath string) error
@@ -49,19 +65,7 @@ func buildSynthesisPrompt(projectDir, ralphHome string, p *prd.PRD) (string, err
 	// Build key events from events.jsonl
 	prompt = strings.Replace(prompt, "{{KEY_EVENTS}}", buildKeyEvents(projectDir), 1)
 
-	// Inject existing learnings (project-specific, from .ralph/memory/)
-	learnings, _ := ReadLearnings(projectDir)
-	if learnings == "" {
-		learnings = "(none yet)"
-	}
-	prompt = strings.Replace(prompt, "{{EXISTING_LEARNINGS}}", learnings, 1)
-
-	// Inject existing PRD learnings (global, from ralphHome/memory/)
-	prdLearnings, _ := ReadPRDLearnings(ralphHome)
-	if prdLearnings == "" {
-		prdLearnings = "(none yet)"
-	}
-	prompt = strings.Replace(prompt, "{{EXISTING_PRD_LEARNINGS}}", prdLearnings, 1)
+	prompt = injectLearnings(prompt, projectDir, ralphHome, "{{EXISTING_LEARNINGS}}", "{{EXISTING_PRD_LEARNINGS}}")
 
 	// Append instructions to write directly to memory files
 	prompt += fmt.Sprintf(`

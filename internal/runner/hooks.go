@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
 
 // stuckPreventionScript is the bash hook script that tracks recent tool calls
@@ -42,8 +44,9 @@ if [ -z "$TOOL_NAME" ]; then
 fi
 
 # Build a key: tool_name:truncated_input (first 120 chars)
+# Strip newlines to prevent key injection across history lines
 TRUNCATED="${TOOL_INPUT:0:120}"
-KEY="${TOOL_NAME}:${TRUNCATED}"
+KEY=$(printf '%s:%s' "$TOOL_NAME" "$TRUNCATED" | tr -d '\n\r')
 
 # Ensure history file exists
 touch "$HISTORY_FILE"
@@ -103,7 +106,9 @@ func DeployStuckPreventionHook(wsDir string, isFixStory bool) (hookDir string, e
 	// Load existing settings if present, merge hook config
 	settings := make(map[string]interface{})
 	if data, readErr := os.ReadFile(settingsPath); readErr == nil {
-		_ = json.Unmarshal(data, &settings)
+		if jsonErr := json.Unmarshal(data, &settings); jsonErr != nil {
+			debuglog.Log("hooks: existing settings.json is malformed, overwriting: %v", jsonErr)
+		}
 	}
 
 	// Set hooks.preToolUse

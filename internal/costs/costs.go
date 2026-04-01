@@ -252,6 +252,31 @@ type RateLimitInfo struct {
 }
 
 
+// CombineUsage merges two token usage values, summing all fields.
+// If either is nil, the other is returned. Model is taken from b when non-empty.
+func CombineUsage(a, b *TokenUsage) *TokenUsage {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	model := a.Model
+	if b.Model != "" {
+		model = b.Model
+	}
+	return &TokenUsage{
+		InputTokens:  a.InputTokens + b.InputTokens,
+		OutputTokens: a.OutputTokens + b.OutputTokens,
+		CacheRead:    a.CacheRead + b.CacheRead,
+		CacheWrite:   a.CacheWrite + b.CacheWrite,
+		Model:        model,
+		Provider:     b.Provider,
+		NumTurns:     a.NumTurns + b.NumTurns,
+		DurationMS:   a.DurationMS + b.DurationMS,
+	}
+}
+
 // CacheHitRate computes the cache hit rate from total cache reads vs total input tokens.
 func (rc *RunCosting) CacheHitRate() float64 {
 	rc.mu.Lock()

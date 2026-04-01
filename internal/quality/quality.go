@@ -383,7 +383,14 @@ func storyPrefixFromPRD(prdFile string) string {
 	if i == 0 {
 		return ""
 	}
-	return id[:i]
+	prefix := id[:i]
+	// Validate prefix is alphanumeric + dash only to prevent revset injection
+	for _, c := range prefix {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+			return ""
+		}
+	}
+	return prefix
 }
 
 // parseFindingsFromActivity reads the activity log and extracts findings from <findings> tags.

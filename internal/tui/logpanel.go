@@ -26,7 +26,7 @@ func newClaudeViewport(width, height int) viewport.Model {
 	return vp
 }
 
-func renderClaudePanel(vp *viewport.Model, sp spinner.Model, content string, running bool, active bool, width, height int, workerTabs ...string) string {
+func renderClaudePanel(vp *viewport.Model, sp spinner.Model, running bool, active bool, width, height int, workerTabs ...string) string {
 	// Build title with sparkle
 	var title string
 	if running {
@@ -45,7 +45,10 @@ func renderClaudePanel(vp *viewport.Model, sp spinner.Model, content string, run
 
 	vp.Width = contentW
 	vp.Height = vpH
-	vp.SetContent(content)
+	// NOTE: Do NOT call vp.SetContent here. SetContent is called in Update
+	// handlers (claudeActivityMsg, etc.). Calling it during View() resets the
+	// viewport's internal line state on every render frame, which causes
+	// scroll-position fighting and freezes when the user scrolls manually.
 
 	body := title + "\n" + vp.View()
 	body = clampLines(body, height-2) // content area inside border

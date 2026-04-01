@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -306,13 +307,9 @@ func printStats(projectDir string) error {
 	}
 	if len(retried) > 0 {
 		// Sort by rejects descending
-		for i := 0; i < len(retried); i++ {
-			for j := i + 1; j < len(retried); j++ {
-				if retried[j].rejects > retried[i].rejects {
-					retried[i], retried[j] = retried[j], retried[i]
-				}
-			}
-		}
+		sort.Slice(retried, func(i, j int) bool {
+			return retried[i].rejects > retried[j].rejects
+		})
 		fmt.Println("\n── Most Judge-Rejected Stories ──")
 		limit := 5
 		if len(retried) < limit {
