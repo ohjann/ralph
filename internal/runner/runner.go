@@ -412,6 +412,16 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = io.MultiWriter(logFile, &stderrBuf)
 
+	// Deploy stuck-prevention hook and set environment variables
+	var storyID string
+	if len(opts) > 0 {
+		storyID = opts[0].StoryID
+	}
+	if hookDir, deployErr := DeployStuckPreventionHook(projectDir, strings.HasPrefix(storyID, "FIX-")); deployErr == nil && hookDir != "" {
+		ResetToolHistory(hookDir)
+		cmd.Env = SetupHookEnv(cmd.Env, hookDir, storyID)
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("creating stdout pipe: %w", err)
