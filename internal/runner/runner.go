@@ -31,9 +31,18 @@ type BuildPromptOpts struct {
 	MemoryDisabled bool // skip memory injection when config.Memory.Disabled is true
 }
 
-// BuildPrompt reads ralph-prompt.md, appends PRD context, story state, iteration constraint,
-// judge feedback, and event context into the prompt.
-func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (string, error) {
+// PromptParts holds the separated prompt components. SystemAppend contains
+// role template content (sent via --append-system-prompt), while UserMessage
+// contains story-specific context (sent via stdin).
+type PromptParts struct {
+	SystemAppend string
+	UserMessage  string
+}
+
+// BuildPrompt reads the role-specific prompt template into SystemAppend and
+// assembles PRD context, story state, iteration constraint, judge feedback,
+// and event context into UserMessage.
+func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...BuildPromptOpts) (PromptParts, error) {
 	// Determine which prompt template to load based on role
 	var role roles.Role
 	if len(opts) > 0 {
@@ -47,10 +56,14 @@ func BuildPrompt(ralphHome, projectDir, storyID string, p *prd.PRD, opts ...Buil
 
 	base, err := os.ReadFile(filepath.Join(ralphHome, promptFile))
 	if err != nil {
-		return "", fmt.Errorf("reading %s: %w", promptFile, err)
+		return PromptParts{}, fmt.Errorf("reading %s: %w", promptFile, err)
 	}
 
-	prompt := string(base)
+	// Role template goes into SystemAppend
+	systemAppend := string(base)
+
+	// Everything else goes into UserMessage
+	var prompt string
 
 	// Inject PRD context if provided
 	var story *prd.UserStory
@@ -103,7 +116,10 @@ If progress.md contains a [CONTEXT EXHAUSTED] entry for %s, continue from where 
 		}
 	}
 
-	return prompt, nil
+	return PromptParts{
+		SystemAppend: systemAppend,
+		UserMessage:  prompt,
+	}, nil
 }
 
 // buildPRDContext generates the YOUR STORY, PROJECT CONTEXT, and OTHER STORIES sections.
@@ -358,6 +374,7 @@ type RunClaudeOpts struct {
 	Model            string
 	ResumeSessionID  string // if set, adds --resume <id> to fork from an existing session
 	ForkSession      bool   // if true, adds --fork-session to create a new session from the resumed one
+	SystemAppend     string // content passed via --append-system-prompt flag
 }
 
 // RunClaudeResult holds the results from a RunClaude invocation.
@@ -404,6 +421,9 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 		}
 		if opts[0].ForkSession {
 			args = append(args, "--fork-session")
+		}
+		if opts[0].SystemAppend != "" {
+			args = append(args, "--append-system-prompt", opts[0].SystemAppend)
 		}
 	}
 	cmd := exec.CommandContext(ctx, "claude", args...)

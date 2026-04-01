@@ -355,16 +355,17 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		if runArchitect {
 			debuglog.Log("runClaudeCmd: running architect phase for story=%s", storyID)
 
-			prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled})
+			archParts, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled})
 			if err != nil {
 				return claudeDoneMsg{Err: fmt.Errorf("architect prompt: %w", err), Role: roles.RoleArchitect}
 			}
 
 			logPath := runner.LogFilePath(cfg.LogDir, iteration) + ".architect"
-			result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
-				Iteration: iteration,
-				StoryID:   storyID,
-				Role:      roles.RoleArchitect,
+			result, err := runner.RunClaude(ctx, cfg.ProjectDir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
+				Iteration:    iteration,
+				StoryID:      storyID,
+				Role:         roles.RoleArchitect,
+				SystemAppend: archParts.SystemAppend,
 			})
 			if result != nil {
 				totalUsage = result.TokenUsage
@@ -398,16 +399,17 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		}
 		debuglog.Log("runClaudeCmd: running %s phase for story=%s", implRole, storyID)
 
-		prompt, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, runner.BuildPromptOpts{Role: implRole, MemoryDisabled: cfg.Memory.Disabled})
+		implParts, err := runner.BuildPrompt(cfg.RalphHome, cfg.ProjectDir, storyID, p, runner.BuildPromptOpts{Role: implRole, MemoryDisabled: cfg.Memory.Disabled})
 		if err != nil {
 			return claudeDoneMsg{Err: err, TokenUsage: totalUsage, Role: implRole}
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
-		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath, runner.RunClaudeOpts{
-			Iteration: iteration,
-			StoryID:   storyID,
-			Role:      implRole,
+		result, err := runner.RunClaude(ctx, cfg.ProjectDir, implParts.UserMessage, logPath, runner.RunClaudeOpts{
+			Iteration:    iteration,
+			StoryID:      storyID,
+			Role:         implRole,
+			SystemAppend: implParts.SystemAppend,
 		})
 
 		if result != nil {

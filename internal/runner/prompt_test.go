@@ -121,15 +121,15 @@ func TestBuildPromptWithPRDIncludesHint(t *testing.T) {
 		},
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, storyID, p)
+	parts, err := BuildPrompt(ralphHome, dir, storyID, p)
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if !strings.Contains(prompt, "### User Hint") {
+	if !strings.Contains(parts.UserMessage, "### User Hint") {
 		t.Error("BuildPrompt output should contain '### User Hint' section")
 	}
-	if !strings.Contains(prompt, hintText) {
+	if !strings.Contains(parts.UserMessage, hintText) {
 		t.Errorf("BuildPrompt output should contain hint text %q", hintText)
 	}
 
@@ -149,11 +149,11 @@ func TestBuildPromptNilPRDNoCrash(t *testing.T) {
 	}
 
 	// Should not crash with nil PRD
-	prompt, err := BuildPrompt(ralphHome, dir, "ANY-001", nil)
+	parts, err := BuildPrompt(ralphHome, dir, "ANY-001", nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt with nil PRD: %v", err)
 	}
-	if !strings.Contains(prompt, "base") {
+	if !strings.Contains(parts.SystemAppend, "base") {
 		t.Error("prompt should contain base content")
 	}
 }
@@ -175,16 +175,16 @@ func TestBuildPromptWithArchitectRoleLoadsRolePrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-010", nil, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-010", nil, BuildPromptOpts{
 		Role: roles.RoleArchitect,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt with architect role: %v", err)
 	}
-	if !strings.Contains(prompt, "architect prompt template") {
+	if !strings.Contains(parts.SystemAppend, "architect prompt template") {
 		t.Error("expected architect prompt template content")
 	}
-	if strings.Contains(prompt, "default prompt template") {
+	if strings.Contains(parts.SystemAppend, "default prompt template") {
 		t.Error("should NOT contain default ralph-prompt.md content")
 	}
 }
@@ -201,13 +201,13 @@ func TestBuildPromptArchitectSkipsIterationConstraint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-011", nil, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-011", nil, BuildPromptOpts{
 		Role: roles.RoleArchitect,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
-	if strings.Contains(prompt, "THIS ITERATION") {
+	if strings.Contains(parts.UserMessage, "THIS ITERATION") {
 		t.Error("architect role should NOT have THIS ITERATION constraint")
 	}
 }
@@ -221,14 +221,14 @@ func TestBuildPromptEmptyRoleUsesDefault(t *testing.T) {
 	}
 
 	// Empty role — should behave exactly as before
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-012", nil, BuildPromptOpts{})
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-012", nil, BuildPromptOpts{})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
-	if !strings.Contains(prompt, "default prompt") {
+	if !strings.Contains(parts.SystemAppend, "default prompt") {
 		t.Error("empty role should load ralph-prompt.md")
 	}
-	if strings.Contains(prompt, "STUCK DETECTION") {
+	if strings.Contains(parts.UserMessage, "STUCK DETECTION") {
 		t.Error("should not contain stuck detection for non-debugger role")
 	}
 }
@@ -262,19 +262,19 @@ func TestBuildPromptDebuggerInjectsStuckInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-013", nil, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-013", nil, BuildPromptOpts{
 		Role: roles.RoleDebugger,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
-	if !strings.Contains(prompt, "STUCK DETECTION INFO") {
+	if !strings.Contains(parts.UserMessage, "STUCK DETECTION INFO") {
 		t.Error("debugger role should include stuck detection info")
 	}
-	if !strings.Contains(prompt, "repeated_bash_command") {
+	if !strings.Contains(parts.UserMessage, "repeated_bash_command") {
 		t.Error("should contain the stuck pattern")
 	}
-	if !strings.Contains(prompt, "make test") {
+	if !strings.Contains(parts.UserMessage, "make test") {
 		t.Error("should contain the repeated command")
 	}
 }
@@ -299,13 +299,13 @@ func TestBuildPromptImplementerHasIterationConstraint(t *testing.T) {
 		},
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-014", p, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-014", p, BuildPromptOpts{
 		Role: roles.RoleImplementer,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
-	if !strings.Contains(prompt, "THIS ITERATION") {
+	if !strings.Contains(parts.UserMessage, "THIS ITERATION") {
 		t.Error("implementer role should have THIS ITERATION constraint")
 	}
 }
@@ -386,29 +386,29 @@ func TestBuildDebuggerStuckContextIncludesErrors(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(storyDir, "state.json"), stateData, 0o644)
 
 	// Build prompt with debugger role
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-020", nil, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-020", nil, BuildPromptOpts{
 		Role: roles.RoleDebugger,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if !strings.Contains(prompt, "STUCK DETECTION INFO") {
+	if !strings.Contains(parts.UserMessage, "STUCK DETECTION INFO") {
 		t.Error("should contain stuck detection info section")
 	}
-	if !strings.Contains(prompt, "repeated_test") {
+	if !strings.Contains(parts.UserMessage, "repeated_test") {
 		t.Error("should contain the stuck pattern")
 	}
-	if !strings.Contains(prompt, "ERRORS ENCOUNTERED") {
+	if !strings.Contains(parts.UserMessage, "ERRORS ENCOUNTERED") {
 		t.Error("should contain errors encountered section")
 	}
-	if !strings.Contains(prompt, "type mismatch on Foo") {
+	if !strings.Contains(parts.UserMessage, "type mismatch on Foo") {
 		t.Error("should contain error details")
 	}
-	if !strings.Contains(prompt, "changed to Bar") {
+	if !strings.Contains(parts.UserMessage, "changed to Bar") {
 		t.Error("should contain error resolution")
 	}
-	if !strings.Contains(prompt, "nil pointer in handler") {
+	if !strings.Contains(parts.UserMessage, "nil pointer in handler") {
 		t.Error("should contain second error")
 	}
 }
@@ -509,23 +509,23 @@ func TestBuildPromptWithAntiPatterns(t *testing.T) {
 		},
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, storyID, p, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, storyID, p, BuildPromptOpts{
 		AntiPatterns: antiPatterns,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if !strings.Contains(prompt, "KNOWN ISSUE") {
+	if !strings.Contains(parts.UserMessage, "KNOWN ISSUE") {
 		t.Error("prompt should contain KNOWN ISSUE warning")
 	}
-	if !strings.Contains(prompt, "internal/runner/runner.go has caused fragile_area") {
+	if !strings.Contains(parts.UserMessage, "internal/runner/runner.go has caused fragile_area") {
 		t.Error("prompt should contain specific warning about runner.go")
 	}
 
 	// Warnings should appear before memory retrieval (which is at the end)
-	knownIdx := strings.Index(prompt, "KNOWN ISSUE")
-	iterIdx := strings.Index(prompt, "THIS ITERATION")
+	knownIdx := strings.Index(parts.UserMessage, "KNOWN ISSUE")
+	iterIdx := strings.Index(parts.UserMessage, "THIS ITERATION")
 	if knownIdx > iterIdx {
 		t.Error("anti-pattern warnings should appear before THIS ITERATION section")
 	}
@@ -556,14 +556,14 @@ func TestBuildPromptNoAntiPatternMatchNoSection(t *testing.T) {
 		},
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, storyID, p, BuildPromptOpts{
+	parts, err := BuildPrompt(ralphHome, dir, storyID, p, BuildPromptOpts{
 		AntiPatterns: antiPatterns,
 	})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if strings.Contains(prompt, "KNOWN ISSUE") {
+	if strings.Contains(parts.UserMessage, "KNOWN ISSUE") {
 		t.Error("prompt should NOT contain KNOWN ISSUE when no anti-patterns match")
 	}
 }
@@ -602,24 +602,24 @@ func TestBuildPromptWithMemoryFilesIncludesLearnedContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-MEM1", nil)
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-MEM1", nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if !strings.Contains(prompt, "## Learned Context (from previous runs)") {
+	if !strings.Contains(parts.UserMessage, "## Learned Context (from previous runs)") {
 		t.Error("expected Learned Context section in prompt")
 	}
-	if !strings.Contains(prompt, "### Cross-Story Learnings") {
+	if !strings.Contains(parts.UserMessage, "### Cross-Story Learnings") {
 		t.Error("expected Cross-Story Learnings subsection")
 	}
-	if !strings.Contains(prompt, "Always run tests before committing") {
+	if !strings.Contains(parts.UserMessage, "Always run tests before committing") {
 		t.Error("expected learnings content in prompt")
 	}
-	if !strings.Contains(prompt, "### PRD-Specific Learnings") {
+	if !strings.Contains(parts.UserMessage, "### PRD-Specific Learnings") {
 		t.Error("expected PRD-Specific Learnings subsection")
 	}
-	if !strings.Contains(prompt, "Break large stories into subtasks") {
+	if !strings.Contains(parts.UserMessage, "Break large stories into subtasks") {
 		t.Error("expected prd-learnings content in prompt")
 	}
 }
@@ -633,12 +633,12 @@ func TestBuildPromptNoMemoryFilesOmitsSection(t *testing.T) {
 	}
 
 	// No memory files exist
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-MEM2", nil)
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-MEM2", nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if strings.Contains(prompt, "Learned Context") {
+	if strings.Contains(parts.UserMessage, "Learned Context") {
 		t.Error("prompt should NOT contain Learned Context when no memory files exist")
 	}
 }
@@ -660,12 +660,12 @@ func TestBuildPromptMemoryDisabledSkipsInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-MEM3", nil, BuildPromptOpts{MemoryDisabled: true})
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-MEM3", nil, BuildPromptOpts{MemoryDisabled: true})
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if strings.Contains(prompt, "Learned Context") {
+	if strings.Contains(parts.UserMessage, "Learned Context") {
 		t.Error("prompt should NOT contain Learned Context when MemoryDisabled is true")
 	}
 }
@@ -690,12 +690,12 @@ func TestBuildPromptEmptyMemoryFilesOmitsSection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(ralphHome, dir, "TEST-MEM4", nil)
+	parts, err := BuildPrompt(ralphHome, dir, "TEST-MEM4", nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt: %v", err)
 	}
 
-	if strings.Contains(prompt, "Learned Context") {
+	if strings.Contains(parts.UserMessage, "Learned Context") {
 		t.Error("prompt should NOT contain Learned Context when memory files are empty/whitespace")
 	}
 }

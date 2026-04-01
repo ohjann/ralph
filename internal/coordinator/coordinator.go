@@ -323,7 +323,7 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) st
 
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 
-	archPrompt, err := runner.BuildPrompt(c.cfg.RalphHome, ws.Dir, storyID, wsPRD, runner.BuildPromptOpts{
+	archParts, err := runner.BuildPrompt(c.cfg.RalphHome, ws.Dir, storyID, wsPRD, runner.BuildPromptOpts{
 		Role:           roles.RoleArchitect,
 		MemoryDisabled: c.cfg.Memory.Disabled,
 	})
@@ -331,16 +331,17 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) st
 		debuglog.Log("fusion: architect prompt build failed for %s: %v", storyID, err)
 		return ""
 	}
-	archPrompt = worker.AppendParallelMode(archPrompt, storyID)
+	archParts.UserMessage = worker.AppendParallelMode(archParts.UserMessage, storyID)
 
 	logDir := filepath.Join(ws.Dir, ".ralph", "logs")
 	_ = os.MkdirAll(logDir, 0o755)
 	logPath := runner.LogFilePath(logDir, 0) + ".architect"
 
-	archResult, err := runner.RunClaude(ctx, ws.Dir, archPrompt, logPath, runner.RunClaudeOpts{
-		StoryID: storyID,
-		Role:    roles.RoleArchitect,
-		Model:   worker.ResolveModel(roles.RoleArchitect, c.cfg),
+	archResult, err := runner.RunClaude(ctx, ws.Dir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
+		StoryID:      storyID,
+		Role:         roles.RoleArchitect,
+		Model:        worker.ResolveModel(roles.RoleArchitect, c.cfg),
+		SystemAppend: archParts.SystemAppend,
 	})
 	if err != nil {
 		debuglog.Log("fusion: architect run failed for %s: %v", storyID, err)

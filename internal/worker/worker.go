@@ -273,19 +273,20 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	if w.ArchitectSessionID == "" && !cfg.NoArchitect && shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
 		send(WorkerRunning, roles.RoleArchitect, nil, false, "")
 
-		archPrompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled})
+		archParts, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled})
 		if err != nil {
 			send(WorkerFailed, roles.RoleArchitect, fmt.Errorf("build architect prompt: %w", err), false, "")
 			return
 		}
-		archPrompt = AppendParallelMode(archPrompt, w.StoryID)
+		archParts.UserMessage = AppendParallelMode(archParts.UserMessage, w.StoryID)
 
 		archLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect"
-		archResult, err := runner.RunClaude(w.Ctx, ws.Dir, archPrompt, archLogPath, runner.RunClaudeOpts{
-			Iteration: w.Iteration,
-			StoryID:   w.StoryID,
-			Role:      roles.RoleArchitect,
-			Model:     ResolveModel(roles.RoleArchitect, cfg),
+		archResult, err := runner.RunClaude(w.Ctx, ws.Dir, archParts.UserMessage, archLogPath, runner.RunClaudeOpts{
+			Iteration:    w.Iteration,
+			StoryID:      w.StoryID,
+			Role:         roles.RoleArchitect,
+			Model:        ResolveModel(roles.RoleArchitect, cfg),
+			SystemAppend: archParts.SystemAppend,
 		})
 		if archResult != nil {
 			claudeUsage = archResult.TokenUsage
@@ -332,26 +333,27 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	}
 	send(WorkerRunning, implRole, nil, false, "")
 
-	prompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: implRole, MemoryDisabled: cfg.Memory.Disabled})
+	implParts, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: implRole, MemoryDisabled: cfg.Memory.Disabled})
 	if err != nil {
 		send(WorkerFailed, implRole, fmt.Errorf("build prompt: %w", err), false, "")
 		return
 	}
-	prompt = AppendParallelMode(prompt, w.StoryID)
+	implParts.UserMessage = AppendParallelMode(implParts.UserMessage, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
 	implOpts := runner.RunClaudeOpts{
-		Iteration: w.Iteration,
-		StoryID:   w.StoryID,
-		Role:      implRole,
-		Model:     ResolveModel(implRole, cfg),
+		Iteration:    w.Iteration,
+		StoryID:      w.StoryID,
+		Role:         implRole,
+		Model:        ResolveModel(implRole, cfg),
+		SystemAppend: implParts.SystemAppend,
 	}
 	// Fork from the shared architect session if available (fusion mode)
 	if w.ArchitectSessionID != "" {
 		implOpts.ResumeSessionID = w.ArchitectSessionID
 		implOpts.ForkSession = true
 	}
-	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, prompt, logPath, implOpts)
+	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, implParts.UserMessage, logPath, implOpts)
 	if implResult != nil {
 		claudeUsage = accumulateUsage(claudeUsage, implResult.TokenUsage)
 		if implResult.RateLimitInfo != nil {
@@ -397,18 +399,19 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	if shouldRunSimplify(w.StoryID, cfg) {
 		send(WorkerSimplifying, roles.RoleSimplify, nil, false, "")
 
-		simplifyPrompt, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleSimplify, MemoryDisabled: cfg.Memory.Disabled})
+		simplifyParts, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleSimplify, MemoryDisabled: cfg.Memory.Disabled})
 		if err != nil {
 			// Non-fatal: skip simplify if prompt build fails
 			w.State = WorkerRunning
 		} else {
-			simplifyPrompt = AppendParallelMode(simplifyPrompt, w.StoryID)
+			simplifyParts.UserMessage = AppendParallelMode(simplifyParts.UserMessage, w.StoryID)
 			simplifyLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".simplify"
-			simplifyResult, simplifyErr := runner.RunClaude(w.Ctx, ws.Dir, simplifyPrompt, simplifyLogPath, runner.RunClaudeOpts{
-				Iteration: w.Iteration,
-				StoryID:   w.StoryID,
-				Role:      roles.RoleSimplify,
-				Model:     ResolveModel(roles.RoleSimplify, cfg),
+			simplifyResult, simplifyErr := runner.RunClaude(w.Ctx, ws.Dir, simplifyParts.UserMessage, simplifyLogPath, runner.RunClaudeOpts{
+				Iteration:    w.Iteration,
+				StoryID:      w.StoryID,
+				Role:         roles.RoleSimplify,
+				Model:        ResolveModel(roles.RoleSimplify, cfg),
+				SystemAppend: simplifyParts.SystemAppend,
 			})
 			if simplifyResult != nil {
 				claudeUsage = accumulateUsage(claudeUsage, simplifyResult.TokenUsage)
