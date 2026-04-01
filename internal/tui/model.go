@@ -999,8 +999,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					)
 						m.coord.SetRunCosting(m.runCosting)
 					m.phase = phaseParallel
-					m.coord.ScheduleReady(m.ctx)
-					cmds = append(cmds, m.coord.ListenCmd())
+					cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 				} else {
 					m.phase = phaseIterating
 					cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
@@ -1215,13 +1214,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case phaseParallel:
 					m.coord.Resume()
 					m.phase = phaseParallel
-					m.coord.ScheduleReady(m.ctx)
-					return m, tea.Batch(m.coord.ListenCmd(), fastTickCmd(), tickCmd())
+					return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 				case phaseInteractive:
 					m.coord.Resume()
 					m.phase = phaseInteractive
-					m.coord.ScheduleReady(m.ctx)
-					return m, tea.Batch(m.coord.ListenCmd(), fastTickCmd(), tickCmd())
+					return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 				case phasePlanning:
 					m.phase = phasePlanning
 					return m, tea.Batch(planCmd(m.ctx, m.cfg), fastTickCmd())
@@ -1786,8 +1783,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.coord.SetNotifier(m.notifier)
 			m.phase = phaseParallel
 			m.updateStatusPage()
-			m.coord.ScheduleReady(m.ctx)
-			cmds = append(cmds, m.coord.ListenCmd())
+			cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 		}
 
 	case coordinator.WorkerUpdateMsg:
@@ -1822,6 +1818,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if u.UsageLimit {
 			m.pausedDuring = m.phase
 			m.phase = phasePaused
+			// Drain any remaining updates from cancelled workers so
+			// inProgress is clean when the user resumes.
+			if drained := m.coord.DrainUpdates(); drained > 0 {
+				debuglog.Log("drained %d stale worker updates after usage limit pause", drained)
+			}
 			m.claudeContent += "\n" + tsLog("── Usage Limit Hit (%s) ──\n", u.StoryID) + "Claude API usage limit reached. All workers paused.\nPress Enter to resume when your limit resets.\n"
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
@@ -1891,21 +1892,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.notifier.StoryFailed(m.ctx, u.StoryID, errMsg)
 				}
-				// Try to schedule more
-				m.coord.ScheduleReady(m.ctx)
-				if m.coord.AllDone() && m.phase != phaseInteractive {
-					if m.coord.CompletedCount() == m.totalStories || m.checkPRDAllComplete() {
-						m.completedStories = m.totalStories
-						return m.transitionToComplete()
-					}
-					m.phase = phaseDone
-					m.allComplete = false
-					m.exitCode = 1
-					m.completionReason = fmt.Sprintf("Parallel workers done but only %d/%d stories completed (worker did not pass)", m.coord.CompletedCount(), m.totalStories)
-					debuglog.Log("entering phaseDone: %s", m.completionReason)
-					m.showCompletionReport()
-					return m, nil
-				}
+				// Try to schedule more (async to avoid blocking TUI on fusion LLM calls)
+				cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 			}
 		case worker.WorkerFailed:
 			m.cacheWorkerLog(u.WorkerID)
@@ -1925,19 +1913,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
-			m.coord.ScheduleReady(m.ctx)
-			if m.coord.AllDone() && m.phase != phaseInteractive {
-				if m.checkPRDAllComplete() {
-					m.completedStories = m.totalStories
-					return m.transitionToComplete()
-				}
-				m.phase = phaseDone
-				m.exitCode = 1
-				m.completionReason = fmt.Sprintf("Worker failed and all work done (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
-				debuglog.Log("entering phaseDone: %s", m.completionReason)
-				m.showCompletionReport()
-				return m, nil
-			}
+			cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 		}
 		// Only keep listening if there are active workers; otherwise we'd
 		// block forever on the update channel with no one sending.
@@ -1984,7 +1960,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				go m.coord.CleanupWorker(m.ctx, wid)
 			}
 			m.coord.CompleteFusion(msg.StoryID, false)
-			m.coord.ScheduleReady(m.ctx)
+			cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 		} else {
 			m.claudeContent += "\n" + tsLog("── Fusion %s: winner selected (worker %d) — %s ──\n", msg.StoryID, msg.WinnerWorkerID, msg.Reason)
 			m.claudeVP.SetContent(m.claudeContent)
@@ -2033,16 +2009,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.cacheWorkerLog(msg.WorkerID)
 		go m.coord.CleanupWorker(m.ctx, msg.WorkerID)
-		// Schedule more work
-		m.coord.ScheduleReady(m.ctx)
-		// Re-register listener if new workers were launched — without this,
-		// workers scheduled from a merge-complete (rather than a worker-update)
-		// would send updates into the channel with nobody listening, stalling
-		// the entire run.
+		// Schedule more work (async to avoid blocking TUI on fusion LLM calls).
+		// Also re-register listener for any already-active workers.
+		cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 		if m.coord.ActiveCount() > 0 {
 			cmds = append(cmds, m.coord.ListenCmd())
-		} else if m.coord.AllDone() {
-			// Final sync of story counts
+		}
+
+	case scheduleReadyDoneMsg:
+		// ScheduleReady completed asynchronously — register listener for any
+		// active workers and check if all work is done.
+		if m.coord.ActiveCount() > 0 {
+			cmds = append(cmds, m.coord.ListenCmd())
+		} else if m.coord.AllDone() && m.phase != phaseInteractive {
 			m.completedStories = m.coord.CompletedCount()
 			if m.completedStories == m.totalStories || m.checkPRDAllComplete() {
 				m.completedStories = m.totalStories
@@ -2051,10 +2030,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phaseDone
 			m.allComplete = false
 			m.exitCode = 1
-			m.completionReason = fmt.Sprintf("All parallel work done after merge but only %d/%d stories completed", m.completedStories, m.totalStories)
+			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
 			debuglog.Log("entering phaseDone: %s", m.completionReason)
 			m.showCompletionReport()
 			return m, nil
+		}
+
+	case panicRecoveredMsg:
+		debuglog.Log("panic recovered in command: %s", msg.Value)
+		m.claudeContent += "\n" + tsLog("── Internal error (recovered panic): %s ──\n", msg.Value)
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		// Re-register listener to prevent deadlock if the panicked command
+		// was expected to produce a message that re-registers ListenCmd.
+		if m.coord != nil && m.coord.ActiveCount() > 0 {
+			cmds = append(cmds, m.coord.ListenCmd())
 		}
 
 	case coordinator.WorkerActivityMsg:
@@ -3219,7 +3210,6 @@ func (m *Model) dispatchInteractiveTask(taskText string) tea.Cmd {
 	story := m.storyCreator.CreateAndAppend(taskText, "", m.livePRD, m.storyDAG)
 	m.coord.AddStory(&story)
 	m.totalStories++
-	m.coord.ScheduleReady(m.ctx)
 	m.claudeContent += tsLog("── Interactive task %s dispatched ──\n", story.ID)
 	m.claudeVP.SetContent(m.claudeContent)
 	m.claudeVP.GotoBottom()
@@ -3230,11 +3220,8 @@ func (m *Model) dispatchInteractiveTask(taskText string) tea.Cmd {
 		m.phase = phaseParallel
 		debuglog.Log("switching from phaseInteractive to phaseParallel for interactive task dispatch")
 	}
-	// Listen for worker updates
-	if m.coord.ActiveCount() > 0 {
-		return m.coord.ListenCmd()
-	}
-	return nil
+	// Schedule work async (avoids blocking TUI on fusion LLM calls)
+	return scheduleReadyCmd(m.ctx, m.coord)
 }
 
 func (m *Model) clearClarifyState() {

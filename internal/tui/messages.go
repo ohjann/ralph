@@ -128,6 +128,12 @@ type statusMsg struct {
 
 type statusClearMsg struct{}
 
+// scheduleReadyDoneMsg is sent after ScheduleReady runs asynchronously so the
+// event loop isn't blocked by fusion complexity LLM calls.
+type scheduleReadyDoneMsg struct {
+	Launched int
+}
+
 // clarifyResultMsg carries the result of a lightweight Claude clarification call.
 // If Ready is true, the task is clear and should proceed to story creation.
 // Otherwise, Questions contains up to 3 clarifying questions to show the user.

@@ -650,6 +650,22 @@ func (c *Coordinator) ListenCmd() tea.Cmd {
 	}
 }
 
+// DrainUpdates non-blockingly reads all pending updates from the update channel
+// and processes them via HandleUpdate. This prevents stale updates from
+// accumulating when workers are cancelled (e.g. on usage limit).
+func (c *Coordinator) DrainUpdates() int {
+	drained := 0
+	for {
+		select {
+		case u := <-c.updateCh:
+			c.HandleUpdate(u)
+			drained++
+		default:
+			return drained
+		}
+	}
+}
+
 // ActiveCount returns the number of workers currently in progress.
 func (c *Coordinator) ActiveCount() int {
 	c.mu.Lock()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -28,18 +29,41 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/worker"
 )
 
+// panicRecoveredMsg is returned when a tea.Cmd panics. This prevents the TUI
+// from hanging forever waiting for a message that will never arrive.
+type panicRecoveredMsg struct {
+	Value string
+	Stack string
+}
+
 // safeCmd wraps a tea.Cmd so that panics in the command goroutine are recovered
 // instead of corrupting the terminal. Bubble Tea only recovers panics from
 // Update/View — panics in Cmd goroutines leave the terminal in a broken state.
 func safeCmd(fn func() tea.Msg) tea.Cmd {
-	return func() tea.Msg {
+	return func() (msg tea.Msg) {
 		defer func() {
 			if r := recover(); r != nil {
-				debuglog.Log("panic recovered in tea.Cmd: %v", r)
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				stack := string(buf[:n])
+				debuglog.Log("panic recovered in tea.Cmd: %v\n%s", r, stack)
+				msg = panicRecoveredMsg{
+					Value: fmt.Sprintf("%v", r),
+					Stack: stack,
+				}
 			}
 		}()
 		return fn()
 	}
+}
+
+// scheduleReadyCmd runs ScheduleReady off the main thread so fusion complexity
+// LLM calls don't block the TUI event loop.
+func scheduleReadyCmd(ctx context.Context, coord *coordinator.Coordinator) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		n := coord.ScheduleReady(ctx)
+		return scheduleReadyDoneMsg{Launched: n}
+	})
 }
 
 func fastTickCmd() tea.Cmd {
