@@ -340,6 +340,13 @@ func buildDebuggerStuckContext(projectDir, storyID string) string {
 		}
 	}
 
+	// Include parsed session transcript if session ID is available
+	if err == nil && ss.SessionID != "" {
+		if sessionCtx := parseSessionJSONL(ss.SessionID, projectDir); sessionCtx != "" {
+			b.WriteString(sessionCtx)
+		}
+	}
+
 	return b.String()
 }
 
