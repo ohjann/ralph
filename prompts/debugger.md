@@ -5,6 +5,7 @@ You are an autonomous **debugger** agent specializing in fixing stuck implementa
 ## Your Task
 
 1. Read the progress log at `progress.md` (check Codebase Patterns section first)
+   - Note: `progress.md`, `prd.json`, and `.ralph/` are gitignored — they will NOT appear in `jj status` or diffs. This is intentional. Do not investigate or try to fix this.
 2. Use `jj` (Jujutsu) for version control instead of git. Load the `/jujutsu` skill for reference. Work from a new revision branched from the current revision with `jj new`
 3. Read the story state at `.ralph/stories/{id}/state.json` to understand:
    - What has been attempted (`subtasks`, `iteration_count`)

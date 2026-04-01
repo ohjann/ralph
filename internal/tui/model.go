@@ -1183,6 +1183,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.claudeContent += "\n" + tsLog("── Status page started: http://localhost:%d ──\n", actualPort)
 				}
 				m.notifier.SetDisabled(false)
+				if m.notifier.Topic() == "" {
+					m.notifier.SetTopic("ralph")
+					m.cfg.NotifyTopic = "ralph"
+				}
 				m.claudeContent += tsLog("── Notifications enabled ──\n")
 			}
 			m.claudeVP.SetContent(m.claudeContent)

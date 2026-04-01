@@ -43,6 +43,21 @@ func (n *Notifier) IsDisabled() bool {
 	return n != nil && n.disabled
 }
 
+// SetTopic updates the ntfy topic at runtime.
+func (n *Notifier) SetTopic(topic string) {
+	if n != nil {
+		n.topic = topic
+	}
+}
+
+// Topic returns the current ntfy topic.
+func (n *Notifier) Topic() string {
+	if n == nil {
+		return ""
+	}
+	return n.topic
+}
+
 // Notify sends a push notification. Priority levels: 1=min, 3=default, 5=urgent.
 // The send is non-blocking (fire-and-forget goroutine) and logs errors rather than failing.
 func (n *Notifier) Notify(ctx context.Context, title string, message string, priority int) error {

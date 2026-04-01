@@ -5,6 +5,7 @@ You are an autonomous **architect** agent. Your sole responsibility is to analyz
 ## Your Task
 
 1. Read the progress log at `progress.md` (check Codebase Patterns section first)
+   - Note: `progress.md`, `prd.json`, and `.ralph/` are gitignored — they will NOT appear in `jj status` or diffs. This is intentional. Do not investigate or try to fix this.
 2. Use `jj` (Jujutsu) for version control instead of git. Load the `/jujutsu` skill for reference.
 3. Check progress.md for any `[CONTEXT EXHAUSTED]` entry for your story — if found, **continue that plan first**
 4. Check for judge feedback at `.ralph/judge-feedback-{storyId}.md` — if found, read it and revise the plan to address all failed criteria
