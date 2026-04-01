@@ -696,6 +696,10 @@ func qualityReviewCmd(ctx context.Context, cfg *config.Config, iteration int) te
 
 func qualityFixCmd(ctx context.Context, cfg *config.Config, assessment quality.Assessment, iteration int) tea.Cmd {
 	return safeCmd(func() tea.Msg {
+		// Drop findings that reference deleted/renamed files since the review ran
+		if dropped := quality.FilterStaleFindings(cfg.ProjectDir, &assessment); dropped > 0 {
+			debuglog.Log("quality fix: dropped %d stale findings (files no longer exist)", dropped)
+		}
 		err := quality.RunFix(ctx, cfg.ProjectDir, cfg.LogDir, assessment, iteration)
 		return qualityFixDoneMsg{Err: err}
 	})

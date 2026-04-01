@@ -182,6 +182,30 @@ func RunReviewsParallel(ctx context.Context, projectDir, logDir string, lenses [
 	return results
 }
 
+// FilterStaleFindings removes findings that reference files which no longer
+// exist on disk. This prevents the fix phase from wasting time on findings
+// from files that were deleted or renamed since the review ran.
+func FilterStaleFindings(projectDir string, assessment *Assessment) int {
+	dropped := 0
+	for i := range assessment.Results {
+		var kept []Finding
+		for _, f := range assessment.Results[i].Findings {
+			if f.File == "" {
+				kept = append(kept, f)
+				continue
+			}
+			path := filepath.Join(projectDir, f.File)
+			if _, err := os.Stat(path); err != nil {
+				dropped++
+				continue
+			}
+			kept = append(kept, f)
+		}
+		assessment.Results[i].Findings = kept
+	}
+	return dropped
+}
+
 // RunFix runs a Claude Code instance to fix identified issues.
 func RunFix(ctx context.Context, projectDir, logDir string, assessment Assessment, iteration int) error {
 	assessmentJSON, err := json.MarshalIndent(assessment, "", "  ")

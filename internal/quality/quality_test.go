@@ -173,6 +173,50 @@ more output`
 	})
 }
 
+func TestFilterStaleFindings(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create one file that exists
+	existingFile := filepath.Join(dir, "exists.go")
+	os.WriteFile(existingFile, []byte("package main"), 0o644)
+
+	a := Assessment{
+		Results: []LensResult{
+			{
+				Lens: "security",
+				Findings: []Finding{
+					{File: "exists.go", Severity: "warning", Description: "real issue"},
+					{File: "deleted.go", Severity: "critical", Description: "stale issue"},
+					{File: "", Severity: "info", Description: "no file ref"},
+				},
+			},
+			{
+				Lens: "testing",
+				Findings: []Finding{
+					{File: "also-deleted.go", Severity: "warning", Description: "another stale"},
+				},
+			},
+		},
+	}
+
+	dropped := FilterStaleFindings(dir, &a)
+	if dropped != 2 {
+		t.Errorf("FilterStaleFindings dropped %d, want 2", dropped)
+	}
+	if len(a.Results[0].Findings) != 2 {
+		t.Errorf("security lens has %d findings, want 2", len(a.Results[0].Findings))
+	}
+	if a.Results[0].Findings[0].File != "exists.go" {
+		t.Errorf("first finding file = %q, want exists.go", a.Results[0].Findings[0].File)
+	}
+	if a.Results[0].Findings[1].File != "" {
+		t.Errorf("second finding file = %q, want empty", a.Results[0].Findings[1].File)
+	}
+	if len(a.Results[1].Findings) != 0 {
+		t.Errorf("testing lens has %d findings, want 0", len(a.Results[1].Findings))
+	}
+}
+
 func TestStoryPrefixFromPRD(t *testing.T) {
 	t.Run("valid PRD", func(t *testing.T) {
 		dir := t.TempDir()
