@@ -1858,7 +1858,7 @@ Straightforward wiring — the role system already has the Model field.
 
 ---
 
-## Phase 7: Claude Code Deep Integration — Interactive Workers
+## Phase 7: Claude Code Deep Integration — Interactive Workers ✅ COMPLETE
 
 **Impact: High | Complexity: Medium | Dependencies: Phase 4 (agent roles — already complete), Phase 6 (multi-model — already complete)**
 
@@ -2115,23 +2115,23 @@ to extract richer context for the next iteration:
 
 ### Acceptance Criteria
 
-- [ ] Session ID captured from stream-json `system/init` event and
+- [x] Session ID captured from stream-json `system/init` event and
       persisted in story state
-- [ ] User can select a running worker, type guidance, and resume it with
+- [x] User can select a running worker, type guidance, and resume it with
       full conversation context via `--resume`
-- [ ] TUI shows hint input overlay per-worker; worker resumes on Enter
-- [ ] Resume hint includes direct-resume instruction to suppress preamble
-- [ ] Partial session state (killed mid-tool-call) detected and logged
-- [ ] Role instructions sent via `--append-system-prompt`, story context
+- [x] TUI shows hint input overlay per-worker; worker resumes on Enter
+- [x] Resume hint includes direct-resume instruction to suppress preamble
+- [x] Partial session state (killed mid-tool-call) detected and logged
+- [x] Role instructions sent via `--append-system-prompt`, story context
       via stdin
-- [ ] Architect cannot write files; simplify cannot create new files
+- [x] Architect cannot write files; simplify cannot create new files
       (tools removed from context, not just blocked)
-- [ ] Fusion workers fork from architect session instead of running
+- [x] Fusion workers fork from architect session instead of running
       architect independently
-- [ ] PreToolUse hook prevents repeated tool calls with redirect message
-- [ ] Debugger receives parsed session transcript context when available
-- [ ] Fallback to current kill-and-restart if session ID not yet captured
-- [ ] `make build` passes, existing tests pass
+- [x] PreToolUse hook prevents repeated tool calls with redirect message
+- [x] Debugger receives parsed session transcript context when available
+- [x] Fallback to current kill-and-restart if session ID not yet captured
+- [x] `make build` passes, existing tests pass
 
 ### Estimated Scope
 
@@ -2146,7 +2146,7 @@ ID persistence). New hook script template in `internal/runner/` or
 
 ## Phase 8: Daemon/Client Architecture — TUI Decoupling
 
-**Impact: High | Complexity: Medium-High | Dependencies: Phase 1 (checkpoint/resume — already complete), Phase 3 (status page — already complete), Phase 7 (session management — workers can resume after TUI reconnect)**
+**Impact: High | Complexity: Medium-High | Dependencies: Phase 1 (checkpoint/resume — already complete), Phase 3 (status page — already complete), Phase 7 (session management — already complete, workers can resume after TUI reconnect)**
 
 > **Added 2026-03-28.** When Ralph's TUI freezes or crashes, all workers
 > (goroutines) die with the process, losing in-progress work. The checkpoint
