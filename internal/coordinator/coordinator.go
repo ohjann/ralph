@@ -1066,3 +1066,15 @@ func FormatWorkerStates(workers map[worker.WorkerID]*worker.Worker) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// RegisterTestWorker injects a worker into the coordinator for testing.
+// The worker is registered as active (in-progress) with the given state.
+func (c *Coordinator) RegisterTestWorker(w *worker.Worker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.workers[w.ID] = w
+	c.inProgress[w.StoryID] = w.ID
+	if w.ID > c.nextID {
+		c.nextID = w.ID
+	}
+}
