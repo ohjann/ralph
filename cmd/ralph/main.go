@@ -5,16 +5,26 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ohjann/ralphplusplus/internal/config"
+	"github.com/ohjann/ralphplusplus/internal/coordinator"
 	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/daemon"
+	"github.com/ohjann/ralphplusplus/internal/dag"
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"github.com/ohjann/ralphplusplus/internal/memory"
+	"github.com/ohjann/ralphplusplus/internal/notify"
 	"github.com/ohjann/ralphplusplus/internal/prd"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/tui"
@@ -65,6 +75,11 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle --kill early (no prd.json or validation needed).
+	if cfg.KillDaemon {
+		os.Exit(killDaemon(cfg.ProjectDir))
+	}
+
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -97,6 +112,35 @@ func main() {
 	defer debuglog.Close()
 	debuglog.Log("ralph starting, version=%s, workers=%d", Version, cfg.Workers)
 
+	// Handle --daemon: run as background daemon (no TUI).
+	if cfg.DaemonMode {
+		runDaemonMode(cfg)
+		return
+	}
+
+	// Default mode: auto-fork logic.
+	// Check if a daemon is already running, start one if needed, then attach TUI.
+	sockPath := filepath.Join(cfg.ProjectDir, ".ralph", "daemon.sock")
+	pidPath := filepath.Join(cfg.ProjectDir, ".ralph", "daemon.pid")
+
+	switch checkDaemon(sockPath, pidPath) {
+	case daemonAlive:
+		fmt.Fprintln(os.Stderr, "Reconnecting to running session...")
+	case daemonStale:
+		// Clean up stale files and start fresh
+		_ = os.Remove(sockPath)
+		_ = os.Remove(pidPath)
+		if err := forkDaemon(cfg, sockPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting daemon: %v\n", err)
+			os.Exit(1)
+		}
+	case daemonAbsent:
+		if err := forkDaemon(cfg, sockPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting daemon: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	model := tui.NewModel(cfg, Version)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -109,6 +153,294 @@ func main() {
 	if m, ok := finalModel.(*tui.Model); ok {
 		os.Exit(m.ExitCode())
 	}
+}
+
+// daemonStatus represents the state of the daemon.
+type daemonStatus int
+
+const (
+	daemonAbsent daemonStatus = iota
+	daemonAlive
+	daemonStale
+)
+
+// checkDaemon determines if a daemon is running, stale, or absent.
+func checkDaemon(sockPath, pidPath string) daemonStatus {
+	// Check if socket exists
+	if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+		return daemonAbsent
+	}
+
+	// Check if PID file exists and process is alive
+	pidData, err := os.ReadFile(pidPath)
+	if err != nil {
+		// Socket exists but no PID file — stale
+		return daemonStale
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		return daemonStale
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return daemonStale
+	}
+
+	// Signal 0 tests if process exists without actually sending a signal
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		return daemonStale
+	}
+
+	// Process is alive — verify the socket actually responds
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", sockPath)
+			},
+		},
+	}
+	resp, err := client.Get("http://daemon/api/state")
+	if err != nil {
+		return daemonStale
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return daemonStale
+	}
+
+	return daemonAlive
+}
+
+// forkDaemon starts a new daemon process in the background and waits for its
+// socket to become available.
+func forkDaemon(cfg *config.Config, sockPath string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+
+	// Build daemon args: forward all CLI flags, add --daemon
+	daemonArgs := buildDaemonArgs(os.Args[1:])
+
+	cmd := exec.Command(exePath, daemonArgs...)
+	cmd.Dir = cfg.ProjectDir
+
+	// Redirect stdout/stderr to daemon.log
+	logPath := filepath.Join(cfg.ProjectDir, ".ralph", "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open daemon log: %w", err)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	// Detach from parent process group so daemon survives TUI exit
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	// Don't wait for the daemon — it runs independently
+	go func() {
+		_ = cmd.Wait()
+		logFile.Close()
+	}()
+
+	// Wait up to 5 seconds for the socket to appear and respond
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		if _, err := os.Stat(sockPath); err == nil {
+			// Socket file exists — try connecting
+			client := &http.Client{
+				Timeout: 1 * time.Second,
+				Transport: &http.Transport{
+					DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+						return net.Dial("unix", sockPath)
+					},
+				},
+			}
+			resp, err := client.Get("http://daemon/api/state")
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("daemon did not start within 5 seconds (check %s)", logPath)
+}
+
+// buildDaemonArgs takes the original CLI args, filters out TUI-only flags,
+// and appends --daemon.
+func buildDaemonArgs(args []string) []string {
+	var result []string
+	// TUI-only flags to filter out (no value)
+	tuiOnlyFlags := map[string]bool{
+		"--no-guy": true,
+		"--kill":   true,
+	}
+
+	i := 0
+	for i < len(args) {
+		if tuiOnlyFlags[args[i]] {
+			i++
+			continue
+		}
+		result = append(result, args[i])
+		i++
+	}
+
+	result = append(result, "--daemon")
+	return result
+}
+
+// runDaemonMode runs ralph as a background daemon (no TUI).
+// This is the entry point when --daemon is passed.
+func runDaemonMode(cfg *config.Config) {
+	debuglog.Log("ralph daemon mode starting, pid=%d", os.Getpid())
+
+	// Load PRD
+	p, err := prd.Load(cfg.PRDFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: failed to load prd.json: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Filter to incomplete stories
+	var incomplete []prd.UserStory
+	for _, s := range p.UserStories {
+		if !s.Passes {
+			incomplete = append(incomplete, s)
+		}
+	}
+
+	if len(incomplete) == 0 {
+		fmt.Fprintln(os.Stderr, "daemon: no incomplete stories")
+		os.Exit(0)
+	}
+
+	// Build DAG — use PRD-provided deps if available, else analyze
+	var storyDAG *dag.DAG
+	if p.HasExplicitDependencies() {
+		storyDAG = dag.FromPRD(incomplete)
+		ids := make([]string, len(incomplete))
+		for i, s := range incomplete {
+			ids[i] = s.ID
+		}
+		if err := storyDAG.Validate(ids); err != nil {
+			debuglog.Log("daemon: PRD deps invalid (%v), using linear fallback", err)
+			storyDAG = dag.LinearFallback(incomplete)
+		}
+	} else {
+		ctx := context.Background()
+		var analyzeErr error
+		storyDAG, analyzeErr = dag.Analyze(ctx, cfg.ProjectDir, incomplete, cfg.UtilityModel)
+		if analyzeErr != nil {
+			storyDAG = dag.LinearFallback(incomplete)
+		} else {
+			ids := make([]string, len(incomplete))
+			for i, s := range incomplete {
+				ids[i] = s.ID
+			}
+			if err := storyDAG.Validate(ids); err != nil {
+				storyDAG = dag.LinearFallback(incomplete)
+			}
+		}
+	}
+
+	cfg.ResolveAutoWorkers(len(incomplete))
+
+	// Create coordinator
+	coord := coordinator.New(cfg, storyDAG, cfg.Workers, incomplete)
+	rc := costs.NewRunCosting()
+	coord.SetRunCosting(rc)
+
+	n := notify.NewNotifier(cfg.NotifyTopic, cfg.NtfyServer)
+	coord.SetNotifier(n)
+
+	// Create and run daemon
+	d := daemon.New(cfg, coord, daemon.DaemonOpts{
+		Notifier:     n,
+		RunCosting:   rc,
+		Version:      Version,
+		TotalStories: len(incomplete),
+	})
+
+	if err := d.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// killDaemon sends SIGTERM to a running daemon and waits for it to exit.
+// Returns the exit code.
+func killDaemon(projectDir string) int {
+	pidPath := filepath.Join(projectDir, ".ralph", "daemon.pid")
+	sockPath := filepath.Join(projectDir, ".ralph", "daemon.sock")
+
+	pidData, err := os.ReadFile(pidPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "No daemon running")
+		return 0
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "No daemon running")
+		_ = os.Remove(pidPath)
+		return 0
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "No daemon running")
+		_ = os.Remove(pidPath)
+		return 0
+	}
+
+	// Check if process is alive
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		fmt.Fprintln(os.Stderr, "No daemon running")
+		_ = os.Remove(pidPath)
+		_ = os.Remove(sockPath)
+		return 0
+	}
+
+	// Send SIGTERM
+	fmt.Fprintf(os.Stderr, "Sending SIGTERM to daemon (PID %d)...\n", pid)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending signal: %v\n", err)
+		return 1
+	}
+
+	// Wait for the socket to be removed (indicates clean shutdown)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, "Daemon stopped")
+			return 0
+		}
+		// Also check if process is still alive
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			// Process died
+			_ = os.Remove(sockPath)
+			_ = os.Remove(pidPath)
+			fmt.Fprintln(os.Stderr, "Daemon stopped")
+			return 0
+		}
+	}
+
+	fmt.Fprintln(os.Stderr, "Daemon did not stop within 10 seconds")
+	return 1
 }
 
 func printHistory(projectDir string, showAll bool) error {

@@ -62,6 +62,8 @@ type Config struct {
 	NoSimplify         bool   // --no-simplify: skip per-story simplify pass
 	NoFusion           bool   // --no-fusion: disable automatic fusion mode for complex stories
 	FusionWorkers      int    // --fusion-workers N: competing implementations per complex story (default: 2)
+	DaemonMode         bool   // --daemon: run as background daemon (no TUI)
+	KillDaemon         bool   // --kill: send SIGTERM to running daemon and exit
 
 	// Derived paths
 	PRDFile        string
@@ -325,6 +327,12 @@ func Parse(args []string) (*Config, error) {
 			i++
 		case "--no-fusion":
 			cfg.NoFusion = true
+			i++
+		case "--daemon":
+			cfg.DaemonMode = true
+			i++
+		case "--kill":
+			cfg.KillDaemon = true
 			i++
 		case "--fusion-workers":
 			if i+1 >= len(args) {
@@ -745,6 +753,10 @@ Monitoring:
   --notify <topic>               Send push notifications via ntfy.sh to given topic
   --ntfy-server <url>            Self-hosted ntfy server URL (default: https://ntfy.sh)
   --enable-monitoring            Enable ntfy + status page using .ralph/.env config
+
+Daemon:
+  --daemon                        Run as a background daemon (no TUI, coordination loop + API only)
+  --kill                          Send SIGTERM to a running daemon and wait for exit
 
 Display:
   --no-guy                        Disable sprite mascot overlay
