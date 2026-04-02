@@ -254,8 +254,11 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 		}
 
 		// Build the line: [tree prefix] icon ID title [worker badge] [elapsed]
+		isSelected := panelActive && i == selectedIdx
 		prefix := ""
-		if entry.connector != "" {
+		if isSelected {
+			prefix = "▸"
+		} else if entry.connector != "" {
 			prefix = styleMuted.Render(entry.connector)
 		} else {
 			prefix = " "
@@ -297,10 +300,8 @@ func renderStoryList(stories []StoryDisplayInfo, width int, animFrame int, panel
 		}
 
 		// Highlight selected row when panel is active
-		if panelActive && i == selectedIdx {
+		if isSelected {
 			selectedLine = currentLine
-			// Cursor indicator — replace first visible char with ▸
-			line = "▸" + line[1:]
 			line = selectedStyle.Width(width).Render(line)
 		}
 
