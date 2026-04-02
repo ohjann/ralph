@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/daemon"
 	"github.com/ohjann/ralphplusplus/internal/judge"
 	"github.com/ohjann/ralphplusplus/internal/memory"
 	"github.com/ohjann/ralphplusplus/internal/prd"
@@ -156,3 +157,27 @@ type windowSizeMsg struct {
 	Width  int
 	Height int
 }
+
+// --- Daemon SSE messages ---
+
+// daemonConnectedMsg is sent when the SSE connection to the daemon is established.
+type daemonConnectedMsg struct {
+	EventCh <-chan daemon.DaemonEvent
+}
+
+// daemonDisconnectedMsg is sent when the SSE stream drops.
+type daemonDisconnectedMsg struct {
+	Err error
+}
+
+// daemonEventMsg wraps a decoded daemon event received via SSE.
+type daemonEventMsg struct {
+	State       *daemon.DaemonStateEvent
+	WorkerLog   *daemon.WorkerLogEvent
+	LogLine     *daemon.LogLineEvent
+	MergeResult *daemon.MergeResultEvent
+	StuckAlert  *daemon.StuckAlertEvent
+}
+
+// daemonQuitDoneMsg signals that the daemon quit POST completed.
+type daemonQuitDoneMsg struct{ Err error }

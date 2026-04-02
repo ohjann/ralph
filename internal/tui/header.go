@@ -22,9 +22,13 @@ func renderHeader(m *Model, width int) string {
 	)
 
 	phaseStr := renderPhase(m.phase)
-	if m.phase == phaseParallel && m.coord != nil {
-		activeCount := m.coord.ActiveCount()
+	if m.phase == phaseParallel && (m.coord != nil || m.client != nil) {
+		activeCount := m.daemonActiveCount()
 		phaseStr = stylePhaseActive.Render(fmt.Sprintf("⚡ %d/%d workers", activeCount, m.cfg.Workers))
+	}
+	// Show connecting state when daemon client is present but not yet connected
+	if m.client != nil && !m.daemonConnected {
+		phaseStr = stylePhaseActive.Render("◌ Connecting to daemon...")
 	}
 
 	storyStr := renderCurrentTask(m)
@@ -122,28 +126,26 @@ func renderCurrentTask(m *Model) string {
 			doneStr = styleDanger.Render("✗ Some failed stories")
 		}
 		// Append plan quality score if available
-		if m.coord != nil {
-			pq := m.coord.GetPlanQuality()
-			if pq.TotalStories > 0 {
-				score := pq.Score()
-				scoreStyle := styleSuccess
-				if score < 0.5 {
-					scoreStyle = styleDanger
-				} else if score < 0.8 {
-					scoreStyle = lipgloss.NewStyle().Foreground(colorPeach)
-				}
-				doneStr += "  │  " + scoreStyle.Render(fmt.Sprintf("Plan: %.0f%%", score*100))
-				doneStr += styleMuted.Render(fmt.Sprintf(" (%d first-pass, %d retried, %d failed)",
-					pq.FirstPassCount, pq.RetryCount, pq.FailedCount))
+		pq := m.daemonGetPlanQuality()
+		if pq.TotalStories > 0 {
+			score := pq.Score()
+			scoreStyle := styleSuccess
+			if score < 0.5 {
+				scoreStyle = styleDanger
+			} else if score < 0.8 {
+				scoreStyle = lipgloss.NewStyle().Foreground(colorPeach)
 			}
+			doneStr += "  │  " + scoreStyle.Render(fmt.Sprintf("Plan: %.0f%%", score*100))
+			doneStr += styleMuted.Render(fmt.Sprintf(" (%d first-pass, %d retried, %d failed)",
+				pq.FirstPassCount, pq.RetryCount, pq.FailedCount))
 		}
 		return doneStr
 	case phaseParallel:
-		if m.coord != nil {
-			active := m.coord.ActiveStoryIDs()
-			if len(active) > 0 {
-				return strings.Join(active, ", ")
-			}
+		active := m.daemonActiveStoryIDs()
+		if len(active) > 0 {
+			return strings.Join(active, ", ")
+		}
+		if m.coord != nil || m.client != nil {
 			return styleMuted.Render("Scheduling...")
 		}
 		return styleMuted.Render("Starting workers...")

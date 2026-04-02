@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/coordinator"
 	"github.com/ohjann/ralphplusplus/internal/costs"
+	"github.com/ohjann/ralphplusplus/internal/daemon"
 	"github.com/ohjann/ralphplusplus/internal/dag"
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	rexec "github.com/ohjann/ralphplusplus/internal/exec"
@@ -559,18 +561,8 @@ func dagAnalyzeCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	})
 }
 
-func mergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.WorkerUpdate) tea.Cmd {
-	return safeCmd(func() tea.Msg {
-		conflictsResolved, err := coord.MergeAndSync(ctx, u)
-		return coordinator.MergeCompleteMsg{
-			StoryID:           u.StoryID,
-			WorkerID:          u.WorkerID,
-			ChangeID:          u.ChangeID,
-			Err:               err,
-			ConflictsResolved: conflictsResolved,
-		}
-	})
-}
+// mergeBackCmd is no longer used — the daemon handles merges autonomously and
+// broadcasts MergeResultEvent via SSE. The TUI receives these in handleDaemonMergeResult.
 
 func fusionCompareCmd(ctx context.Context, coord *coordinator.Coordinator, storyID string, fg *fusion.FusionGroup) tea.Cmd {
 	return safeCmd(func() tea.Msg {
@@ -778,5 +770,105 @@ func utilityRunClaude(cfg *config.Config) func(context.Context, string, string, 
 		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
 		return err
 	}
+}
+
+// --- Daemon client commands ---
+
+// connectDaemonSSECmd establishes the SSE connection and returns a
+// daemonConnectedMsg with the event channel, or daemonDisconnectedMsg on error.
+func connectDaemonSSECmd(client *daemon.DaemonClient, ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		eventCh := client.StreamEvents(ctx)
+		return daemonConnectedMsg{EventCh: eventCh}
+	}
+}
+
+// listenDaemonEventCmd reads the next event from the SSE channel and decodes it
+// into a typed daemonEventMsg. If the channel closes, it returns daemonDisconnectedMsg.
+func listenDaemonEventCmd(eventCh <-chan daemon.DaemonEvent) tea.Cmd {
+	return func() tea.Msg {
+		evt, ok := <-eventCh
+		if !ok {
+			return daemonDisconnectedMsg{Err: nil}
+		}
+
+		msg := daemonEventMsg{}
+		switch evt.Type {
+		case daemon.EventDaemonState:
+			var s daemon.DaemonStateEvent
+			if err := json.Unmarshal(evt.Data, &s); err == nil {
+				msg.State = &s
+			}
+		case daemon.EventWorkerLog:
+			var l daemon.WorkerLogEvent
+			if err := json.Unmarshal(evt.Data, &l); err == nil {
+				msg.WorkerLog = &l
+			}
+		case daemon.EventLogLine:
+			var l daemon.LogLineEvent
+			if err := json.Unmarshal(evt.Data, &l); err == nil {
+				msg.LogLine = &l
+			}
+		case daemon.EventMergeResult:
+			var r daemon.MergeResultEvent
+			if err := json.Unmarshal(evt.Data, &r); err == nil {
+				msg.MergeResult = &r
+			}
+		case daemon.EventStuckAlert:
+			var a daemon.StuckAlertEvent
+			if err := json.Unmarshal(evt.Data, &a); err == nil {
+				msg.StuckAlert = &a
+			}
+		case "error":
+			return daemonDisconnectedMsg{Err: fmt.Errorf("daemon SSE error")}
+		}
+		return msg
+	}
+}
+
+// daemonQuitCmd sends POST /api/quit to the daemon.
+func daemonQuitCmd(client *daemon.DaemonClient) tea.Cmd {
+	return func() tea.Msg {
+		err := client.Quit()
+		return daemonQuitDoneMsg{Err: err}
+	}
+}
+
+// daemonResumeCmd sends POST /api/resume to the daemon.
+func daemonResumeCmd(client *daemon.DaemonClient) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		_ = client.Resume()
+		return statusMsg{Text: "Resumed", Level: statusInfo}
+	})
+}
+
+// daemonPauseCmd sends POST /api/pause to the daemon.
+func daemonPauseCmd(client *daemon.DaemonClient) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		_ = client.Pause()
+		return statusMsg{Text: "Paused", Level: statusInfo}
+	})
+}
+
+// daemonHintCmd sends a hint to a specific worker via the daemon.
+func daemonHintCmd(client *daemon.DaemonClient, workerID worker.WorkerID, text string) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		err := client.SendHint(workerID, text)
+		if err != nil {
+			return statusMsg{Text: fmt.Sprintf("Hint failed: %v", err), Level: statusError}
+		}
+		return statusMsg{Text: fmt.Sprintf("Hint sent to worker %d", workerID), Level: statusInfo}
+	})
+}
+
+// daemonTaskCmd submits an ad-hoc task to the daemon.
+func daemonTaskCmd(client *daemon.DaemonClient, description string) tea.Cmd {
+	return safeCmd(func() tea.Msg {
+		err := client.SubmitTask(description)
+		if err != nil {
+			return statusMsg{Text: fmt.Sprintf("Task failed: %v", err), Level: statusError}
+		}
+		return statusMsg{Text: "Task submitted", Level: statusInfo}
+	})
 }
 

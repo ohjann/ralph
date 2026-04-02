@@ -23,6 +23,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/notify"
 	"github.com/ohjann/ralphplusplus/internal/statuspage"
 	"github.com/ohjann/ralphplusplus/internal/coordinator"
+	"github.com/ohjann/ralphplusplus/internal/daemon"
 	"github.com/ohjann/ralphplusplus/internal/dag"
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"github.com/ohjann/ralphplusplus/internal/events"
@@ -111,8 +112,13 @@ type Model struct {
 	animatedFill   float64 // current animated fill ratio (0.0–1.0)
 	fillVelocity   float64 // spring velocity
 
-	// Parallel execution
+	// Parallel execution — coord is retained for DAG bootstrap only.
+	// All runtime coordination goes through the daemon client.
 	coord            *coordinator.Coordinator
+	client           *daemon.DaemonClient    // daemon IPC client (nil when running without daemon)
+	daemonConnected  bool                    // true once SSE stream is established
+	daemonState      *daemon.DaemonStateEvent // latest state snapshot from SSE
+	sseEventCh       <-chan daemon.DaemonEvent // SSE event channel (set on connect)
 	storyDAG         *dag.DAG
 	activeWorkerView worker.WorkerID // which worker's output to show in Claude panel
 
@@ -263,6 +269,200 @@ func (m *Model) stopStatusServer() {
 	}
 }
 
+// --- Daemon-aware helpers ---
+// These methods read from daemonState when a daemon client is present,
+// falling back to the coordinator for non-daemon mode.
+
+func (m *Model) daemonActiveCount() int {
+	if m.client != nil && m.daemonState != nil {
+		count := 0
+		for _, ws := range m.daemonState.Workers {
+			if ws.State == "running" || ws.State == "active" {
+				count++
+			}
+		}
+		return count
+	}
+	if m.coord != nil {
+		return m.coord.ActiveCount()
+	}
+	return 0
+}
+
+func (m *Model) daemonActiveStoryIDs() []string {
+	if m.client != nil && m.daemonState != nil {
+		return m.daemonState.ActiveStoryIDs
+	}
+	if m.coord != nil {
+		return m.coord.ActiveStoryIDs()
+	}
+	return nil
+}
+
+func (m *Model) daemonAllDone() bool {
+	if m.client != nil && m.daemonState != nil {
+		return m.daemonState.AllDone
+	}
+	if m.coord != nil {
+		return m.coord.AllDone()
+	}
+	return false
+}
+
+func (m *Model) daemonCompletedCount() int {
+	if m.client != nil && m.daemonState != nil {
+		return m.daemonState.CompletedCount
+	}
+	if m.coord != nil {
+		return m.coord.CompletedCount()
+	}
+	return 0
+}
+
+func (m *Model) daemonFailedCount() int {
+	if m.client != nil && m.daemonState != nil {
+		return m.daemonState.FailedCount
+	}
+	if m.coord != nil {
+		return m.coord.FailedCount()
+	}
+	return 0
+}
+
+func (m *Model) daemonIterationCount() int {
+	if m.client != nil && m.daemonState != nil {
+		return m.daemonState.IterationCount
+	}
+	if m.coord != nil {
+		return m.coord.IterationCount()
+	}
+	return 0
+}
+
+func (m *Model) daemonIsWorkerActive(wID worker.WorkerID) bool {
+	if m.client != nil && m.daemonState != nil {
+		ws, ok := m.daemonState.Workers[wID]
+		return ok && (ws.State == "running" || ws.State == "active")
+	}
+	if m.coord != nil {
+		return m.coord.IsWorkerActive(wID)
+	}
+	return false
+}
+
+func (m *Model) daemonGetWorkerActivityPath(wID worker.WorkerID) string {
+	if m.client != nil && m.daemonState != nil {
+		if ws, ok := m.daemonState.Workers[wID]; ok {
+			return ws.ActivityPath
+		}
+		return ""
+	}
+	if m.coord != nil {
+		return m.coord.GetWorkerActivityPath(wID)
+	}
+	return ""
+}
+
+func (m *Model) daemonIsInProgress(storyID string) bool {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok {
+			return ss.InProgress
+		}
+		return false
+	}
+	if m.coord != nil {
+		return m.coord.IsInProgress(storyID)
+	}
+	return false
+}
+
+func (m *Model) daemonIsCompleted(storyID string) bool {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok {
+			return ss.Completed
+		}
+		return false
+	}
+	if m.coord != nil {
+		return m.coord.IsCompleted(storyID)
+	}
+	return false
+}
+
+func (m *Model) daemonIsFailed(storyID string) bool {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok {
+			return ss.Failed
+		}
+		return false
+	}
+	if m.coord != nil {
+		return m.coord.IsFailed(storyID)
+	}
+	return false
+}
+
+func (m *Model) daemonFailedError(storyID string) string {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok {
+			return ss.FailedError
+		}
+		return ""
+	}
+	if m.coord != nil {
+		return m.coord.FailedError(storyID)
+	}
+	return ""
+}
+
+func (m *Model) daemonIsBlockedByFailure(storyID string) (bool, string) {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok && ss.BlockedByDep != "" {
+			return true, ss.BlockedByDep
+		}
+		return false, ""
+	}
+	if m.coord != nil {
+		return m.coord.IsBlockedByFailure(storyID)
+	}
+	return false, ""
+}
+
+func (m *Model) daemonStoryTitle(storyID string) string {
+	if m.client != nil && m.daemonState != nil {
+		if ss, ok := m.daemonState.Stories[storyID]; ok {
+			return ss.Title
+		}
+		return ""
+	}
+	if m.coord != nil {
+		return m.coord.StoryTitle(storyID)
+	}
+	return ""
+}
+
+func (m *Model) daemonGetPlanQuality() coordinator.PlanQuality {
+	if m.client != nil && m.daemonState != nil {
+		return coordinator.PlanQuality{
+			FirstPassCount: m.daemonState.PlanQuality.FirstPassCount,
+			RetryCount:     m.daemonState.PlanQuality.RetryCount,
+			FailedCount:    m.daemonState.PlanQuality.FailedCount,
+			TotalStories:   m.daemonState.PlanQuality.TotalStories,
+		}
+	}
+	if m.coord != nil {
+		return m.coord.GetPlanQuality()
+	}
+	return coordinator.PlanQuality{}
+}
+
+// daemonQuit sends POST /api/quit to the daemon (non-blocking).
+func (m *Model) daemonQuit() {
+	if m.client != nil {
+		go m.client.Quit()
+	}
+}
+
 // updateStatusPage pushes the current model state to the status page server.
 func (m *Model) updateStatusPage() {
 	if m.statusServer == nil {
@@ -325,16 +525,14 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 
 	// Completion reason and plan quality
 	state.CompletionReason = m.completionReason
-	if m.coord != nil {
-		pq := m.coord.GetPlanQuality()
-		if pq.TotalStories > 0 {
-			state.PlanQuality = &statuspage.PlanQualityStatus{
-				Score:          pq.Score(),
-				FirstPassCount: pq.FirstPassCount,
-				RetryCount:     pq.RetryCount,
-				FailedCount:    pq.FailedCount,
-				TotalStories:   pq.TotalStories,
-			}
+	pq := m.daemonGetPlanQuality()
+	if pq.TotalStories > 0 {
+		state.PlanQuality = &statuspage.PlanQualityStatus{
+			Score:          pq.Score(),
+			FirstPassCount: pq.FirstPassCount,
+			RetryCount:     pq.RetryCount,
+			FailedCount:    pq.FailedCount,
+			TotalStories:   pq.TotalStories,
 		}
 	}
 
@@ -379,19 +577,35 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 		state.WorkerLogs = workerLogs
 
 		// Build worker tabs matching the TUI tab order
-		workers := m.coord.Workers()
-		for _, wID := range m.workerTabOrder {
-			w := workers[wID]
-			if w == nil {
-				continue
+		if m.client != nil && m.daemonState != nil {
+			for _, wID := range m.workerTabOrder {
+				ws, ok := m.daemonState.Workers[wID]
+				if !ok {
+					continue
+				}
+				state.WorkerTabs = append(state.WorkerTabs, statuspage.WorkerTab{
+					WorkerID: int(wID),
+					StoryID:  ws.StoryID,
+					Role:     string(ws.Role),
+					State:    ws.State,
+					Active:   wID == m.activeWorkerView,
+				})
 			}
-			state.WorkerTabs = append(state.WorkerTabs, statuspage.WorkerTab{
-				WorkerID: int(wID),
-				StoryID:  w.StoryID,
-				Role:     string(w.Role),
-				State:    w.State.String(),
-				Active:   wID == m.activeWorkerView,
-			})
+		} else if m.coord != nil {
+			workers := m.coord.Workers()
+			for _, wID := range m.workerTabOrder {
+				w := workers[wID]
+				if w == nil {
+					continue
+				}
+				state.WorkerTabs = append(state.WorkerTabs, statuspage.WorkerTab{
+					WorkerID: int(wID),
+					StoryID:  w.StoryID,
+					Role:     string(w.Role),
+					State:    w.State.String(),
+					Active:   wID == m.activeWorkerView,
+				})
+			}
 		}
 	}
 
@@ -426,7 +640,15 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 	workerAssignments := make(map[string]int)
 	workerIterations := make(map[string]int)
 	workerRoles := make(map[string]string)
-	if m.coord != nil {
+	if m.client != nil && m.daemonState != nil {
+		for wID, ws := range m.daemonState.Workers {
+			if ws.State == "running" || ws.State == "setup" || ws.State == "judging" || ws.State == "active" {
+				workerAssignments[ws.StoryID] = int(wID)
+				workerIterations[ws.StoryID] = ws.Iteration
+				workerRoles[ws.StoryID] = string(ws.Role)
+			}
+		}
+	} else if m.coord != nil {
 		for wID, w := range m.coord.Workers() {
 			if w.State == worker.WorkerRunning || w.State == worker.WorkerSetup || w.State == worker.WorkerJudging {
 				workerAssignments[w.StoryID] = int(wID)
@@ -466,9 +688,9 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 				}
 			}
 
-			// In parallel mode, check coordinator for running/failed status
-			if m.coord != nil {
-				if m.coord.IsInProgress(s.ID) {
+			// In parallel mode, check coordinator/daemon for running/failed status
+			if m.coord != nil || m.client != nil {
+				if m.daemonIsInProgress(s.ID) {
 					ss.Status = "running"
 					ss.WorkerID = workerAssignments[s.ID]
 					ss.Iteration = workerIterations[s.ID]
@@ -476,7 +698,7 @@ func (m *Model) buildStatusState() statuspage.StatusState {
 					if ss.IsInteractive {
 						ss.TaskStatus = "running"
 					}
-				} else if m.coord.IsFailed(s.ID) {
+				} else if m.daemonIsFailed(s.ID) {
 					ss.Status = "failed"
 					if ss.IsInteractive {
 						ss.TaskStatus = "failed"
@@ -539,11 +761,11 @@ func (m *Model) buildCurrentTaskText() string {
 		}
 		return "Some failed stories"
 	case phaseParallel:
-		if m.coord != nil {
-			active := m.coord.ActiveStoryIDs()
-			if len(active) > 0 {
-				return strings.Join(active, ", ")
-			}
+		active := m.daemonActiveStoryIDs()
+		if len(active) > 0 {
+			return strings.Join(active, ", ")
+		}
+		if m.coord != nil || m.client != nil {
 			return "Scheduling..."
 		}
 		return "Starting workers..."
@@ -672,6 +894,12 @@ func (m *Model) Init() tea.Cmd {
 	// Check memory file sizes at startup (shown once via status bar).
 	memCheck := checkMemorySizeCmd(m.cfg.ProjectDir, m.cfg.RalphHome)
 
+	// If a daemon client is present, start the SSE connection.
+	var sseConnect tea.Cmd
+	if m.client != nil {
+		sseConnect = connectDaemonSSECmd(m.client, m.ctx)
+	}
+
 	if m.cfg.IdleMode {
 		m.phase = phaseIdle
 		return tea.Batch(
@@ -681,6 +909,7 @@ func (m *Model) Init() tea.Cmd {
 			tickCmd(),
 			spriteInit,
 			memCheck,
+			sseConnect,
 		)
 	}
 	if m.cfg.PlanFile != "" {
@@ -693,6 +922,7 @@ func (m *Model) Init() tea.Cmd {
 			tickCmd(),
 			spriteInit,
 			memCheck,
+			sseConnect,
 		)
 	}
 	if m.cfg.NoPRD {
@@ -712,6 +942,7 @@ func (m *Model) Init() tea.Cmd {
 			fastTickCmd(),
 			tickCmd(),
 			memCheck,
+			sseConnect,
 		}
 		if spriteInit != nil {
 			initCmds = append(initCmds, spriteInit)
@@ -726,6 +957,7 @@ func (m *Model) Init() tea.Cmd {
 		tickCmd(),
 		spriteInit,
 		memCheck,
+		sseConnect,
 	)
 }
 
@@ -795,7 +1027,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEnter:
 				hint := strings.TrimSpace(m.hintInput.Value())
 				if hint != "" {
-					if m.coord != nil && m.coord.IsWorkerActive(m.hintTargetWorker) {
+					if m.client != nil && m.daemonIsWorkerActive(m.hintTargetWorker) {
+						// Send hint via daemon HTTP POST
+						go m.client.SendHint(m.hintTargetWorker, hint)
+						m.claudeContent += "\n" + tsLog("── Hint sent (resuming worker): %s ──\n", hint)
+					} else if m.coord != nil && m.coord.IsWorkerActive(m.hintTargetWorker) {
 						// Resume worker with hint (kill + resume with --resume)
 						m.coord.ResumeWorkerWithHint(m.hintTargetWorker, hint)
 						m.claudeContent += "\n" + tsLog("── Hint sent (resuming worker): %s ──\n", hint)
@@ -935,19 +1171,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mascot != nil && m.mascot.Interactive {
 			switch msg.String() {
 			case "ctrl+c":
+				m.daemonQuit()
 				if m.coord != nil {
 					m.coord.CancelAll()
 					m.coord.CleanupAll(context.Background())
 				}
 				m.cleanupWorkerLogs()
 				m.stopStatusServer()
-					m.cancel()
+				m.cancel()
 				return m, tea.Quit
 			case "q":
 				if m.confirmQuit || m.phase == phaseDone || m.phase == phaseIdle {
+					m.daemonQuit()
 					m.cleanupWorkerLogs()
 					m.stopStatusServer()
-							m.cancel()
+					m.cancel()
 					return m, tea.Quit
 				}
 				m.confirmQuit = true
@@ -970,6 +1208,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case msg.String() == "ctrl+c":
+			m.daemonQuit()
 			if m.coord != nil {
 				m.coord.CancelAll()
 				m.coord.CleanupAll(context.Background())
@@ -1039,15 +1278,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case msg.String() == "q":
 			if m.phase == phaseResumePrompt {
+				m.daemonQuit()
 				m.cleanupWorkerLogs()
 				m.stopStatusServer()
-					m.cancel()
+				m.cancel()
 				return m, tea.Quit
 			}
 			if m.phase == phaseReview {
+				m.daemonQuit()
 				m.cleanupWorkerLogs()
 				m.stopStatusServer()
-					m.cancel()
+				m.cancel()
 				return m, tea.Quit
 			}
 			if m.phase == phaseQualityPrompt {
@@ -1055,15 +1296,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.transitionToSummary()
 			}
 			if m.confirmQuit || m.phase == phaseDone || m.phase == phaseIdle {
+				m.daemonQuit()
 				m.cleanupWorkerLogs()
 				m.stopStatusServer()
-					m.cancel()
+				m.cancel()
 				return m, tea.Quit
 			}
 			if m.phase == phaseInteractive {
 				// In interactive mode, quit transitions to done
+				m.daemonQuit()
 				m.phase = phaseDone
-				m.allComplete = m.coord == nil || m.coord.AllDone()
+				m.allComplete = m.daemonAllDone()
 				if !m.allComplete {
 					m.exitCode = 1
 					m.completionReason = "User quit interactive mode with active workers"
@@ -1229,12 +1472,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				switch m.pausedDuring {
 				case phaseParallel:
-					m.coord.Resume()
+					if m.client != nil {
+						go m.client.Resume()
+					} else if m.coord != nil {
+						m.coord.Resume()
+					}
 					m.phase = phaseParallel
+					if m.client != nil {
+						return m, tea.Batch(fastTickCmd(), tickCmd())
+					}
 					return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 				case phaseInteractive:
-					m.coord.Resume()
+					if m.client != nil {
+						go m.client.Resume()
+					} else if m.coord != nil {
+						m.coord.Resume()
+					}
 					m.phase = phaseInteractive
+					if m.client != nil {
+						return m, tea.Batch(fastTickCmd(), tickCmd())
+					}
 					return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 				case phasePlanning:
 					m.phase = phasePlanning
@@ -1284,7 +1541,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.switchToWorkerTab(next)
 				}
 				// 'h': open hint input for the active worker (resume with guidance)
-				if msg.String() == "h" && m.coord != nil && m.coord.IsWorkerActive(m.activeWorkerView) {
+				if msg.String() == "h" && m.daemonIsWorkerActive(m.activeWorkerView) {
 					m.hintTargetWorker = m.activeWorkerView
 					m.hintActive = true
 					m.hintInput.SetWidth(m.width - 4)
@@ -1316,12 +1573,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			switch m.pausedDuring {
 			case phaseParallel:
-				m.coord.Resume()
+				if m.client != nil {
+					go m.client.Resume()
+				} else if m.coord != nil {
+					m.coord.Resume()
+				}
 				m.phase = phaseParallel
+				if m.client != nil {
+					return m, tea.Batch(fastTickCmd(), tickCmd())
+				}
 				return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 			case phaseInteractive:
-				m.coord.Resume()
+				if m.client != nil {
+					go m.client.Resume()
+				} else if m.coord != nil {
+					m.coord.Resume()
+				}
 				m.phase = phaseInteractive
+				if m.client != nil {
+					return m, tea.Batch(fastTickCmd(), tickCmd())
+				}
 				return m, tea.Batch(scheduleReadyCmd(m.ctx, m.coord), fastTickCmd(), tickCmd())
 			case phasePlanning:
 				m.phase = phasePlanning
@@ -1388,8 +1659,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activityPath := filepath.Join(m.cfg.LogDir, "summary-activity.log")
 			cmds = append(cmds, pollActivityCmd(activityPath))
 		}
-		if (m.phase == phaseParallel || m.phase == phaseInteractive) && m.coord != nil && m.activeWorkerView > 0 && m.coord.IsWorkerActive(m.activeWorkerView) {
-			activityPath := m.coord.GetWorkerActivityPath(m.activeWorkerView)
+		if (m.phase == phaseParallel || m.phase == phaseInteractive) && m.activeWorkerView > 0 && m.daemonIsWorkerActive(m.activeWorkerView) {
+			activityPath := m.daemonGetWorkerActivityPath(m.activeWorkerView)
 			if activityPath != "" {
 				wID := m.activeWorkerView
 				cmds = append(cmds, pollWorkerActivityCmd(wID, activityPath))
@@ -1949,8 +2220,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if u.Passed && u.ChangeID != "" {
-				m.notifyStoryComplete(u.StoryID, m.coord.StoryTitle(u.StoryID))
-				cmds = append(cmds, mergeBackCmd(m.ctx, m.coord, u))
+				m.notifyStoryComplete(u.StoryID, m.daemonStoryTitle(u.StoryID))
+				// Daemon handles merges — in coord-direct mode, inline the merge call
+				cmds = append(cmds, coordMergeBackCmd(m.ctx, m.coord, u))
 			} else {
 				// Abandon the committed change so it doesn't leave an orphaned
 				// side branch in the jj history.
@@ -1997,21 +2269,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Only keep listening if there are active workers; otherwise we'd
 		// block forever on the update channel with no one sending.
-		if m.coord.ActiveCount() > 0 {
-			cmds = append(cmds, listenUpdateCmd(m.coord))
+		if m.daemonActiveCount() > 0 {
+			if m.coord != nil {
+				cmds = append(cmds, listenUpdateCmd(m.coord))
+			}
 		} else if len(cmds) > 0 {
-			// There are pending commands (e.g. mergeBackCmd) — don't enter
+			// There are pending commands (e.g. coordMergeBackCmd) — don't enter
 			// phaseDone yet; let them run and check completion afterwards.
-		} else if m.coord.AllDone() && m.phase != phaseInteractive {
+		} else if m.daemonAllDone() && m.phase != phaseInteractive {
 			// No active workers and nothing left to schedule — we're done
-			m.allComplete = m.coord.CompletedCount() == m.totalStories || m.checkPRDAllComplete()
+			m.allComplete = m.daemonCompletedCount() == m.totalStories || m.checkPRDAllComplete()
 			if m.allComplete {
 				m.completedStories = m.totalStories
 				return m.transitionToComplete()
 			}
 			m.phase = phaseDone
 			m.exitCode = 1
-			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
+			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.daemonCompletedCount(), m.totalStories)
 			debuglog.Log("entering phaseDone: %s", m.completionReason)
 			m.showCompletionReport()
 			return m, nil
@@ -2059,18 +2333,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ChangeID: msg.WinnerChangeID,
 				Passed:   true,
 			}
-			cmds = append(cmds, mergeBackCmd(m.ctx, m.coord, winnerUpdate))
-			m.notifyStoryComplete(msg.StoryID, m.coord.StoryTitle(msg.StoryID))
+			cmds = append(cmds, coordMergeBackCmd(m.ctx, m.coord, winnerUpdate))
+			m.notifyStoryComplete(msg.StoryID, m.daemonStoryTitle(msg.StoryID))
 		}
-		if m.coord.ActiveCount() > 0 {
+		if m.coord != nil && m.daemonActiveCount() > 0 {
 			cmds = append(cmds, listenUpdateCmd(m.coord))
 		}
 
 	case coordinator.MergeCompleteMsg:
+		// Only fires in coord-direct mode (no daemon)
 		m.updateStatusPage()
 		if msg.Err != nil {
-			// Abandon the change so it doesn't leave an orphaned side branch.
-			if msg.ChangeID != "" {
+			if msg.ChangeID != "" && m.coord != nil {
 				m.coord.AbandonChange(m.ctx, msg.ChangeID)
 			}
 			m.claudeContent += "\n" + tsLog("── Merge failed (%s): %v ──\n", msg.StoryID, msg.Err)
@@ -2084,25 +2358,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.claudeVP.SetContent(m.claudeContent)
 			m.claudeVP.GotoBottom()
 			m.prevClaudeLen = len(m.claudeContent)
-			// Update story counts immediately (don't wait for slow tick)
-			m.completedStories = m.coord.CompletedCount()
+			m.completedStories = m.daemonCompletedCount()
 		}
 		m.cacheWorkerLog(msg.WorkerID)
-		go m.coord.CleanupWorker(m.ctx, msg.WorkerID)
-		// Schedule more work (async to avoid blocking TUI on fusion LLM calls).
-		// Also re-register listener for any already-active workers.
-		cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
-		if m.coord.ActiveCount() > 0 {
-			cmds = append(cmds, listenUpdateCmd(m.coord))
+		if m.coord != nil {
+			go m.coord.CleanupWorker(m.ctx, msg.WorkerID)
+			cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
+			if m.daemonActiveCount() > 0 {
+				cmds = append(cmds, listenUpdateCmd(m.coord))
+			}
 		}
 
 	case scheduleReadyDoneMsg:
-		// ScheduleReady completed asynchronously — register listener for any
-		// active workers and check if all work is done.
-		if m.coord.ActiveCount() > 0 {
+		if m.coord != nil && m.daemonActiveCount() > 0 {
 			cmds = append(cmds, listenUpdateCmd(m.coord))
-		} else if m.coord.AllDone() && m.phase != phaseInteractive {
-			m.completedStories = m.coord.CompletedCount()
+		} else if m.daemonAllDone() && m.phase != phaseInteractive {
+			m.completedStories = m.daemonCompletedCount()
 			if m.completedStories == m.totalStories || m.checkPRDAllComplete() {
 				m.completedStories = m.totalStories
 				return m.transitionToComplete()
@@ -2110,7 +2381,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phaseDone
 			m.allComplete = false
 			m.exitCode = 1
-			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.coord.CompletedCount(), m.totalStories)
+			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.daemonCompletedCount(), m.totalStories)
 			debuglog.Log("entering phaseDone: %s", m.completionReason)
 			m.showCompletionReport()
 			return m, nil
@@ -2122,9 +2393,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.claudeVP.SetContent(m.claudeContent)
 		m.claudeVP.GotoBottom()
 		m.prevClaudeLen = len(m.claudeContent)
-		// Re-register listener to prevent deadlock if the panicked command
-		// was expected to produce a message that re-registers listenUpdateCmd.
-		if m.coord != nil && m.coord.ActiveCount() > 0 {
+		if m.coord != nil && m.daemonActiveCount() > 0 {
 			cmds = append(cmds, listenUpdateCmd(m.coord))
 		}
 
@@ -2320,9 +2589,135 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		debuglog.Log("entering phaseInteractive after PRD completion")
 		m.updateStatusPage()
 
+	// --- Daemon SSE event handlers ---
+
+	case daemonConnectedMsg:
+		m.daemonConnected = true
+		m.sseEventCh = msg.EventCh
+		m.claudeContent += tsLog("── Connected to daemon ──\n")
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		// Start listening for events from the SSE channel
+		cmds = append(cmds, listenDaemonEventCmd(m.sseEventCh))
+
+	case daemonDisconnectedMsg:
+		m.daemonConnected = false
+		m.sseEventCh = nil
+		m.claudeContent += "\n" + tsLog("── Daemon disconnected, reconnecting... ──\n")
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		// Auto-reconnect after a short delay
+		if m.client != nil {
+			cmds = append(cmds, tea.Tick(time.Second, func(time.Time) tea.Msg {
+				return nil // will trigger reconnect below
+			}))
+			cmds = append(cmds, connectDaemonSSECmd(m.client, m.ctx))
+		}
+
+	case daemonEventMsg:
+		m.handleDaemonEvent(msg)
+		// Keep listening for next event
+		if m.sseEventCh != nil {
+			cmds = append(cmds, listenDaemonEventCmd(m.sseEventCh))
+		}
+
+	case daemonQuitDoneMsg:
+		// Daemon acknowledged our quit request — nothing more to do
+
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// coordMergeBackCmd runs MergeAndSync on the coordinator. This is only used in
+// non-daemon (coord-direct) mode. When the daemon client is present, merges are
+// handled server-side and results arrive via SSE MergeResultEvent.
+func coordMergeBackCmd(ctx context.Context, coord *coordinator.Coordinator, u worker.WorkerUpdate) tea.Cmd {
+	return func() tea.Msg {
+		if coord == nil {
+			return nil
+		}
+		conflictsResolved, err := coord.MergeAndSync(ctx, u)
+		return coordinator.MergeCompleteMsg{
+			StoryID:           u.StoryID,
+			WorkerID:          u.WorkerID,
+			ChangeID:          u.ChangeID,
+			Err:               err,
+			ConflictsResolved: conflictsResolved,
+		}
+	}
+}
+
+// handleDaemonEvent processes a decoded SSE event from the daemon and updates
+// the local model state accordingly. Merges, scheduling, and worker lifecycle
+// are handled by the daemon — the TUI only updates its view.
+func (m *Model) handleDaemonEvent(msg daemonEventMsg) {
+	if msg.State != nil {
+		m.daemonState = msg.State
+		m.completedStories = msg.State.CompletedCount
+		m.totalStories = msg.State.TotalStories
+		m.allComplete = msg.State.AllDone
+		// Update cost totals from daemon state
+		m.runCosting.TotalCost = msg.State.CostTotals.TotalCost
+		m.runCosting.TotalInputTokens = msg.State.CostTotals.TotalInputTokens
+		m.runCosting.TotalOutputTokens = msg.State.CostTotals.TotalOutputTokens
+		m.updateStatusPage()
+	}
+
+	if msg.WorkerLog != nil {
+		l := msg.WorkerLog
+		// Auto-select first worker
+		if m.activeWorkerView == 0 {
+			m.activeWorkerView = l.WorkerID
+		}
+		if l.WorkerID == m.activeWorkerView {
+			m.claudeContent += l.Line + "\n"
+			m.claudeVP.SetContent(m.claudeContent)
+			m.claudeVP.GotoBottom()
+			m.prevClaudeLen = len(m.claudeContent)
+		}
+		// Also cache it
+		m.workerLogCache[l.WorkerID] += l.Line + "\n"
+	}
+
+	if msg.LogLine != nil {
+		m.claudeContent += "\n" + tsLog("%s", msg.LogLine.Line)
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+	}
+
+	if msg.MergeResult != nil {
+		m.handleDaemonMergeResult(msg.MergeResult)
+	}
+
+	if msg.StuckAlert != nil {
+		a := msg.StuckAlert
+		m.notifier.StoryStuck(m.ctx, a.StoryID, fmt.Sprintf("worker %d stuck: %s", a.WorkerID, a.StuckReason))
+		m.stuckAlert = &runner.StuckInfo{
+			Pattern: a.StuckReason,
+			StoryID: a.StoryID,
+		}
+		m.stuckAlertAt = time.Now()
+		m.hintTargetWorker = a.WorkerID
+	}
+}
+
+// handleDaemonMergeResult processes a MergeResultEvent from SSE.
+// The daemon already performed the merge; the TUI just updates its display.
+func (m *Model) handleDaemonMergeResult(r *daemon.MergeResultEvent) {
+	m.updateStatusPage()
+	if !r.Success {
+		m.claudeContent += "\n" + tsLog("── Merge failed (%s): %s ──\n", r.StoryID, r.Error)
+	} else {
+		m.claudeContent += "\n" + tsLog("── Merged %s into main ──\n", r.StoryID)
+		m.completedStories = m.daemonCompletedCount()
+	}
+	m.claudeVP.SetContent(m.claudeContent)
+	m.claudeVP.GotoBottom()
+	m.prevClaudeLen = len(m.claudeContent)
 }
 
 // checkPRDAllComplete checks the PRD file directly to see if all stories
@@ -2390,7 +2785,7 @@ func (m *Model) cacheWorkerLog(wID worker.WorkerID) {
 		return
 	}
 	// Try to read from disk as fallback
-	actPath := m.coord.GetWorkerActivityPath(wID)
+	actPath := m.daemonGetWorkerActivityPath(wID)
 	if actPath == "" {
 		return
 	}
@@ -2642,38 +3037,71 @@ func (m *Model) View() string {
 	// Claude panel
 	claudeRunning := m.phase == phaseClaudeRun || m.phase == phaseJudgeRun || m.phase == phaseParallel || m.phase == phaseInteractive || m.phase == phaseDagAnalysis || m.phase == phasePlanning || m.phase == phaseQualityReview || m.phase == phaseQualityFix || m.phase == phaseSummary
 	var workerTabStr string
-	if (m.phase == phaseParallel || m.phase == phaseInteractive) && m.coord != nil {
-		workers := m.coord.Workers()
-		// Sort: active workers first (by ID), then completed/failed (by ID)
-		var activeIDs, doneIDs []worker.WorkerID
-		for id, w := range workers {
-			if w.State == worker.WorkerIdle {
-				continue
+	if (m.phase == phaseParallel || m.phase == phaseInteractive) && (m.coord != nil || m.client != nil) {
+		if m.client != nil && m.daemonState != nil {
+			// Build worker tabs from daemon state
+			var activeIDs, doneIDs []worker.WorkerID
+			for wID, ws := range m.daemonState.Workers {
+				switch ws.State {
+				case "idle":
+					continue
+				case "done", "failed":
+					doneIDs = append(doneIDs, wID)
+				default:
+					activeIDs = append(activeIDs, wID)
+				}
 			}
-			if w.State == worker.WorkerDone || w.State == worker.WorkerFailed {
-				doneIDs = append(doneIDs, id)
-			} else {
-				activeIDs = append(activeIDs, id)
-			}
-		}
-		sort.Slice(activeIDs, func(i, j int) bool { return activeIDs[i] < activeIDs[j] })
-		sort.Slice(doneIDs, func(i, j int) bool { return doneIDs[i] < doneIDs[j] })
-		m.workerTabOrder = append(activeIDs, doneIDs...)
+			sort.Slice(activeIDs, func(i, j int) bool { return activeIDs[i] < activeIDs[j] })
+			sort.Slice(doneIDs, func(i, j int) bool { return doneIDs[i] < doneIDs[j] })
+			m.workerTabOrder = append(activeIDs, doneIDs...)
 
-		var tabParts []string
-		for tabIdx, id := range m.workerTabOrder {
-			w := workers[id]
-			marker := ""
-			if id == m.activeWorkerView {
-				marker = "▸"
+			var tabParts []string
+			for tabIdx, id := range m.workerTabOrder {
+				ws := m.daemonState.Workers[id]
+				marker := ""
+				if id == m.activeWorkerView {
+					marker = "▸"
+				}
+				roleStr := ""
+				if ws.Role != "" {
+					roleStr = " " + string(ws.Role)
+				}
+				tabParts = append(tabParts, fmt.Sprintf("%s%d:%s%s[%s]", marker, tabIdx+1, ws.StoryID, roleStr, ws.State))
 			}
-			roleStr := ""
-			if w.Role != "" {
-				roleStr = " " + string(w.Role)
+			workerTabStr = strings.Join(tabParts, " │ ")
+		} else if m.coord != nil {
+			workers := m.coord.Workers()
+			// Sort: active workers first (by ID), then completed/failed (by ID)
+			var activeIDs, doneIDs []worker.WorkerID
+			for id, w := range workers {
+				if w.State == worker.WorkerIdle {
+					continue
+				}
+				if w.State == worker.WorkerDone || w.State == worker.WorkerFailed {
+					doneIDs = append(doneIDs, id)
+				} else {
+					activeIDs = append(activeIDs, id)
+				}
 			}
-			tabParts = append(tabParts, fmt.Sprintf("%s%d:%s%s[%s]", marker, tabIdx+1, w.StoryID, roleStr, w.State))
+			sort.Slice(activeIDs, func(i, j int) bool { return activeIDs[i] < activeIDs[j] })
+			sort.Slice(doneIDs, func(i, j int) bool { return doneIDs[i] < doneIDs[j] })
+			m.workerTabOrder = append(activeIDs, doneIDs...)
+
+			var tabParts []string
+			for tabIdx, id := range m.workerTabOrder {
+				w := workers[id]
+				marker := ""
+				if id == m.activeWorkerView {
+					marker = "▸"
+				}
+				roleStr := ""
+				if w.Role != "" {
+					roleStr = " " + string(w.Role)
+				}
+				tabParts = append(tabParts, fmt.Sprintf("%s%d:%s%s[%s]", marker, tabIdx+1, w.StoryID, roleStr, w.State))
+			}
+			workerTabStr = strings.Join(tabParts, " │ ")
 		}
-		workerTabStr = strings.Join(tabParts, " │ ")
 	}
 	claudePanel := renderClaudePanel(
 		&m.claudeVP,
@@ -2993,17 +3421,17 @@ func (m *Model) generateCompletionReport() string {
 func (m *Model) inferStorySkipReason(storyID string) string {
 	// Check parallel coordinator state
 	if m.coord != nil {
-		if m.coord.IsCompleted(storyID) {
+		if m.daemonIsCompleted(storyID) {
 			return "Marked completed by coordinator but passes=false in prd.json (possible judge rejection)"
 		}
-		if m.coord.IsFailed(storyID) {
-			if errMsg := m.coord.FailedError(storyID); errMsg != "" {
+		if m.daemonIsFailed(storyID) {
+			if errMsg := m.daemonFailedError(storyID); errMsg != "" {
 				return fmt.Sprintf("Worker failed: %s", errMsg)
 			}
 			return "Worker failed (no error details)"
 		}
 		// Check if it was blocked by a failed dependency
-		if blocked, dep := m.coord.IsBlockedByFailure(storyID); blocked {
+		if blocked, dep := m.daemonIsBlockedByFailure(storyID); blocked {
 			return fmt.Sprintf("Blocked: dependency %q failed", dep)
 		}
 		return "Not scheduled (may have been unreachable in DAG)"
@@ -3077,9 +3505,9 @@ func (m *Model) persistRunHistory() {
 	}
 
 	totalIterations := m.iteration
-	if m.coord != nil {
-		totalIterations = m.coord.IterationCount()
-		failed = m.coord.FailedCount()
+	if m.coord != nil || m.client != nil {
+		totalIterations = m.daemonIterationCount()
+		failed = m.daemonFailedCount()
 	} else {
 		failed = len(p.UserStories) - completed
 	}
@@ -3146,10 +3574,10 @@ func (m *Model) persistRunHistory() {
 
 	// Compute first-pass rate
 	var firstPassRate float64
-	if m.coord != nil {
-		pq := m.coord.GetPlanQuality()
-		if pq.TotalStories > 0 {
-			firstPassRate = float64(pq.FirstPassCount) / float64(pq.TotalStories)
+	if m.coord != nil || m.client != nil {
+		fpq := m.daemonGetPlanQuality()
+		if fpq.TotalStories > 0 {
+			firstPassRate = float64(fpq.FirstPassCount) / float64(fpq.TotalStories)
 		}
 	} else if completed > 0 {
 		// Serial mode: stories with zero judge rejections are first-pass
@@ -3220,9 +3648,9 @@ func (m *Model) buildRunSummary() costs.RunSummary {
 	}
 
 	totalIterations := m.iteration
-	if m.coord != nil {
-		totalIterations = m.coord.IterationCount()
-		failed = m.coord.FailedCount()
+	if m.coord != nil || m.client != nil {
+		totalIterations = m.daemonIterationCount()
+		failed = m.daemonFailedCount()
 	} else {
 		failed = len(p.UserStories) - completed
 	}
@@ -3282,6 +3710,18 @@ func (m *Model) dispatchInteractiveTask(taskText string) tea.Cmd {
 		return nil
 	}
 	// Bootstrap coordinator if none exists (pure interactive / post-PRD mode)
+	// When a daemon client is present, submit the task via HTTP POST
+	if m.client != nil {
+		m.claudeContent += tsLog("── Interactive task submitted ──\n")
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		if m.phase == phaseInteractive {
+			m.phase = phaseParallel
+		}
+		return daemonTaskCmd(m.client, taskText)
+	}
+
 	if m.coord == nil {
 		m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, nil)
 		m.coord.SetRunCosting(m.runCosting)
