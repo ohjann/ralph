@@ -1078,3 +1078,11 @@ func (c *Coordinator) RegisterTestWorker(w *worker.Worker) {
 		c.nextID = w.ID
 	}
 }
+
+// MarkCompleteForTest marks a story as completed (test helper only).
+func (c *Coordinator) MarkCompleteForTest(storyID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.completed[storyID] = true
+	delete(c.inProgress, storyID)
+}

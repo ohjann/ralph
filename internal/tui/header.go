@@ -82,6 +82,18 @@ func renderHeader(m *Model, width int) string {
 		badges = append(badges, lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render(
 			fmt.Sprintf("📡 :%d", m.cfg.StatusPort)))
 	}
+	if m.client != nil {
+		if m.daemonConnected {
+			uptime := ""
+			if m.daemonState != nil && m.daemonState.Uptime != "" {
+				uptime = " " + m.daemonState.Uptime
+			}
+			badges = append(badges, lipgloss.NewStyle().Foreground(colorSuccess).Render(
+				fmt.Sprintf("⚙ daemon%s", uptime)))
+		} else {
+			badges = append(badges, styleDanger.Render("⚙ daemon ✗"))
+		}
+	}
 
 	badgeStr := ""
 	if len(badges) > 0 {

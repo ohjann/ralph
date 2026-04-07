@@ -33,6 +33,11 @@ Options:
   --idle                          Launch TUI without executing (display only)
   --help, -h                      Show help
 
+Daemon:
+  --daemon                        Run as background daemon (no TUI, coordination + API only)
+  --kill                          Send SIGTERM to running daemon and exit
+  --idle-timeout <duration>       Auto-shutdown after idle (no work + no clients) for duration (default: 5m, 0 = disabled)
+
 Subcommands:
   ralph history                   Show recent run summaries (last 10)
   ralph history --all             Show all run history
@@ -41,6 +46,13 @@ Subcommands:
   ralph memory stats              Show memory file sizes and entry counts
   ralph memory consolidate        Manually trigger dream consolidation cycle
   ralph memory reset              Clear all memory files
+
+Client Commands (connect to running daemon):
+  ralph status                    Show current daemon state
+  ralph logs                      Stream daemon events to stdout
+  ralph hint <worker-id> "text"   Send a hint to a worker
+  ralph pause                     Pause all workers
+  ralph resume                    Resume paused workers
 
 Arguments:
   max_iterations                  Max loop iterations (default: 1.5x story count)

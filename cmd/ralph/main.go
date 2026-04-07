@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -28,6 +30,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/prd"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/tui"
+	"github.com/ohjann/ralphplusplus/internal/worker"
 )
 
 var Version = "dev"
@@ -78,6 +81,11 @@ func main() {
 	// Handle --kill early (no prd.json or validation needed).
 	if cfg.KillDaemon {
 		os.Exit(killDaemon(cfg.ProjectDir))
+	}
+
+	// Handle client subcommands (connect to running daemon).
+	if cfg.SubCommand != "" {
+		os.Exit(runSubCommand(cfg))
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -353,6 +361,168 @@ func runDaemonMode(cfg *config.Config) {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runSubCommand handles CLI client subcommands that connect to a running daemon.
+func runSubCommand(cfg *config.Config) int {
+	sockPath := filepath.Join(cfg.ProjectDir, ".ralph", "daemon.sock")
+
+	client, err := daemon.Connect(sockPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot connect to daemon: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Is a daemon running? Start one with: ralph --daemon")
+		return 1
+	}
+	defer client.Close()
+
+	switch cfg.SubCommand {
+	case "status":
+		return cmdStatus(client)
+	case "logs":
+		return cmdLogs(client)
+	case "hint":
+		return cmdHint(client, cfg)
+	case "pause":
+		return cmdPauseResume(client, true)
+	case "resume":
+		return cmdPauseResume(client, false)
+	}
+	return 1
+}
+
+func cmdStatus(client *daemon.DaemonClient) int {
+	state, err := client.GetState()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	// Summary line
+	activeWorkers := 0
+	for _, w := range state.Workers {
+		if w.State == "running" {
+			activeWorkers++
+		}
+	}
+	pausedStr := ""
+	if state.Paused {
+		pausedStr = " (PAUSED)"
+	}
+	fmt.Printf("Phase: %s%s | Workers: %d active | Stories: %d/%d complete",
+		state.Phase, pausedStr, activeWorkers, state.CompletedCount, state.TotalStories)
+	if state.FailedCount > 0 {
+		fmt.Printf(" | %d failed", state.FailedCount)
+	}
+	if state.CostTotals.TotalCost > 0 {
+		fmt.Printf(" | Cost: $%.2f", state.CostTotals.TotalCost)
+	}
+	fmt.Println()
+
+	if state.AllDone {
+		fmt.Println("\nAll stories complete.")
+		return 0
+	}
+
+	// Worker table
+	if len(state.Workers) > 0 {
+		fmt.Printf("\n%-8s  %-10s  %-30s  %-10s  %s\n",
+			"WORKER", "STORY", "TITLE", "STATE", "ITER")
+		fmt.Printf("%-8s  %-10s  %-30s  %-10s  %s\n",
+			"────────", "──────────", "──────────────────────────────", "──────────", "────")
+		for _, w := range state.Workers {
+			title := w.StoryTitle
+			if len(title) > 30 {
+				title = title[:27] + "..."
+			}
+			fmt.Printf("%-8d  %-10s  %-30s  %-10s  %d\n",
+				w.ID, w.StoryID, title, w.State, w.Iteration)
+		}
+	}
+
+	return 0
+}
+
+func cmdLogs(client *daemon.DaemonClient) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle Ctrl+C
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	evtCh := client.StreamEvents(ctx)
+	for evt := range evtCh {
+		switch evt.Type {
+		case daemon.EventLogLine:
+			var log daemon.LogLineEvent
+			if err := json.Unmarshal(evt.Data, &log); err == nil {
+				fmt.Printf("[%s] %s\n", log.Timestamp.Format("15:04:05"), log.Line)
+			}
+		case daemon.EventMergeResult:
+			var mr daemon.MergeResultEvent
+			if err := json.Unmarshal(evt.Data, &mr); err == nil {
+				if mr.Success {
+					fmt.Printf("[merge] %s: merged successfully\n", mr.StoryID)
+				} else {
+					fmt.Printf("[merge] %s: FAILED: %s\n", mr.StoryID, mr.Error)
+				}
+			}
+		case daemon.EventStuckAlert:
+			var sa daemon.StuckAlertEvent
+			if err := json.Unmarshal(evt.Data, &sa); err == nil {
+				fmt.Printf("[stuck] worker %d (%s): %s\n", sa.WorkerID, sa.StoryID, sa.StuckReason)
+			}
+		case daemon.EventDaemonState:
+			var s daemon.DaemonStateEvent
+			if err := json.Unmarshal(evt.Data, &s); err == nil {
+				active := 0
+				for _, w := range s.Workers {
+					if w.State == "running" {
+						active++
+					}
+				}
+				fmt.Printf("[state] %d/%d complete | %d active workers\n",
+					s.CompletedCount, s.TotalStories, active)
+			}
+		case "error":
+			fmt.Fprintf(os.Stderr, "Connection error: %s\n", string(evt.Data))
+			return 1
+		}
+	}
+	return 0
+}
+
+func cmdHint(client *daemon.DaemonClient, cfg *config.Config) int {
+	wID := worker.WorkerID(cfg.HintWorkerID)
+	if err := client.SendHint(wID, cfg.HintText); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Printf("Hint sent to worker %d\n", cfg.HintWorkerID)
+	return 0
+}
+
+func cmdPauseResume(client *daemon.DaemonClient, pause bool) int {
+	var err error
+	if pause {
+		err = client.Pause()
+	} else {
+		err = client.Resume()
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	if pause {
+		fmt.Println("Workers paused")
+	} else {
+		fmt.Println("Workers resumed")
+	}
+	return 0
 }
 
 // killDaemon sends SIGTERM to a running daemon and waits for it to exit.

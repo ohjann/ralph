@@ -452,51 +452,6 @@ func TestStaleDaemonDetectionNewDaemonStartsCleanly(t *testing.T) {
 	}
 }
 
-func TestKillFlagSendsSIGTERM(t *testing.T) {
-	// Start a real daemon in a goroutine
-	dmn, _, tmpDir := testDaemonShort(t)
-	startDaemon(t, dmn)
-
-	sockPath := dmn.SocketPath()
-	pidPath := filepath.Join(tmpDir, ".ralph", "daemon.pid")
-
-	// Read PID from the file
-	pidData, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("read PID file: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
-	if err != nil {
-		t.Fatalf("parse PID: %v", err)
-	}
-
-	// Verify the process is alive
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		t.Fatalf("FindProcess: %v", err)
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		t.Fatalf("process should be alive: %v", err)
-	}
-
-	// Send SIGTERM — this exercises the same code path as --kill
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("Signal(SIGTERM): %v", err)
-	}
-
-	// Wait for socket and PID file to be cleaned up
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		_, sockErr := os.Stat(sockPath)
-		_, pidErr := os.Stat(pidPath)
-		if os.IsNotExist(sockErr) && os.IsNotExist(pidErr) {
-			return // success — daemon cleaned up on SIGTERM
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Error("daemon did not clean up socket/PID files after SIGTERM within 5s")
-}
-
 func TestIsolatedTempDirectories(t *testing.T) {
 	// Start two daemons concurrently and verify no socket path conflicts
 	dmn1, _, tmpDir1 := testDaemonShort(t)
@@ -542,8 +497,10 @@ func TestIsolatedTempDirectories(t *testing.T) {
 }
 
 // TestKillDaemonFunction tests the killDaemon flow end-to-end by starting a
-// daemon subprocess and sending SIGTERM via os.FindProcess, matching what
-// the --kill flag does in main.go.
+// daemon in a goroutine and sending SIGTERM via os.FindProcess, matching what
+// the --kill flag does in main.go. Note: this sends SIGTERM to the test
+// process itself, which works because the daemon's signal handler runs
+// in-process and calls cancel() on the daemon's context.
 func TestKillDaemonFunction(t *testing.T) {
 	// Start a daemon, send SIGTERM via the kill path, verify cleanup
 	dmn, _, tmpDir := testDaemonShort(t)
@@ -593,5 +550,79 @@ func TestKillDaemonFunction(t *testing.T) {
 		}
 	}
 	t.Error("killDaemon flow: socket was not removed within 10s after SIGTERM")
+}
+
+func TestIdleTimeoutShutdown(t *testing.T) {
+	dmn, coord, _ := testDaemonShort(t)
+	// Set a very short idle timeout
+	dmn.Cfg.IdleTimeout = 500 * time.Millisecond
+
+	// Mark the only story as complete before starting
+	coord.MarkCompleteForTest("T-001")
+
+	startDaemon(t, dmn)
+	// Do NOT defer Shutdown — the daemon should shut itself down
+
+	// Verify daemon is alive initially
+	client, err := daemon.Connect(dmn.SocketPath())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	_ = client // GetState was called in Connect, no persistent SSE subscription
+
+	// Wait for idle timeout to fire (500ms + buffer)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(dmn.SocketPath()); os.IsNotExist(err) {
+			return // success — daemon shut itself down
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	dmn.Shutdown() // cleanup if test fails
+	t.Error("daemon did not auto-shutdown after idle timeout")
+}
+
+func TestIdleTimeoutResetOnClientConnect(t *testing.T) {
+	dmn, coord, _ := testDaemonShort(t)
+	dmn.Cfg.IdleTimeout = 500 * time.Millisecond
+
+	coord.MarkCompleteForTest("T-001")
+
+	startDaemon(t, dmn)
+	defer dmn.Shutdown()
+
+	// Connect a client with SSE subscription to prevent idle shutdown
+	client, err := daemon.Connect(dmn.SocketPath())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	evtCh := client.StreamEvents(ctx)
+
+	// Drain initial state
+	select {
+	case <-evtCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial event")
+	}
+
+	// Wait longer than the idle timeout — daemon should still be alive
+	// because we have a connected SSE client
+	time.Sleep(800 * time.Millisecond)
+
+	// Verify daemon is still alive
+	client2, err := daemon.Connect(dmn.SocketPath())
+	if err != nil {
+		t.Fatalf("daemon should still be alive with connected client: %v", err)
+	}
+	state, err := client2.GetState()
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if !state.AllDone {
+		t.Error("expected AllDone to be true")
+	}
 }
 

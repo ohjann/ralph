@@ -105,6 +105,9 @@ func (a *APIServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Send initial state snapshot
 	a.writeSSEEvent(w, flusher, a.daemon.buildStateEvent())
 
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -116,6 +119,11 @@ func (a *APIServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			a.writeSSEEvent(w, flusher, evt)
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }
@@ -341,6 +349,8 @@ func (d *Daemon) BuildStateSnapshot() DaemonStateEvent {
 		d.RunCosting.Unlock()
 	}
 
+	uptime := time.Since(d.startTime).Truncate(time.Second).String()
+
 	return DaemonStateEvent{
 		Workers:        workerStatuses,
 		Stories:        storyStatuses,
@@ -353,6 +363,8 @@ func (d *Daemon) BuildStateSnapshot() DaemonStateEvent {
 		IterationCount: d.Coord.IterationCount(),
 		AllDone:        d.Coord.AllDone(),
 		CostTotals:     costTotals,
+		Uptime:         uptime,
+		ClientCount:    d.ClientCount(),
 		PlanQuality: PlanQualityInfo{
 			FirstPassCount: pq.FirstPassCount,
 			RetryCount:     pq.RetryCount,

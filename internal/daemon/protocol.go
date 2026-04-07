@@ -24,6 +24,8 @@ type DaemonStateEvent struct {
 	AllDone        bool                              `json:"all_done"`
 	CostTotals     CostTotals                        `json:"cost_totals"`
 	PlanQuality    PlanQualityInfo                   `json:"plan_quality"`
+	Uptime         string                            `json:"uptime"`
+	ClientCount    int                               `json:"client_count"`
 	Timestamp      time.Time                         `json:"timestamp"`
 }
 

@@ -29,6 +29,7 @@ internal/
   costs/            Token usage tracking, pricing, run history
   notify/           Push notifications via ntfy.sh
   statuspage/       Remote HTTP status page with SSE live updates
+  daemon/           Background daemon (event loop, HTTP API over Unix socket, client library, IPC protocol)
 ralph-prompt.md     Prompt template for Claude Code iterations
 judge-prompt.md     Review template for judge verification
 skills/ralph/       Claude Code skill for converting plans to prd.json
@@ -123,3 +124,6 @@ Ralph creates and manages these files in the project directory:
 | `.ralph/run-history.json` | Accumulated run summaries with cost data |
 | `.ralph/workspace-setup.sh` | (Optional) Custom worker workspace initialization |
 | `.ralph/workspace-teardown.sh` | (Optional) Custom worker workspace cleanup |
+| `.ralph/daemon.sock` | Unix domain socket for daemon API (created at runtime) |
+| `.ralph/daemon.pid` | Daemon process ID file (created at runtime) |
+| `.ralph/daemon.log` | Daemon stdout/stderr when forked as background process |

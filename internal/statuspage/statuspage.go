@@ -116,6 +116,13 @@ func New() *StatusServer {
 	}
 }
 
+// ConnectedClients returns the number of connected SSE clients.
+func (s *StatusServer) ConnectedClients() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.clients)
+}
+
 // Start starts the HTTP server on the given port. If the port is already in
 // use, it tries up to 10 consecutive ports before giving up. It returns the
 // actual port the server is listening on.
@@ -237,6 +244,9 @@ func (s *StatusServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case msg, ok := <-client.ch:
@@ -247,6 +257,11 @@ func (s *StatusServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

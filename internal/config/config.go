@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 )
@@ -62,8 +63,12 @@ type Config struct {
 	NoSimplify         bool   // --no-simplify: skip per-story simplify pass
 	NoFusion           bool   // --no-fusion: disable automatic fusion mode for complex stories
 	FusionWorkers      int    // --fusion-workers N: competing implementations per complex story (default: 2)
-	DaemonMode         bool   // --daemon: run as background daemon (no TUI)
-	KillDaemon         bool   // --kill: send SIGTERM to running daemon and exit
+	DaemonMode         bool          // --daemon: run as background daemon (no TUI)
+	KillDaemon         bool          // --kill: send SIGTERM to running daemon and exit
+	IdleTimeout        time.Duration // --idle-timeout: auto-shutdown after this duration idle (default: 5m, 0 = disabled)
+	SubCommand         string        // client subcommand: "status", "logs", "hint", "pause", "resume"
+	HintWorkerID       int           // worker ID for "hint" subcommand
+	HintText           string        // hint text for "hint" subcommand
 
 	// Derived paths
 	PRDFile        string
@@ -86,7 +91,54 @@ func Parse(args []string) (*Config, error) {
 		UtilityModel:       "haiku",
 		AutoMaxWorkers:     5,
 		FusionWorkers:      2,
+		IdleTimeout:        5 * time.Minute,
 		Memory: DefaultMemoryConfig(),
+	}
+
+	// Check for client subcommands (connect to running daemon).
+	if len(args) > 0 {
+		switch args[0] {
+		case "status", "logs", "pause", "resume", "hint":
+			cfg.SubCommand = args[0]
+			// Parse optional --dir and subcommand-specific args
+			for j := 1; j < len(args); j++ {
+				switch args[j] {
+				case "--dir":
+					if j+1 < len(args) {
+						cfg.ProjectDir = args[j+1]
+						j++
+					}
+				default:
+					if strings.HasPrefix(args[j], "--dir=") {
+						cfg.ProjectDir = args[j][len("--dir="):]
+					} else if cfg.SubCommand == "hint" && cfg.HintWorkerID == 0 {
+						n, err := strconv.Atoi(args[j])
+						if err != nil {
+							return nil, fmt.Errorf("hint: invalid worker ID %q", args[j])
+						}
+						cfg.HintWorkerID = n
+					} else if cfg.SubCommand == "hint" && cfg.HintText == "" {
+						cfg.HintText = args[j]
+					}
+				}
+			}
+			if cfg.SubCommand == "hint" && (cfg.HintWorkerID == 0 || cfg.HintText == "") {
+				return nil, fmt.Errorf("usage: ralph hint <worker-id> \"hint text\"")
+			}
+			if cfg.ProjectDir == "" {
+				cwd, err := os.Getwd()
+				if err != nil {
+					return nil, fmt.Errorf("cannot determine working directory: %w", err)
+				}
+				cfg.ProjectDir = cwd
+			}
+			abs, err := filepath.Abs(cfg.ProjectDir)
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve project dir: %w", err)
+			}
+			cfg.ProjectDir = abs
+			return cfg, nil
+		}
 	}
 
 	// Check for "history" subcommand as first argument.
@@ -334,6 +386,16 @@ func Parse(args []string) (*Config, error) {
 		case "--kill":
 			cfg.KillDaemon = true
 			i++
+		case "--idle-timeout":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--idle-timeout requires a duration (e.g. 5m, 30s, 0)")
+			}
+			d, err := time.ParseDuration(args[i+1])
+			if err != nil {
+				return nil, fmt.Errorf("--idle-timeout: invalid duration %q", args[i+1])
+			}
+			cfg.IdleTimeout = d
+			i += 2
 		case "--fusion-workers":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--fusion-workers requires a number")
@@ -499,6 +561,15 @@ func Parse(args []string) (*Config, error) {
 					n = 2
 				}
 				cfg.FusionWorkers = n
+				i++
+				continue
+			}
+			if strings.HasPrefix(args[i], "--idle-timeout=") {
+				d, err := time.ParseDuration(args[i][len("--idle-timeout="):])
+				if err != nil {
+					return nil, fmt.Errorf("--idle-timeout: invalid duration %q", args[i][len("--idle-timeout="):])
+				}
+				cfg.IdleTimeout = d
 				i++
 				continue
 			}
@@ -757,6 +828,14 @@ Monitoring:
 Daemon:
   --daemon                        Run as a background daemon (no TUI, coordination loop + API only)
   --kill                          Send SIGTERM to a running daemon and wait for exit
+  --idle-timeout <duration>       Auto-shutdown after idle (no work + no clients) for duration (default: 5m, 0 = disabled)
+
+Client Commands (connect to running daemon):
+  ralph status                    Show current daemon state
+  ralph logs                      Stream daemon events to stdout
+  ralph hint <worker-id> "text"   Send a hint to a worker
+  ralph pause                     Pause all workers
+  ralph resume                    Resume paused workers
 
 Display:
   --no-guy                        Disable sprite mascot overlay

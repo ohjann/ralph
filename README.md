@@ -77,6 +77,8 @@ ralph
 - Ad-hoc tasks via TUI input bar, no prd.json needed
 - Opus for architect/debugger, Sonnet for implementer/reviewer, Haiku for utility tasks (all configurable)
 - Orchestration state checkpointed after every story event; resume on restart
+- Daemon/client architecture: the TUI is a disposable client over Unix socket IPC — if it crashes, workers keep running; just run `ralph` again to reconnect
+- CLI client mode (`ralph status`, `ralph logs`, `ralph hint`, `ralph pause`, `ralph resume`) for headless control from scripts or Claude Code
 
 ## Documentation
 

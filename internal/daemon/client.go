@@ -207,3 +207,8 @@ func (c *DaemonClient) SubmitTask(description string) error {
 		Description: description,
 	})
 }
+
+// Close releases idle connections held by the client.
+func (c *DaemonClient) Close() {
+	c.httpClient.CloseIdleConnections()
+}

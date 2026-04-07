@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,8 +39,9 @@ type Daemon struct {
 	statusMu     sync.Mutex
 
 	// SSE broadcaster for daemon events
-	sseMu      sync.Mutex
-	sseClients []chan DaemonEvent
+	sseMu       sync.Mutex
+	sseClients  []chan DaemonEvent
+	clientCount atomic.Int32
 
 	// HTTP API server over Unix socket
 	apiServer *APIServer
@@ -50,6 +52,9 @@ type Daemon struct {
 	pidFile    string
 	socketPath string
 	startTime  time.Time
+
+	// Client connect/disconnect notifications for idle timer
+	clientNotifyCh chan struct{}
 
 	// Coordination state
 	totalStories     int
@@ -77,9 +82,10 @@ func New(cfg *config.Config, coord *coordinator.Coordinator, opts DaemonOpts) *D
 		cancel:       cancel,
 		pidFile:      filepath.Join(cfg.ProjectDir, ".ralph", "daemon.pid"),
 		socketPath:   filepath.Join(cfg.ProjectDir, ".ralph", "daemon.sock"),
-		startTime:    time.Now(),
-		totalStories: opts.TotalStories,
-		sseClients:   make([]chan DaemonEvent, 0),
+		startTime:      time.Now(),
+		totalStories:   opts.TotalStories,
+		sseClients:     make([]chan DaemonEvent, 0),
+		clientNotifyCh: make(chan struct{}, 1),
 	}
 }
 
@@ -135,7 +141,18 @@ func (d *Daemon) Subscribe() chan DaemonEvent {
 	d.sseMu.Lock()
 	d.sseClients = append(d.sseClients, ch)
 	d.sseMu.Unlock()
+	d.clientCount.Add(1)
+	// Notify event loop to re-check idle state
+	select {
+	case d.clientNotifyCh <- struct{}{}:
+	default:
+	}
 	return ch
+}
+
+// ClientCount returns the number of connected SSE clients on the daemon API.
+func (d *Daemon) ClientCount() int {
+	return int(d.clientCount.Load())
 }
 
 // Unsubscribe removes a previously subscribed SSE channel.
@@ -146,9 +163,27 @@ func (d *Daemon) Unsubscribe(ch chan DaemonEvent) {
 		if c == ch {
 			d.sseClients = append(d.sseClients[:i], d.sseClients[i+1:]...)
 			close(ch)
+			d.clientCount.Add(-1)
+			// Notify event loop to re-check idle state
+			select {
+			case d.clientNotifyCh <- struct{}{}:
+			default:
+			}
 			return
 		}
 	}
+}
+
+// TotalConnectedClients returns the total number of connected clients
+// across both the daemon API and the status page.
+func (d *Daemon) TotalConnectedClients() int {
+	count := d.ClientCount()
+	d.statusMu.Lock()
+	if d.statusServer != nil {
+		count += d.statusServer.ConnectedClients()
+	}
+	d.statusMu.Unlock()
+	return count
 }
 
 // broadcast sends a DaemonEvent to all SSE subscribers.
@@ -173,20 +208,67 @@ func (d *Daemon) eventLoop() {
 	mergeCh := make(chan coordinator.MergeCompleteMsg, 8)
 	fusionCh := make(chan coordinator.FusionCompareDoneMsg, 8)
 
+	// Idle timeout: auto-shutdown when all work done and no clients connected.
+	// A nil channel blocks forever in select, which is the desired default.
+	var idleTimer *time.Timer
+	var idleCh <-chan time.Time
+
+	checkIdle := func() {
+		if d.Cfg.IdleTimeout <= 0 {
+			return
+		}
+		if d.Coord.AllDone() && d.TotalConnectedClients() == 0 {
+			if idleTimer == nil {
+				debuglog.Log("daemon: idle timeout started (%v)", d.Cfg.IdleTimeout)
+				idleTimer = time.NewTimer(d.Cfg.IdleTimeout)
+				idleCh = idleTimer.C
+			}
+		} else if idleTimer != nil {
+			idleTimer.Stop()
+			idleTimer = nil
+			idleCh = nil
+			debuglog.Log("daemon: idle timeout cancelled (work or clients present)")
+		}
+	}
+
+	// Periodic idle check (covers cases where no events flow through the loop)
+	idleCheck := time.NewTicker(5 * time.Second)
+	defer idleCheck.Stop()
+
+	// Run initial idle check
+	checkIdle()
+
 	for {
 		select {
 		case <-d.ctx.Done():
 			debuglog.Log("daemon: context cancelled, exiting event loop")
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
 			return
 
 		case u := <-d.Coord.UpdateCh():
 			d.handleWorkerUpdate(u, mergeCh, fusionCh)
+			checkIdle()
 
 		case msg := <-mergeCh:
 			d.handleMergeComplete(msg)
+			checkIdle()
 
 		case msg := <-fusionCh:
 			d.handleFusionComplete(msg, mergeCh)
+			checkIdle()
+
+		case <-d.clientNotifyCh:
+			checkIdle()
+
+		case <-idleCheck.C:
+			checkIdle()
+
+		case <-idleCh:
+			debuglog.Log("daemon: idle timeout expired, shutting down")
+			d.cancel()
+			return
 		}
 	}
 }
