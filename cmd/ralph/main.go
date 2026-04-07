@@ -337,13 +337,16 @@ func runDaemonMode(cfg *config.Config) {
 		}
 	}
 
-	if len(incomplete) == 0 {
+	if len(incomplete) == 0 && !cfg.IdleMode {
 		fmt.Fprintln(os.Stderr, "daemon: no incomplete stories")
 		os.Exit(0)
 	}
 
 	// Build DAG — use PRD-provided deps if available, else analyze
-	storyDAG := dag.BuildDAG(context.Background(), cfg.ProjectDir, p, incomplete, cfg.UtilityModel)
+	var storyDAG *dag.DAG
+	if len(incomplete) > 0 {
+		storyDAG = dag.BuildDAG(context.Background(), cfg.ProjectDir, p, incomplete, cfg.UtilityModel)
+	}
 
 	cfg.ResolveAutoWorkers(len(incomplete))
 
