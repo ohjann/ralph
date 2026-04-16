@@ -142,6 +142,15 @@ func (c *Coordinator) SetNotifier(n *notify.Notifier) {
 	c.notifier = n
 }
 
+// SetDAG installs the dependency DAG after construction. Used when DAG
+// analysis is deferred so the daemon API can start serving before the
+// (potentially slow) LLM-based dependency analysis completes.
+func (c *Coordinator) SetDAG(d *dag.DAG) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dag = d
+}
+
 // Notifier returns the coordinator's notifier (may be nil).
 func (c *Coordinator) Notifier() *notify.Notifier {
 	return c.notifier

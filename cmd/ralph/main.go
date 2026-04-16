@@ -342,16 +342,12 @@ func runDaemonMode(cfg *config.Config) {
 		os.Exit(0)
 	}
 
-	// Build DAG — use PRD-provided deps if available, else analyze
-	var storyDAG *dag.DAG
-	if len(incomplete) > 0 {
-		storyDAG = dag.BuildDAG(context.Background(), cfg.ProjectDir, p, incomplete, cfg.UtilityModel)
-	}
-
 	cfg.ResolveAutoWorkers(len(incomplete))
 
-	// Create coordinator
-	coord := coordinator.New(cfg, storyDAG, cfg.Workers, incomplete)
+	// Create coordinator without a DAG — the DAG is built in the daemon's
+	// Prepare phase (after the API socket is serving) so the parent process
+	// doesn't time out waiting for dependency analysis to finish.
+	coord := coordinator.New(cfg, nil, cfg.Workers, incomplete)
 	rc := costs.NewRunCosting()
 	coord.SetRunCosting(rc)
 
@@ -364,6 +360,13 @@ func runDaemonMode(cfg *config.Config) {
 		RunCosting:   rc,
 		Version:      Version,
 		TotalStories: len(incomplete),
+		Prepare: func(ctx context.Context) error {
+			if len(incomplete) == 0 {
+				return nil
+			}
+			coord.SetDAG(dag.BuildDAG(ctx, cfg.ProjectDir, p, incomplete, cfg.UtilityModel))
+			return nil
+		},
 	})
 
 	if err := d.Run(); err != nil {

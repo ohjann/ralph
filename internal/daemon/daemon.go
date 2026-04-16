@@ -33,6 +33,7 @@ type Daemon struct {
 	Notifier   *notify.Notifier
 	RunCosting *costs.RunCosting
 	Version    string
+	prepare    func(ctx context.Context) error
 
 	// Status page
 	statusServer *statuspage.StatusServer
@@ -67,6 +68,10 @@ type DaemonOpts struct {
 	RunCosting   *costs.RunCosting
 	Version      string
 	TotalStories int
+	// Prepare runs after the API socket is serving but before the event
+	// loop starts. Use it for slow setup (e.g. LLM-based DAG analysis) so
+	// clients can attach during the wait instead of timing out.
+	Prepare func(ctx context.Context) error
 }
 
 // New creates a new Daemon.
@@ -78,6 +83,7 @@ func New(cfg *config.Config, coord *coordinator.Coordinator, opts DaemonOpts) *D
 		Notifier:     opts.Notifier,
 		RunCosting:   opts.RunCosting,
 		Version:      opts.Version,
+		prepare:      opts.Prepare,
 		ctx:          ctx,
 		cancel:       cancel,
 		pidFile:      filepath.Join(cfg.ProjectDir, ".ralph", "daemon.pid"),
@@ -108,6 +114,14 @@ func (d *Daemon) Run() error {
 		// Non-fatal — daemon can still operate without the API
 	} else {
 		d.apiServer = apiServer
+	}
+
+	// Run any slow setup (e.g. DAG analysis) now that the API is serving.
+	// Clients attached during this window see /api/state and can wait.
+	if d.prepare != nil {
+		if err := d.prepare(d.ctx); err != nil {
+			return fmt.Errorf("daemon prepare: %w", err)
+		}
 	}
 
 	// Initial scheduling (skip if no stories, e.g. --idle with all complete)

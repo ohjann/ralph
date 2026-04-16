@@ -358,6 +358,11 @@ func copyDirSelective(src, dst, storyID string) error {
 			return os.MkdirAll(target, 0o755)
 		}
 
+		// Skip non-regular files (sockets, fifos, devices) — e.g. .ralph/daemon.sock
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
 		// Skip large log files
 		if info.Size() > 10*1024*1024 {
 			return nil
@@ -381,6 +386,11 @@ func copyDir(src, dst string) error {
 
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+
+		// Skip non-regular files (sockets, fifos, devices)
+		if !info.Mode().IsRegular() {
+			return nil
 		}
 
 		// Skip large log files
