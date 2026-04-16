@@ -867,6 +867,9 @@ Examples:
 History Subcommand:
   ralph history                          Show last 10 runs
   ralph history --all                    Show all runs
+  ralph history --stats                  Show aggregate statistics across all runs
+  ralph history --compare                Compare runs grouped by model
+  ralph history --compare --by flags     Compare runs grouped by feature-flag configuration
 
 Memory Subcommands:
   ralph memory stats                     Show memory file sizes and entry counts

@@ -43,6 +43,9 @@ Subcommands:
   ralph history --all             Show all run history
   ralph history --stats           Show aggregate statistics across all runs
   ralph history --compare         Compare runs grouped by model
+  ralph history --compare --by flags
+                                  Compare runs grouped by feature-flag configuration
+                                  (groups by --no-architect, --no-fusion, etc.)
   ralph memory stats              Show memory file sizes and entry counts
   ralph memory consolidate        Manually trigger dream consolidation cycle
   ralph memory reset              Clear all memory files

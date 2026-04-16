@@ -904,8 +904,11 @@ func (m *Model) contextContentWidth() int {
 func (m *Model) Init() tea.Cmd {
 	setTitle := tea.SetWindowTitle("✦ ralph")
 
-	// Detect anti-patterns from prior runs (cheap: reads run-history.json + events.jsonl).
-	if patterns, err := memory.DetectAntiPatterns(m.cfg.ProjectDir); err == nil {
+	// Populate anti-patterns for display. In-process mode reuses the coordinator's
+	// already-detected patterns; daemon-client mode reads from disk (separate process).
+	if m.coord != nil {
+		m.antiPatternsContent = renderAntiPatternsContent(m.coord.GetAntiPatterns())
+	} else if patterns, err := memory.DetectAntiPatterns(m.cfg.ProjectDir); err == nil {
 		m.antiPatternsContent = renderAntiPatternsContent(patterns)
 	}
 
