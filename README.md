@@ -35,6 +35,25 @@ Memory between iterations comes from jj history, `progress.md`, `prd.json` statu
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** installed and authenticated (`npm install -g @anthropic-ai/claude-code`)
 - **[jj (Jujutsu)](https://martinvonz.github.io/jj/)** for version control. Ralph uses jj, not git. The workspace isolation and mutable commit model make parallel workers much simpler, but it means you need jj installed and initialized in your project (`jj git init --colocate` in an existing git repo)
 
+### Runtime dependencies
+
+Pre-built tarballs ship only the `ralph` binary. You still need the following on your `$PATH` at runtime:
+
+- **`jj`** and **`git`** — required for version control operations
+- **`claude`** — the Claude Code CLI, installed separately via `npm install -g @anthropic-ai/claude-code`
+
+## Installing a released tarball
+
+Tagged releases (`v*`) publish darwin and linux tarballs with SHA256 checksums via GoReleaser. A single-binary install on macOS arm64 looks like:
+
+```bash
+curl -L https://github.com/ohjann/ralphplusplus/releases/latest/download/ralph-<version>-darwin-arm64.tar.gz \
+  | tar xz
+./ralph --help
+```
+
+Homebrew formula authorship is out of scope for this project; consume the tarballs from any standard installer.
+
 
 ## Quick Start
 
