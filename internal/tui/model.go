@@ -182,7 +182,7 @@ type Model struct {
 	settings settingsState
 }
 
-func NewModel(cfg *config.Config, version string) *Model {
+func NewModel(cfg *config.Config, version string, client *daemon.DaemonClient) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Always create notifier for terminal notifications; ntfy push only fires if topic is set
@@ -227,6 +227,7 @@ func NewModel(cfg *config.Config, version string) *Model {
 	return &Model{
 		cfg:            cfg,
 		version:        version,
+		client:         client,
 		ctx:            ctx,
 		cancel:         cancel,
 		phase:          phaseInit,

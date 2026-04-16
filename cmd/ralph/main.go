@@ -180,7 +180,13 @@ func main() {
 		}
 	}
 
-	model := tui.NewModel(cfg, Version)
+	client, err := daemon.Connect(sockPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not connect to daemon at %s: %v\n", sockPath, err)
+		client = nil
+	}
+
+	model := tui.NewModel(cfg, Version, client)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
