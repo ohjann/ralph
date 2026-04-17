@@ -1810,14 +1810,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevClaudeLen = len(m.claudeContent)
 		}
 
-		// Check for existing checkpoint to offer resume
+		// Check for existing checkpoint to offer resume. If the current PRD
+		// shares at least one story ID with the checkpoint, it's the same
+		// run and resume is meaningful. If there's zero overlap, the PRD
+		// was replaced with an entirely new story set (e.g. a new project
+		// phase) and the checkpoint is stale — delete it silently rather
+		// than prompting with story IDs the user no longer cares about.
 		cp, exists, err := checkpoint.Load(m.cfg.ProjectDir)
 		if err == nil && exists {
-			m.loadedCheckpoint = &cp
 			currentHash, hashErr := checkpoint.ComputePRDHash(m.cfg.PRDFile)
-			m.checkpointPRDChanged = hashErr != nil || currentHash != cp.PRDHash
-			m.phase = phaseResumePrompt
-			return m, tea.Batch(cmds...)
+			if checkpointOverlapsPRD(&cp, m.cfg.PRDFile) {
+				m.loadedCheckpoint = &cp
+				m.checkpointPRDChanged = hashErr != nil || currentHash != cp.PRDHash
+				m.phase = phaseResumePrompt
+				return m, tea.Batch(cmds...)
+			}
+			m.claudeContent += tsLog("── Checkpoint from previous PRD discarded — no story IDs in common ──\n")
+			m.claudeVP.SetContent(m.claudeContent)
+			m.prevClaudeLen = len(m.claudeContent)
+			_ = checkpoint.Delete(m.cfg.ProjectDir)
 		}
 		// Compute PRD hash for checkpointing
 		if hash, err := checkpoint.ComputePRDHash(m.cfg.PRDFile); err == nil {
@@ -2820,6 +2831,44 @@ func (m *Model) checkPRDAllComplete() bool {
 		return false
 	}
 	return p.AllComplete()
+}
+
+// checkpointOverlapsPRD returns true when at least one story ID the
+// checkpoint knows about is also in the current PRD. Used to distinguish
+// "PRD was edited, resume makes sense" from "PRD was replaced with a new
+// phase, the checkpoint is stale". Checks the DAG first (most complete
+// story set), falling back to completed/failed/in-progress lists if the
+// DAG wasn't persisted.
+func checkpointOverlapsPRD(cp *checkpoint.Checkpoint, prdFile string) bool {
+	p, err := prd.Load(prdFile)
+	if err != nil || len(p.UserStories) == 0 {
+		return false
+	}
+	prdIDs := make(map[string]bool, len(p.UserStories))
+	for _, s := range p.UserStories {
+		prdIDs[s.ID] = true
+	}
+	for id := range cp.DAG {
+		if prdIDs[id] {
+			return true
+		}
+	}
+	for _, id := range cp.CompletedStories {
+		if prdIDs[id] {
+			return true
+		}
+	}
+	for id := range cp.FailedStories {
+		if prdIDs[id] {
+			return true
+		}
+	}
+	for _, id := range cp.InProgress {
+		if prdIDs[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // transitionToComplete handles the "all stories done" transition.
