@@ -268,10 +268,10 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		archParts.UserMessage = AppendParallelMode(archParts.UserMessage, w.StoryID)
 
 		archLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect"
-		archResult, err := runner.RunClaude(w.Ctx, ws.Dir, archParts.UserMessage, archLogPath, runner.RunClaudeOpts{
-			Iteration:    w.Iteration,
+		archResult, err := runner.RunClaudeForIteration(w.Ctx, cfg, ws.Dir, archParts.UserMessage, archLogPath, runner.IterationOpts{
 			StoryID:      w.StoryID,
 			Role:         roles.RoleArchitect,
+			Iter:         w.Iteration,
 			Model:        ResolveModel(roles.RoleArchitect, cfg),
 			SystemAppend: archParts.SystemAppend,
 		})
@@ -332,10 +332,10 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 				"The previous plan was rejected: " + reason + "\n" +
 				"Produce a revised plan that names specific files to modify and addresses each acceptance criterion.\n"
 			retryLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".architect.retry"
-			retryResult, err := runner.RunClaude(w.Ctx, ws.Dir, retryParts.UserMessage, retryLogPath, runner.RunClaudeOpts{
-				Iteration:    w.Iteration,
+			retryResult, err := runner.RunClaudeForIteration(w.Ctx, cfg, ws.Dir, retryParts.UserMessage, retryLogPath, runner.IterationOpts{
 				StoryID:      w.StoryID,
 				Role:         roles.RoleArchitect,
+				Iter:         w.Iteration,
 				Model:        ResolveModel(roles.RoleArchitect, cfg),
 				SystemAppend: retryParts.SystemAppend,
 			})
@@ -379,14 +379,14 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	implParts.UserMessage = AppendParallelMode(implParts.UserMessage, w.StoryID)
 
 	logPath := runner.LogFilePath(wsLogDir, w.Iteration)
-	implOpts := runner.RunClaudeOpts{
-		Iteration:    w.Iteration,
+	implOpts := runner.IterationOpts{
 		StoryID:      w.StoryID,
 		Role:         implRole,
+		Iter:         w.Iteration,
 		Model:        ResolveModel(implRole, cfg),
 		SystemAppend: implParts.SystemAppend,
 	}
-	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, implParts.UserMessage, logPath, implOpts)
+	implResult, err := runner.RunClaudeForIteration(w.Ctx, cfg, ws.Dir, implParts.UserMessage, logPath, implOpts)
 	if implResult != nil {
 		claudeUsage = costs.CombineUsage(claudeUsage, implResult.TokenUsage)
 		if implResult.RateLimitInfo != nil {
@@ -434,10 +434,10 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 					w.Ctx = resumeCtx
 					w.Cancel = resumeCancel
 
-					resumeResult, resumeErr := runner.RunClaude(resumeCtx, ws.Dir, resumePrompt, logPath, runner.RunClaudeOpts{
-						Iteration:       w.Iteration,
+					resumeResult, resumeErr := runner.RunClaudeForIteration(resumeCtx, cfg, ws.Dir, resumePrompt, logPath, runner.IterationOpts{
 						StoryID:         w.StoryID,
 						Role:            implRole,
+						Iter:            w.Iteration,
 						Model:           ResolveModel(implRole, cfg),
 						ResumeSessionID: w.SessionID,
 					})
@@ -503,10 +503,10 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		} else {
 			simplifyParts.UserMessage = AppendParallelMode(simplifyParts.UserMessage, w.StoryID)
 			simplifyLogPath := runner.LogFilePath(wsLogDir, w.Iteration) + ".simplify"
-			simplifyResult, simplifyErr := runner.RunClaude(w.Ctx, ws.Dir, simplifyParts.UserMessage, simplifyLogPath, runner.RunClaudeOpts{
-				Iteration:    w.Iteration,
+			simplifyResult, simplifyErr := runner.RunClaudeForIteration(w.Ctx, cfg, ws.Dir, simplifyParts.UserMessage, simplifyLogPath, runner.IterationOpts{
 				StoryID:      w.StoryID,
 				Role:         roles.RoleSimplify,
+				Iter:         w.Iteration,
 				Model:        ResolveModel(roles.RoleSimplify, cfg),
 				SystemAppend: simplifyParts.SystemAppend,
 			})

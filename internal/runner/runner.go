@@ -19,6 +19,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/assets"
 	"github.com/ohjann/ralphplusplus/internal/costs"
 	"github.com/ohjann/ralphplusplus/internal/events"
+	"github.com/ohjann/ralphplusplus/internal/history"
 	"github.com/ohjann/ralphplusplus/internal/memory"
 	"github.com/ohjann/ralphplusplus/internal/prd"
 	"github.com/ohjann/ralphplusplus/internal/roles"
@@ -369,13 +370,17 @@ func buildDebuggerStuckContext(projectDir, storyID string) string {
 
 // RunClaudeOpts contains optional parameters for RunClaude.
 type RunClaudeOpts struct {
-	Iteration        int
-	StoryID          string
-	Role             roles.Role
-	Model            string
-	ResumeSessionID  string // if set, adds --resume <id> to fork from an existing session
-	ForkSession      bool   // if true, adds --fork-session to create a new session from the resumed one
-	SystemAppend     string // content passed via --append-system-prompt flag
+	Iteration       int
+	StoryID         string
+	Role            roles.Role
+	Model           string
+	ResumeSessionID string // if set, adds --resume <id> to fork from an existing session
+	ForkSession     bool   // if true, adds --fork-session to create a new session from the resumed one
+	SystemAppend    string // content passed via --append-system-prompt flag
+
+	// History, if non-nil, captures the per-iteration prompt and raw stream bytes
+	// into the run-scoped history manifest. nil means no-op.
+	History *history.IterationWriter
 }
 
 // RunClaudeResult holds the results from a RunClaude invocation.
@@ -389,7 +394,23 @@ type RunClaudeResult struct {
 // a human-readable activity file for the TUI to display. Raw JSON is written
 // to the log file for debugging. Returns accumulated token usage and rate limit
 // info from the streaming response alongside any error.
-func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) (*RunClaudeResult, error) {
+func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts ...RunClaudeOpts) (result *RunClaudeResult, err error) {
+	var hist *history.IterationWriter
+	if len(opts) > 0 {
+		hist = opts[0].History
+	}
+	if hist != nil {
+		defer func() {
+			var sid string
+			var usage *costs.TokenUsage
+			if result != nil {
+				sid = result.SessionID
+				usage = result.TokenUsage
+			}
+			_ = hist.Finish(sid, usage, err)
+		}()
+	}
+
 	logFile, err := os.Create(logFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("creating log file: %w", err)
@@ -430,6 +451,9 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = projectDir
 	cmd.Stdin = strings.NewReader(prompt)
+	if hist != nil {
+		_ = hist.WritePrompt(prompt)
+	}
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = io.MultiWriter(logFile, &stderrBuf)
 
@@ -459,11 +483,16 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 		proc.isFixStory = strings.HasPrefix(opts[0].StoryID, "FIX-")
 	}
 
+	var streamDest io.Writer = logFile
+	if hist != nil {
+		streamDest = io.MultiWriter(logFile, hist.RawStreamWriter())
+	}
+
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // up to 10MB lines
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Fprintln(logFile, line)
+		fmt.Fprintln(streamDest, line)
 		proc.processLine(line)
 	}
 	if scanErr := scanner.Err(); scanErr != nil {
@@ -471,7 +500,7 @@ func RunClaude(ctx context.Context, projectDir, prompt, logFilePath string, opts
 	}
 
 	usage := proc.tokenUsage()
-	result := &RunClaudeResult{
+	result = &RunClaudeResult{
 		TokenUsage:    &usage,
 		RateLimitInfo: proc.rateLimitInfo,
 		SessionID:     proc.SessionID(),

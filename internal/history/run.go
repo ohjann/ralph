@@ -17,9 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/costs"
-	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/userdata"
 )
 
@@ -119,16 +117,16 @@ type Run struct {
 
 // OpenRun touches the repo, stamps the process identity, creates the run dir,
 // and writes the initial manifest with Status="running".
-func OpenRun(cfg *config.Config, version string, opts RunOpts) (*Run, error) {
-	if cfg == nil {
-		return nil, errors.New("OpenRun: cfg is nil")
+func OpenRun(projectDir, prdFile, version string, opts RunOpts) (*Run, error) {
+	if projectDir == "" {
+		return nil, errors.New("OpenRun: projectDir is empty")
 	}
 	kind := opts.Kind
 	if kind == "" {
 		kind = KindDaemon
 	}
 
-	fp, meta, err := TouchRepo(cfg.ProjectDir)
+	fp, meta, err := TouchRepo(projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("touch repo: %w", err)
 	}
@@ -152,7 +150,7 @@ func OpenRun(cfg *config.Config, version string, opts RunOpts) (*Run, error) {
 	hostname, _ := os.Hostname()
 	now := time.Now().UTC()
 
-	branch, head := gitState(cfg.ProjectDir)
+	branch, head := gitState(projectDir)
 
 	m := Manifest{
 		SchemaVersion: ManifestSchemaVersion,
@@ -163,8 +161,8 @@ func OpenRun(cfg *config.Config, version string, opts RunOpts) (*Run, error) {
 		RepoName:      meta.Name,
 		GitBranch:     branch,
 		GitHeadSHA:    head,
-		PRDPath:       cfg.PRDFile,
-		PRDSnapshot:   prdSnapshot(cfg.PRDFile),
+		PRDPath:       prdFile,
+		PRDSnapshot:   prdSnapshot(prdFile),
 		RalphVersion:  version,
 		ClaudeModels:  opts.ClaudeModels,
 		Flags:         opts.Flags,
@@ -292,6 +290,28 @@ func (r *Run) Finalize(status string, totals Totals) error {
 	return r.writeManifestLocked()
 }
 
+// ComputeTotals derives per-run cost totals from the recorded iterations. It
+// is safe to call repeatedly; Finalize uses the returned value to stamp the
+// manifest when no external accounting is available.
+func (r *Run) ComputeTotals() Totals {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var t Totals
+	for _, s := range r.manifest.Stories {
+		for _, it := range s.Iterations {
+			t.Iterations++
+			if it.TokenUsage == nil {
+				continue
+			}
+			t.InputTokens += it.TokenUsage.InputTokens
+			t.OutputTokens += it.TokenUsage.OutputTokens
+			t.CacheRead += it.TokenUsage.CacheRead
+			t.CacheWrite += it.TokenUsage.CacheWrite
+		}
+	}
+	return t
+}
+
 func (r *Run) findStory(storyID string) int {
 	for i, s := range r.manifest.Stories {
 		if s.StoryID == storyID {
@@ -378,13 +398,15 @@ func (w *IterationWriter) openStream() (*os.File, error) {
 // Finish stamps EndTime, token usage, session id, and optional error on the
 // iteration record and closes the transcript file. The .meta.json sidecar is
 // rewritten so the manifest can be rebuilt if truncated.
-func (w *IterationWriter) Finish(result *runner.RunClaudeResult, runErr error) error {
+func (w *IterationWriter) Finish(sessionID string, usage *costs.TokenUsage, runErr error) error {
 	rec, updateErr := w.run.updateIteration(w.sIdx, w.iIdx, func(ir *IterationRecord) {
 		end := time.Now().UTC()
 		ir.EndTime = &end
-		if result != nil {
-			ir.TokenUsage = result.TokenUsage
-			ir.SessionID = result.SessionID
+		if usage != nil {
+			ir.TokenUsage = usage
+		}
+		if sessionID != "" {
+			ir.SessionID = sessionID
 		}
 		if runErr != nil {
 			ir.Error = runErr.Error()

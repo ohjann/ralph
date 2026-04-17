@@ -359,9 +359,10 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) {
 	_ = os.MkdirAll(logDir, 0o755)
 	logPath := runner.LogFilePath(logDir, 0) + ".architect"
 
-	if _, err := runner.RunClaude(ctx, ws.Dir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
+	if _, err := runner.RunClaudeForIteration(ctx, c.cfg, ws.Dir, archParts.UserMessage, logPath, runner.IterationOpts{
 		StoryID:      storyID,
 		Role:         roles.RoleArchitect,
+		Iter:         0,
 		Model:        worker.ResolveModel(roles.RoleArchitect, c.cfg),
 		SystemAppend: archParts.SystemAppend,
 	}); err != nil {
@@ -633,7 +634,11 @@ Be concise. Just fix the conflicts and stop.`, storyID, conflictedFiles)
 	_ = os.MkdirAll(logDir, 0o755)
 	logPath := filepath.Join(logDir, fmt.Sprintf("conflict-resolution-%s.log", storyID))
 
-	if _, err := runner.RunClaude(ctx, c.cfg.ProjectDir, prompt, logPath); err != nil {
+	if _, err := runner.RunClaudeForIteration(ctx, c.cfg, c.cfg.ProjectDir, prompt, logPath, runner.IterationOpts{
+		StoryID: storyID,
+		Role:    "conflict-resolution",
+		Iter:    0,
+	}); err != nil {
 		return fmt.Errorf("claude conflict resolution: %w", err)
 	}
 

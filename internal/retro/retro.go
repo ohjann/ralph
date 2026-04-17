@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/quality"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 )
@@ -36,7 +37,7 @@ type RetroResult struct {
 // RunRetrospective executes a post-implementation design retrospective.
 // It reads the PRD and SUMMARY.md, gets a file manifest, spawns a Claude
 // session to analyze the code holistically, and returns improvement suggestions.
-func RunRetrospective(ctx context.Context, projectDir, logDir, prdFile, model string) (*RetroResult, error) {
+func RunRetrospective(ctx context.Context, cfg *config.Config, projectDir, logDir, prdFile, model string) (*RetroResult, error) {
 	// Read PRD
 	prdData, err := os.ReadFile(prdFile)
 	if err != nil {
@@ -70,7 +71,12 @@ func RunRetrospective(ctx context.Context, projectDir, logDir, prdFile, model st
 
 	// Run Claude
 	logPath := filepath.Join(logDir, "retro.log")
-	_, err = runner.RunClaude(ctx, projectDir, prompt, logPath, runner.RunClaudeOpts{Model: model})
+	_, err = runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logPath, runner.IterationOpts{
+		StoryID: "_retro",
+		Role:    "retro",
+		Iter:    1,
+		Model:   model,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("claude retrospective: %w", err)
 	}

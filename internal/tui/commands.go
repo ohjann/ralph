@@ -253,7 +253,11 @@ The "constraints" array at the top level captures cross-cutting decisions that a
 		_ = os.MkdirAll(cfg.LogDir, 0o755)
 
 		logPath := filepath.Join(cfg.LogDir, "plan.log")
-		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		result, err := runner.RunClaudeForIteration(ctx, cfg, cfg.ProjectDir, prompt, logPath, runner.IterationOpts{
+			StoryID: "_plan",
+			Role:    "plan-generation",
+			Iter:    1,
+		})
 		_ = result
 		if err != nil {
 			return planDoneMsg{Err: fmt.Errorf("claude plan generation failed: %w", err)}
@@ -351,10 +355,10 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 			}
 
 			logPath := runner.LogFilePath(cfg.LogDir, iteration) + ".architect"
-			result, err := runner.RunClaude(ctx, cfg.ProjectDir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
-				Iteration:    iteration,
+			result, err := runner.RunClaudeForIteration(ctx, cfg, cfg.ProjectDir, archParts.UserMessage, logPath, runner.IterationOpts{
 				StoryID:      storyID,
 				Role:         roles.RoleArchitect,
+				Iter:         iteration,
 				SystemAppend: archParts.SystemAppend,
 			})
 			if result != nil {
@@ -395,10 +399,10 @@ func runClaudeCmd(ctx context.Context, cfg *config.Config, storyID string, itera
 		}
 
 		logPath := runner.LogFilePath(cfg.LogDir, iteration)
-		result, err := runner.RunClaude(ctx, cfg.ProjectDir, implParts.UserMessage, logPath, runner.RunClaudeOpts{
-			Iteration:    iteration,
+		result, err := runner.RunClaudeForIteration(ctx, cfg, cfg.ProjectDir, implParts.UserMessage, logPath, runner.IterationOpts{
 			StoryID:      storyID,
 			Role:         implRole,
+			Iter:         iteration,
 			SystemAppend: implParts.SystemAppend,
 		})
 
@@ -580,7 +584,7 @@ func qualityReviewCmd(ctx context.Context, cfg *config.Config, iteration int) te
 		}
 
 		lenses := quality.DefaultLenses()
-		results := quality.RunReviewsParallel(ctx, cfg.ProjectDir, cfg.LogDir, lenses, manifest, iteration, cfg.QualityWorkers)
+		results := quality.RunReviewsParallel(ctx, cfg, cfg.ProjectDir, cfg.LogDir, lenses, manifest, iteration, cfg.QualityWorkers)
 		assessment := quality.MergeAssessment(results, iteration)
 
 		_ = quality.WriteAssessment(cfg.ProjectDir, assessment)
@@ -595,7 +599,7 @@ func qualityFixCmd(ctx context.Context, cfg *config.Config, assessment quality.A
 		if dropped := quality.FilterStaleFindings(cfg.ProjectDir, &assessment); dropped > 0 {
 			debuglog.Log("quality fix: dropped %d stale findings (files no longer exist)", dropped)
 		}
-		err := quality.RunFix(ctx, cfg.ProjectDir, cfg.LogDir, assessment, iteration)
+		err := quality.RunFix(ctx, cfg, cfg.ProjectDir, cfg.LogDir, assessment, iteration)
 		return qualityFixDoneMsg{Err: err}
 	})
 }
@@ -634,7 +638,11 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 `, string(prdData), string(progressData))
 
 		logPath := filepath.Join(cfg.LogDir, "summary.log")
-		result, err := runner.RunClaude(ctx, cfg.ProjectDir, prompt, logPath)
+		result, err := runner.RunClaudeForIteration(ctx, cfg, cfg.ProjectDir, prompt, logPath, runner.IterationOpts{
+			StoryID: "_summary",
+			Role:    "summary",
+			Iter:    1,
+		})
 		_ = result
 
 		// Read the generated summary
@@ -646,7 +654,7 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 
 func retroCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 	return safeCmd(func() tea.Msg {
-		result, err := retro.RunRetrospective(ctx, cfg.ProjectDir, cfg.LogDir, cfg.PRDFile, cfg.UtilityModel)
+		result, err := retro.RunRetrospective(ctx, cfg, cfg.ProjectDir, cfg.LogDir, cfg.PRDFile, cfg.UtilityModel)
 		return retroDoneMsg{Result: result, Err: err}
 	})
 }
@@ -670,7 +678,13 @@ func dreamCmd(ctx context.Context, cfg *config.Config) tea.Cmd {
 
 func utilityRunClaude(cfg *config.Config) func(context.Context, string, string, string) error {
 	return func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
+		iter := int(cfg.UtilityIter.Add(1))
+		_, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logFilePath, runner.IterationOpts{
+			StoryID: "_utility",
+			Role:    "utility",
+			Iter:    iter,
+			Model:   cfg.UtilityModel,
+		})
 		return err
 	}
 }

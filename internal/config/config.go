@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/history"
 )
 
 // MemoryConfig holds configuration for the markdown-based memory system.
@@ -78,6 +80,15 @@ type Config struct {
 	ArchiveDir     string
 	LastBranchFile string
 	LogDir         string
+
+	// HistoryRun, if non-nil, is the active per-process run that iteration
+	// writers are attached to. Populated in cmd/ralph/main.go after cfg.Validate().
+	HistoryRun *history.Run
+
+	// UtilityIter is a monotonic counter used to synthesize iteration indices
+	// for utility calls (DAG analysis, dream/synthesis, memory consolidate)
+	// that have no natural per-story iteration number.
+	UtilityIter atomic.Int64
 }
 
 func Parse(args []string) (*Config, error) {

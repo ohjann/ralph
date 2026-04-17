@@ -8,17 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/costs"
-	"github.com/ohjann/ralphplusplus/internal/runner"
 )
 
 var runIDRe = regexp.MustCompile(`^run-\d{10,}-[a-z2-7]{6}$`)
 
-// newRunCfg sets up a RALPH_DATA_DIR, picks a project dir, and returns a
-// minimal config.Config. The returned project dir is *not* a git repo so the
+// newRunEnv sets up a RALPH_DATA_DIR, picks a project dir, and returns
+// (projectDir, prdFile). The returned project dir is *not* a git repo so the
 // manifest's GitBranch/GitHeadSHA are empty — which tests touch explicitly.
-func newRunCfg(t *testing.T) *config.Config {
+func newRunEnv(t *testing.T) (projectDir, prdFile string) {
 	t.Helper()
 	dataDir := t.TempDir()
 	t.Setenv("RALPH_DATA_DIR", dataDir)
@@ -27,10 +25,7 @@ func newRunCfg(t *testing.T) *config.Config {
 	if err := os.WriteFile(prdPath, []byte(`{"project":"x"}`), 0o644); err != nil {
 		t.Fatalf("write prd: %v", err)
 	}
-	return &config.Config{
-		ProjectDir: proj,
-		PRDFile:    prdPath,
-	}
+	return proj, prdPath
 }
 
 func readManifest(t *testing.T, dir string) Manifest {
@@ -47,8 +42,8 @@ func readManifest(t *testing.T, dir string) Manifest {
 }
 
 func TestOpenRun_WritesRunningManifestWithKind(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "test-ver", RunOpts{Kind: KindRetro})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "test-ver", RunOpts{Kind: KindRetro})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}
@@ -90,8 +85,8 @@ func TestOpenRun_WritesRunningManifestWithKind(t *testing.T) {
 }
 
 func TestOpenRun_EmptyKindDefaultsToDaemon(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}
@@ -102,8 +97,8 @@ func TestOpenRun_EmptyKindDefaultsToDaemon(t *testing.T) {
 }
 
 func TestStartIteration_CreatesCorrectPaths(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}
@@ -152,10 +147,7 @@ func TestStartIteration_CreatesCorrectPaths(t *testing.T) {
 		t.Fatalf("RawStreamWriter: %v", err)
 	}
 
-	if err := iw.Finish(&runner.RunClaudeResult{
-		TokenUsage: &costs.TokenUsage{InputTokens: 10, OutputTokens: 2},
-		SessionID:  "sess-1",
-	}, nil); err != nil {
+	if err := iw.Finish("sess-1", &costs.TokenUsage{InputTokens: 10, OutputTokens: 2}, nil); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 
@@ -183,8 +175,8 @@ func TestStartIteration_CreatesCorrectPaths(t *testing.T) {
 }
 
 func TestFinalize_WritesEndTimeAndTotals(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}
@@ -347,8 +339,8 @@ func TestRunIDFormat_SortableAndDistinct(t *testing.T) {
 }
 
 func TestUpdateStoryList_PreservesIterations(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}
@@ -356,7 +348,7 @@ func TestUpdateStoryList_PreservesIterations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartIteration: %v", err)
 	}
-	_ = iw.Finish(&runner.RunClaudeResult{SessionID: "s"}, nil)
+	_ = iw.Finish("s", nil, nil)
 
 	// Re-seed the list (as the DAG might evolve) — the prior iteration
 	// must survive.
@@ -376,8 +368,8 @@ func TestUpdateStoryList_PreservesIterations(t *testing.T) {
 }
 
 func TestSetStoryFinal(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}

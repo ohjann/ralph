@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 )
 
@@ -122,7 +123,7 @@ Do NOT comment on security, style, or architecture. Only testing gaps.`,
 }
 
 // RunReview runs a single lens review using Claude Code.
-func RunReview(ctx context.Context, projectDir, logDir string, lens Lens, manifest string, iteration int) LensResult {
+func RunReview(ctx context.Context, cfg *config.Config, projectDir, logDir string, lens Lens, manifest string, iteration int) LensResult {
 	prompt := fmt.Sprintf(`%s
 
 ## Changed Files
@@ -149,7 +150,11 @@ Be specific. Include file paths and line numbers. Don't flag style preferences â
 `, lens.Prompt, manifest, lens.Name)
 
 	logPath := filepath.Join(logDir, fmt.Sprintf("quality-%s-%d.log", lens.Name, iteration))
-	result, err := runner.RunClaude(ctx, projectDir, prompt, logPath)
+	result, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logPath, runner.IterationOpts{
+		StoryID: "_quality-" + lens.Name,
+		Role:    "quality-review",
+		Iter:    iteration,
+	})
 	_ = result
 	if err != nil {
 		return LensResult{Lens: lens.Name, Err: err}
@@ -163,7 +168,7 @@ Be specific. Include file paths and line numbers. Don't flag style preferences â
 }
 
 // RunReviewsParallel runs multiple lens reviews in parallel, limited to maxWorkers.
-func RunReviewsParallel(ctx context.Context, projectDir, logDir string, lenses []Lens, manifest string, iteration int, maxWorkers int) []LensResult {
+func RunReviewsParallel(ctx context.Context, cfg *config.Config, projectDir, logDir string, lenses []Lens, manifest string, iteration int, maxWorkers int) []LensResult {
 	results := make([]LensResult, len(lenses))
 	sem := make(chan struct{}, maxWorkers)
 	var wg sync.WaitGroup
@@ -174,7 +179,7 @@ func RunReviewsParallel(ctx context.Context, projectDir, logDir string, lenses [
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = RunReview(ctx, projectDir, logDir, l, manifest, iteration)
+			results[idx] = RunReview(ctx, cfg, projectDir, logDir, l, manifest, iteration)
 		}(i, lens)
 	}
 
@@ -207,7 +212,7 @@ func FilterStaleFindings(projectDir string, assessment *Assessment) int {
 }
 
 // RunFix runs a Claude Code instance to fix identified issues.
-func RunFix(ctx context.Context, projectDir, logDir string, assessment Assessment, iteration int) error {
+func RunFix(ctx context.Context, cfg *config.Config, projectDir, logDir string, assessment Assessment, iteration int) error {
 	assessmentJSON, err := json.MarshalIndent(assessment, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling assessment: %w", err)
@@ -234,7 +239,11 @@ Focus on real fixes. Don't add unnecessary comments, documentation, or refactori
 `, string(assessmentJSON))
 
 	logPath := filepath.Join(logDir, fmt.Sprintf("quality-fix-%d.log", iteration))
-	result, err := runner.RunClaude(ctx, projectDir, prompt, logPath)
+	result, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logPath, runner.IterationOpts{
+		StoryID: "_quality-fix",
+		Role:    "quality-fix",
+		Iter:    iteration,
+	})
 	_ = result
 	return err
 }

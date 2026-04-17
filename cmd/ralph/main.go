@@ -113,6 +113,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Flip any stale "running" manifests from previous crashed runs whose PIDs
+	// are no longer alive on this host. Best-effort: do not block startup.
+	if sweepErr := history.SweepInterrupted(); sweepErr != nil {
+		debuglog.Log("history: sweep failed: %v", sweepErr)
+	}
+
+	// Open a history run for the workhorse processes (daemon child, retro,
+	// memory-consolidate). The parent TUI process does not run Claude directly
+	// once a daemon is attached, so it skips OpenRun here; runRetro and
+	// runMemoryConsolidate each open their own run before reaching this line.
+	if cfg.DaemonMode {
+		hr, runErr := history.OpenRun(cfg.ProjectDir, cfg.PRDFile, Version, history.RunOpts{Kind: history.KindDaemon})
+		if runErr != nil {
+			debuglog.Log("history: open run failed: %v", runErr)
+		} else {
+			cfg.HistoryRun = hr
+			defer func() {
+				_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals())
+			}()
+		}
+	}
+
 	// Record this repo in the user-level metadata dir. Failures are
 	// non-fatal — history tracking must not block a run.
 	repoFP, _, err := history.TouchRepo(cfg.ProjectDir)
@@ -431,8 +453,18 @@ func runRetro(cfg *config.Config) int {
 		return 1
 	}
 
+	if sweepErr := history.SweepInterrupted(); sweepErr != nil {
+		debuglog.Log("history: sweep failed: %v", sweepErr)
+	}
+	if hr, runErr := history.OpenRun(cfg.ProjectDir, prdFile, Version, history.RunOpts{Kind: history.KindRetro}); runErr != nil {
+		debuglog.Log("history: open retro run failed: %v", runErr)
+	} else {
+		cfg.HistoryRun = hr
+		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals()) }()
+	}
+
 	fmt.Fprintln(os.Stderr, "Running design retrospective...")
-	result, err := retro.RunRetrospective(context.Background(), cfg.ProjectDir, logDir, prdFile, cfg.UtilityModel)
+	result, err := retro.RunRetrospective(context.Background(), cfg, cfg.ProjectDir, logDir, prdFile, cfg.UtilityModel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -1135,8 +1167,24 @@ func runMemoryConsolidate(cfg *config.Config) error {
 		return fmt.Errorf("creating log directory: %w", err)
 	}
 
+	if sweepErr := history.SweepInterrupted(); sweepErr != nil {
+		debuglog.Log("history: sweep failed: %v", sweepErr)
+	}
+	if hr, runErr := history.OpenRun(cfg.ProjectDir, cfg.PRDFile, Version, history.RunOpts{Kind: history.KindMemoryConsolidate}); runErr != nil {
+		debuglog.Log("history: open memory-consolidate run failed: %v", runErr)
+	} else {
+		cfg.HistoryRun = hr
+		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals()) }()
+	}
+
 	runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {
-		_, err := runner.RunClaude(ctx, projectDir, prompt, logFilePath, runner.RunClaudeOpts{Model: cfg.UtilityModel})
+		iter := int(cfg.UtilityIter.Add(1))
+		_, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logFilePath, runner.IterationOpts{
+			StoryID: "_memory-consolidate",
+			Role:    "memory-consolidate",
+			Iter:    iter,
+			Model:   cfg.UtilityModel,
+		})
 		return err
 	}
 
