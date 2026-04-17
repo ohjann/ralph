@@ -305,6 +305,47 @@ func WorkspaceName(storyID string) string {
 	return storyID
 }
 
+// ExportStoryState mirrors <wsDir>/.ralph/stories/<storyID>/ back to
+// <mainDir>/.ralph/stories/<storyID>/. Files that already exist in main are
+// overwritten. If the source story dir does not exist (e.g. architect wrote
+// nothing), this is a no-op. Used to persist a fusion shared-architect's
+// plan.md into the project dir before the temporary -arch workspace is
+// destroyed, so subsequent fusion workers inherit it via CopyState.
+func ExportStoryState(wsDir, mainDir, storyID string) error {
+	if storyID == "" {
+		return nil
+	}
+	src := filepath.Join(wsDir, ".ralph", "stories", storyID)
+	dst := filepath.Join(mainDir, ".ralph", "stories", storyID)
+	info, err := os.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("expected %s to be a directory", src)
+	}
+	return filepath.Walk(src, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if fi.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+		return copyFile(path, target)
+	})
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

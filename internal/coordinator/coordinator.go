@@ -287,23 +287,15 @@ func (c *Coordinator) shouldUseFusionLocked(ctx context.Context, story *prd.User
 	return complex
 }
 
-// runFusionArchitectThenSpawn runs a shared architect phase for fusion workers,
-// captures the session ID, then spawns fusion implementer workers that fork from
-// that session. If the architect fails or yields no session ID, falls back to
-// spawning regular fusion workers (each running their own architect).
+// runFusionArchitectThenSpawn runs a shared architect phase for fusion workers
+// and exports its plan.md to the main project dir, then spawns fusion
+// implementer workers. Each worker inherits the plan via the normal
+// workspace.CopyState, so shouldRunArchitect returns false and no per-worker
+// architect is run. If the architect produced nothing, workers fall back to
+// running their own architects.
 func (c *Coordinator) runFusionArchitectThenSpawn(ctx context.Context, storyID string, story *prd.UserStory, fg *fusion.FusionGroup) {
-	var architectSessionID string
-
-	// Attempt to run shared architect
 	if !c.cfg.NoArchitect {
-		architectSessionID = c.runSharedArchitect(ctx, storyID)
-	}
-
-	if architectSessionID != "" {
-		fg.ArchitectSessionID = architectSessionID
-		debuglog.Log("fusion: architect session captured for %s: %s", storyID, architectSessionID)
-	} else {
-		debuglog.Log("fusion: no architect session for %s, workers will run own architects", storyID)
+		c.runSharedArchitect(ctx, storyID)
 	}
 
 	// Spawn fusion workers
@@ -312,7 +304,6 @@ func (c *Coordinator) runFusionArchitectThenSpawn(ctx context.Context, storyID s
 	for fi := 0; fi < c.cfg.FusionWorkers; fi++ {
 		suffix := fmt.Sprintf("-f%d", fi)
 		w := c.spawnWorkerLocked(ctx, storyID, story, suffix)
-		w.ArchitectSessionID = architectSessionID
 		fg.Workers = append(fg.Workers, w.ID)
 		go worker.Run(w, c.cfg, c.updateCh)
 	}
@@ -320,14 +311,21 @@ func (c *Coordinator) runFusionArchitectThenSpawn(ctx context.Context, storyID s
 }
 
 // runSharedArchitect creates a temporary workspace, runs the architect phase,
-// and returns the captured session ID. Returns empty string on any failure.
-func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) string {
+// and exports the resulting plan.md (plus any other files the architect wrote
+// under .ralph/stories/<id>/) back to the main project dir. Fusion workers
+// then inherit the plan via the normal workspace.CopyState propagation.
+//
+// The architect's session is not resumed by subsequent fusion workers: Claude
+// CLI scopes session lookup by cwd, and the workers run from different
+// workspaces than the -arch dir. Sharing the plan.md artifact is both simpler
+// and robust to Claude CLI storage-format changes.
+func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) {
 	c.jjMu.Lock()
 	ws, err := workspace.Create(ctx, c.cfg.ProjectDir, storyID, c.cfg.WorkspaceBase, "-arch")
 	c.jjMu.Unlock()
 	if err != nil {
 		debuglog.Log("fusion: architect workspace create failed for %s: %v", storyID, err)
-		return ""
+		return
 	}
 	defer func() {
 		wsName := workspace.WorkspaceName(storyID) + "-arch"
@@ -338,11 +336,11 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) st
 
 	if err := workspace.CopyState(c.cfg.ProjectDir, ws.Dir, storyID); err != nil {
 		debuglog.Log("fusion: architect copy state failed for %s: %v", storyID, err)
-		return ""
+		return
 	}
 	if _, err := workspace.RunSetup(ctx, ws.Dir); err != nil {
 		debuglog.Log("fusion: architect workspace setup failed for %s: %v", storyID, err)
-		return ""
+		return
 	}
 
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
@@ -353,7 +351,7 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) st
 	})
 	if err != nil {
 		debuglog.Log("fusion: architect prompt build failed for %s: %v", storyID, err)
-		return ""
+		return
 	}
 	archParts.UserMessage = worker.AppendParallelMode(archParts.UserMessage, storyID)
 
@@ -361,20 +359,18 @@ func (c *Coordinator) runSharedArchitect(ctx context.Context, storyID string) st
 	_ = os.MkdirAll(logDir, 0o755)
 	logPath := runner.LogFilePath(logDir, 0) + ".architect"
 
-	archResult, err := runner.RunClaude(ctx, ws.Dir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
+	if _, err := runner.RunClaude(ctx, ws.Dir, archParts.UserMessage, logPath, runner.RunClaudeOpts{
 		StoryID:      storyID,
 		Role:         roles.RoleArchitect,
 		Model:        worker.ResolveModel(roles.RoleArchitect, c.cfg),
 		SystemAppend: archParts.SystemAppend,
-	})
-	if err != nil {
+	}); err != nil {
 		debuglog.Log("fusion: architect run failed for %s: %v", storyID, err)
 	}
 
-	if archResult != nil && archResult.SessionID != "" {
-		return archResult.SessionID
+	if err := workspace.ExportStoryState(ws.Dir, c.cfg.ProjectDir, storyID); err != nil {
+		debuglog.Log("fusion: architect export state failed for %s: %v", storyID, err)
 	}
-	return ""
 }
 
 // HandleUpdate processes a worker update.

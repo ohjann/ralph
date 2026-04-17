@@ -3213,15 +3213,18 @@ func (m *Model) renderResumePrompt() string {
 	b.WriteString(header)
 	b.WriteString("\n")
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFD700")).Render("  Checkpoint Found — Resume Previous Run?")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFD700")).Render("  Unfinished run detected")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	// Mode
 	b.WriteString(fmt.Sprintf("  Mode: %s\n\n", stylePanelTitle.Render(cp.Phase)))
 
-	// Completed stories
-	b.WriteString(fmt.Sprintf("  %s (%d)\n", styleSuccess.Render("Completed"), len(cp.CompletedStories)))
+	// Completed stories — always skipped because prd.json has passes=true
+	b.WriteString(fmt.Sprintf("  %s (%d) %s\n",
+		styleSuccess.Render("Completed"),
+		len(cp.CompletedStories),
+		styleMuted.Render("— already pass in prd.json, will not re-run")))
 	for _, id := range cp.CompletedStories {
 		b.WriteString(fmt.Sprintf("    %s %s\n", styleStoryPassed.Render("✓"), id))
 	}
@@ -3230,8 +3233,11 @@ func (m *Model) renderResumePrompt() string {
 	}
 	b.WriteString("\n")
 
-	// Failed stories
-	b.WriteString(fmt.Sprintf("  %s (%d)\n", styleDanger.Render("Failed"), len(cp.FailedStories)))
+	// Failed stories — the choice below only affects these
+	b.WriteString(fmt.Sprintf("  %s (%d) %s\n",
+		styleDanger.Render("Failed"),
+		len(cp.FailedStories),
+		styleMuted.Render("— your choice below decides what happens to these")))
 	for id, fs := range cp.FailedStories {
 		errSummary := fs.LastError
 		if len(errSummary) > 60 {
@@ -3248,13 +3254,15 @@ func (m *Model) renderResumePrompt() string {
 	totalKnown := len(cp.CompletedStories) + len(cp.FailedStories) + len(cp.InProgress)
 	if p, err := prd.Load(m.cfg.PRDFile); err == nil {
 		remaining := p.TotalCount() - len(cp.CompletedStories)
-		b.WriteString(fmt.Sprintf("  %s %d\n\n", styleMuted.Render("Remaining:"), remaining))
+		b.WriteString(fmt.Sprintf("  %s %d story(s) still to run\n\n", styleMuted.Render("Remaining:"), remaining))
 	} else {
 		b.WriteString(fmt.Sprintf("  %s %d+ stories tracked\n\n", styleMuted.Render("Total:"), totalKnown))
 	}
 
-	// Prompt
-	b.WriteString("  Press " + styleKey.Render("y") + " to resume, " + styleKey.Render("n") + " to start fresh, " + styleKey.Render("q") + " to quit\n")
+	// Prompt — spell out what each choice actually does
+	b.WriteString("  " + styleKey.Render("y") + " resume     keep retry counts, continue from where things stopped\n")
+	b.WriteString("  " + styleKey.Render("n") + " retry      reset retry counts to 0 and re-attempt failed stories\n")
+	b.WriteString("  " + styleKey.Render("q") + " quit       exit without changes; checkpoint stays on disk\n")
 
 	return b.String()
 }
@@ -3387,8 +3395,8 @@ func renderFooter(width int, confirmQuit bool, done bool, idle bool, parallel bo
 			styleKey.Render("q") + styleFooter.Render(": quit")
 	}
 	if resumePrompt {
-		return "  " + styleKey.Render("y") + styleFooter.Render(": resume  ") +
-			styleKey.Render("n") + styleFooter.Render(": start fresh  ") +
+		return "  " + styleKey.Render("y") + styleFooter.Render(": resume (keep retries)  ") +
+			styleKey.Render("n") + styleFooter.Render(": retry (reset retries)  ") +
 			styleKey.Render("q") + styleFooter.Render(": quit")
 	}
 	if confirmQuit {

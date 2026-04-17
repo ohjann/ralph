@@ -168,7 +168,7 @@ func renderCurrentTask(m *Model) string {
 	case phaseRetrospective:
 		return lipgloss.NewStyle().Foreground(colorTeal).Render("⚡ Design retrospective...")
 	case phaseResumePrompt:
-		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("◇ Resume from checkpoint? Press Enter to continue, q to restart")
+		return lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("◇ Unfinished run — y resume, n retry, q quit")
 	case phaseInteractive:
 		return lipgloss.NewStyle().Foreground(colorPrimary).Render("⌨ Interactive — press t to add a task")
 	default:

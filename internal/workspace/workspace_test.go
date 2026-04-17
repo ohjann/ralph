@@ -179,3 +179,64 @@ func TestCopyState_EmptyStoryID(t *testing.T) {
 		}
 	}
 }
+
+func TestExportStoryState(t *testing.T) {
+	mainDir := t.TempDir()
+	wsDir := t.TempDir()
+
+	// Architect in wsDir wrote plan.md + nested subdir + state.json.
+	storyDir := filepath.Join(wsDir, ".ralph", "stories", "IH-004")
+	if err := os.MkdirAll(filepath.Join(storyDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storyDir, "plan.md"), []byte("# Plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storyDir, "state.json"), []byte(`{"story_id":"IH-004"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storyDir, "sub", "nested.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Main already has a stale plan.md that should be overwritten.
+	stalePlan := filepath.Join(mainDir, ".ralph", "stories", "IH-004", "plan.md")
+	if err := os.MkdirAll(filepath.Dir(stalePlan), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePlan, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ExportStoryState(wsDir, mainDir, "IH-004"); err != nil {
+		t.Fatalf("ExportStoryState: %v", err)
+	}
+
+	got, err := os.ReadFile(stalePlan)
+	if err != nil {
+		t.Fatalf("read plan.md: %v", err)
+	}
+	if string(got) != "# Plan" {
+		t.Errorf("plan.md overwrite: got %q want %q", got, "# Plan")
+	}
+	if _, err := os.Stat(filepath.Join(mainDir, ".ralph", "stories", "IH-004", "state.json")); err != nil {
+		t.Errorf("state.json missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mainDir, ".ralph", "stories", "IH-004", "sub", "nested.txt")); err != nil {
+		t.Errorf("nested file missing: %v", err)
+	}
+}
+
+func TestExportStoryState_NoSourceDir(t *testing.T) {
+	mainDir := t.TempDir()
+	wsDir := t.TempDir()
+	if err := ExportStoryState(wsDir, mainDir, "NOPE"); err != nil {
+		t.Errorf("expected no-op, got: %v", err)
+	}
+}
+
+func TestExportStoryState_EmptyStoryID(t *testing.T) {
+	if err := ExportStoryState(t.TempDir(), t.TempDir(), ""); err != nil {
+		t.Errorf("empty storyID should be no-op, got: %v", err)
+	}
+}

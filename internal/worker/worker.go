@@ -66,11 +66,10 @@ type Worker struct {
 	BaseChangeID   string     // jj change ID of the commit the workspace branched from
 	LogDir         string
 	Iteration      int
-	FusionSuffix       string // non-empty for fusion workers (e.g., "-f0", "-f1")
-	SessionID          string // captured from Claude stream for kill+resume
-	ArchitectSessionID string // if set, skip architect and fork from this session
-	ResumeHint         string // if set after cancel, resume with this hint instead of treating as failure
-	IsResumed          bool   // true when current run is a resume (for logging/diagnostics)
+	FusionSuffix string // non-empty for fusion workers (e.g., "-f0", "-f1")
+	SessionID    string // captured from Claude stream for kill+resume
+	ResumeHint   string // if set after cancel, resume with this hint instead of treating as failure
+	IsResumed    bool   // true when current run is a resume (for logging/diagnostics)
 	JJMu           *sync.Mutex // serialises jj operations against the main repo (shared with coordinator)
 	Ctx            context.Context
 	Cancel         context.CancelFunc
@@ -254,9 +253,11 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 	// Load PRD for prompt building
 	wsPRD, _ := prd.Load(filepath.Join(ws.Dir, "prd.json"))
 
-	// 2. Architect phase: run architect agent if applicable
-	// Skip architect if this fusion worker already has a forked architect session
-	if w.ArchitectSessionID == "" && !cfg.NoArchitect && shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
+	// 2. Architect phase: run architect agent if applicable.
+	// shouldRunArchitect returns false when plan.md already exists in the
+	// workspace — fusion workers inherit the shared architect's plan via
+	// CopyState, so this naturally skips the per-worker architect.
+	if !cfg.NoArchitect && shouldRunArchitect(w.StoryID, w.Iteration, ws.Dir, wsPRD) {
 		send(WorkerRunning, roles.RoleArchitect, nil, false, "")
 
 		archParts, err := runner.BuildPrompt(cfg.RalphHome, ws.Dir, w.StoryID, wsPRD, runner.BuildPromptOpts{Role: roles.RoleArchitect, MemoryDisabled: cfg.Memory.Disabled, AntiPatterns: w.AntiPatterns})
@@ -384,11 +385,6 @@ func Run(w *Worker, cfg *config.Config, updateCh chan<- WorkerUpdate) {
 		Role:         implRole,
 		Model:        ResolveModel(implRole, cfg),
 		SystemAppend: implParts.SystemAppend,
-	}
-	// Fork from the shared architect session if available (fusion mode)
-	if w.ArchitectSessionID != "" {
-		implOpts.ResumeSessionID = w.ArchitectSessionID
-		implOpts.ForkSession = true
 	}
 	implResult, err := runner.RunClaude(w.Ctx, ws.Dir, implParts.UserMessage, logPath, implOpts)
 	if implResult != nil {
