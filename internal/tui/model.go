@@ -1279,13 +1279,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					m.cfg.ResolveAutoWorkers(len(incomplete))
-					m.coord = coordinator.NewFromCheckpoint(
-						m.cfg, m.storyDAG, m.cfg.Workers, incomplete,
-						cp.CompletedStories, cp.FailedStories, cp.IterationCount,
-					)
+					// In daemon mode the daemon owns scheduling. Creating a
+					// local coordinator here would double-spawn workers
+					// against the same workspaces.
+					if m.client == nil {
+						m.coord = coordinator.NewFromCheckpoint(
+							m.cfg, m.storyDAG, m.cfg.Workers, incomplete,
+							cp.CompletedStories, cp.FailedStories, cp.IterationCount,
+						)
 						m.coord.SetRunCosting(m.runCosting)
+						cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
+					}
 					m.phase = phaseParallel
-					cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 				} else {
 					m.phase = phaseIterating
 					cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
@@ -2152,12 +2157,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.claudeVP.GotoBottom()
 				m.prevClaudeLen = len(m.claudeContent)
 			}
-			m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, incomplete)
-			m.coord.SetRunCosting(m.runCosting)
-			m.coord.SetNotifier(m.notifier)
+			// In daemon mode the daemon runs its own coordinator and
+			// spawns workers; skip local coord creation to avoid
+			// double-spawning against the same workspaces.
+			if m.client == nil {
+				m.coord = coordinator.New(m.cfg, m.storyDAG, m.cfg.Workers, incomplete)
+				m.coord.SetRunCosting(m.runCosting)
+				m.coord.SetNotifier(m.notifier)
+				cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
+			}
 			m.phase = phaseParallel
 			m.updateStatusPage()
-			cmds = append(cmds, scheduleReadyCmd(m.ctx, m.coord))
 		}
 
 	case workerUpdateMsg:
@@ -2684,6 +2694,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Keep listening for next event
 		if m.sseEventCh != nil {
 			cmds = append(cmds, listenDaemonEventCmd(m.sseEventCh))
+		}
+		// Daemon-driven completion: when running as a client and the daemon
+		// reports AllDone, fire the completion report ourselves — we aren't
+		// running a local coord that would trigger via workerUpdateMsg.
+		if m.client != nil && m.daemonState != nil && m.daemonState.AllDone &&
+			m.phase == phaseParallel && m.daemonActiveCount() == 0 {
+			if m.daemonCompletedCount() == m.totalStories || m.checkPRDAllComplete() {
+				m.completedStories = m.totalStories
+				return m.transitionToComplete()
+			}
+			m.phase = phaseDone
+			m.allComplete = false
+			m.exitCode = 1
+			m.completionReason = fmt.Sprintf("No active workers remaining (%d/%d completed)", m.daemonCompletedCount(), m.totalStories)
+			debuglog.Log("entering phaseDone via daemon state: %s", m.completionReason)
+			m.showCompletionReport()
+			return m, nil
 		}
 
 	case daemonQuitDoneMsg:

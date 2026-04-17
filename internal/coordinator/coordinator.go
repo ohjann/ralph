@@ -824,6 +824,15 @@ func (c *Coordinator) AllDone() bool {
 		return false
 	}
 	if c.dag == nil {
+		// DAG not yet built (daemon still in Prepare). If any story is
+		// still pending, the run is NOT done — it just hasn't started yet.
+		// Without this guard, the TUI fires a premature completion report
+		// as soon as it connects to a daemon that is mid-Prepare.
+		for id := range c.stories {
+			if !c.completed[id] && !c.failed[id] {
+				return false
+			}
+		}
 		return true
 	}
 	for id := range c.dag.Nodes {
