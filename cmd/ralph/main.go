@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/rand"
@@ -427,11 +428,16 @@ func buildDaemonArgs(args []string) []string {
 func runDaemonMode(cfg *config.Config) {
 	debuglog.Log("ralph daemon mode starting, pid=%d", os.Getpid())
 
-	// Load PRD
+	// Load PRD. When --plan is set, prd.json may not exist yet (the TUI
+	// generates it from the plan file) — tolerate that and start idle.
 	p, err := prd.Load(cfg.PRDFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: failed to load prd.json: %v\n", err)
-		os.Exit(1)
+		if cfg.PlanFile != "" && errors.Is(err, fs.ErrNotExist) {
+			p = &prd.PRD{}
+		} else {
+			fmt.Fprintf(os.Stderr, "daemon: failed to load prd.json: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Filter to incomplete stories
@@ -442,7 +448,7 @@ func runDaemonMode(cfg *config.Config) {
 		}
 	}
 
-	if len(incomplete) == 0 && !cfg.IdleMode {
+	if len(incomplete) == 0 && !cfg.IdleMode && cfg.PlanFile == "" {
 		fmt.Fprintln(os.Stderr, "daemon: no incomplete stories")
 		os.Exit(0)
 	}
