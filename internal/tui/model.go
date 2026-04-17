@@ -137,7 +137,8 @@ type Model struct {
 	workerTabOrder []worker.WorkerID
 
 	// Resume checkpoint (loaded during phaseInit)
-	loadedCheckpoint *checkpoint.Checkpoint
+	loadedCheckpoint     *checkpoint.Checkpoint
+	checkpointPRDChanged bool // true when the checkpoint's PRDHash doesn't match the current prd.json
 
 	// Cost tracking
 	runCosting    *costs.RunCosting
@@ -1296,6 +1297,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Start fresh — delete checkpoint and continue normal startup
 				_ = checkpoint.Delete(m.cfg.ProjectDir)
 				m.loadedCheckpoint = nil
+				m.checkpointPRDChanged = false
 				if m.cfg.Workers > 1 || m.cfg.WorkersAuto {
 					m.phase = phaseDagAnalysis
 					cmds = append(cmds, dagAnalyzeCmd(m.ctx, m.cfg))
@@ -1806,18 +1808,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check for existing checkpoint to offer resume
 		cp, exists, err := checkpoint.Load(m.cfg.ProjectDir)
 		if err == nil && exists {
+			m.loadedCheckpoint = &cp
 			currentHash, hashErr := checkpoint.ComputePRDHash(m.cfg.PRDFile)
-			if hashErr == nil && currentHash == cp.PRDHash {
-				// Valid checkpoint — offer resume
-				m.loadedCheckpoint = &cp
-				m.phase = phaseResumePrompt
-				return m, tea.Batch(cmds...)
-			}
-			// Stale checkpoint — PRD changed, delete and continue
-			m.claudeContent += tsLog("── Checkpoint found but PRD has changed — starting fresh ──\n")
-			m.claudeVP.SetContent(m.claudeContent)
-			m.prevClaudeLen = len(m.claudeContent)
-			_ = checkpoint.Delete(m.cfg.ProjectDir)
+			m.checkpointPRDChanged = hashErr != nil || currentHash != cp.PRDHash
+			m.phase = phaseResumePrompt
+			return m, tea.Batch(cmds...)
 		}
 		// Compute PRD hash for checkpointing
 		if hash, err := checkpoint.ComputePRDHash(m.cfg.PRDFile); err == nil {
@@ -3223,6 +3218,14 @@ func (m *Model) renderResumePrompt() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFD700")).Render("  Unfinished run detected")
 	b.WriteString(title)
 	b.WriteString("\n\n")
+
+	// Warn when the PRD has changed since the checkpoint was written. The
+	// story IDs in the checkpoint may no longer line up, so resume is still
+	// offered but flagged.
+	if m.checkpointPRDChanged {
+		b.WriteString("  " + styleDanger.Render("⚠  prd.json has changed since this checkpoint was written.") + "\n")
+		b.WriteString("  " + styleMuted.Render("   Resume may reference stale story IDs — retry (n) is usually safer.") + "\n\n")
+	}
 
 	// Mode
 	b.WriteString(fmt.Sprintf("  Mode: %s\n\n", stylePanelTitle.Render(cp.Phase)))

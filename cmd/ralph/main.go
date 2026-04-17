@@ -141,7 +141,7 @@ func main() {
 		} else {
 			cfg.HistoryRun = hr
 			defer func() {
-				_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals())
+				_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil)
 			}()
 		}
 	}
@@ -479,7 +479,7 @@ func runRetro(cfg *config.Config) int {
 		debuglog.Log("history: open retro run failed: %v", runErr)
 	} else {
 		cfg.HistoryRun = hr
-		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals()) }()
+		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil) }()
 	}
 
 	fmt.Fprintln(os.Stderr, "Running design retrospective...")
@@ -1223,7 +1223,7 @@ func runMemoryConsolidate(cfg *config.Config) error {
 		debuglog.Log("history: open memory-consolidate run failed: %v", runErr)
 	} else {
 		cfg.HistoryRun = hr
-		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals()) }()
+		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil) }()
 	}
 
 	runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {

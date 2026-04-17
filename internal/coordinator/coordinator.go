@@ -609,6 +609,14 @@ func (c *Coordinator) MergeAndSync(ctx context.Context, u worker.WorkerUpdate) (
 		}
 	}
 
+	// Re-write the checkpoint so the stored PRD hash reflects the post-merge
+	// state of prd.json (which was just updated with passes=true). Otherwise
+	// the next TUI startup sees a hash mismatch and silently discards the
+	// checkpoint, treating a mid-run restart as a fresh start.
+	c.mu.Lock()
+	c.writeCheckpointLocked()
+	c.mu.Unlock()
+
 	return conflictsResolved, nil
 }
 
