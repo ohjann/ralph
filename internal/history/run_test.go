@@ -209,8 +209,8 @@ func TestFinalize_WritesEndTimeAndTotals(t *testing.T) {
 // RunID and Kind match the manifest. This enforces the "two records cannot
 // diverge" contract from IH-005.
 func TestFinalize_AppendsCostSummaryWithManifestRunIDAndKind(t *testing.T) {
-	cfg := newRunCfg(t)
-	r, err := OpenRun(cfg, "v", RunOpts{Kind: KindRetro})
+	proj, prd := newRunEnv(t)
+	r, err := OpenRun(proj, prd, "v", RunOpts{Kind: KindRetro})
 	if err != nil {
 		t.Fatalf("OpenRun: %v", err)
 	}

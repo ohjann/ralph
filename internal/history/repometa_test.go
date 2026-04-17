@@ -463,3 +463,122 @@ func TestUpdateLastRunID(t *testing.T) {
 		t.Fatalf("RunCount bumped by UpdateLastRunID: %d", m.RunCount)
 	}
 }
+
+// TestDaemonShutdown_UpdateLastRunIDMatchesRunDir exercises the sequence the
+// daemon child runs at shutdown: OpenRun creates runs/<runID>, Finalize stamps
+// the manifest, UpdateLastRunID writes meta.LastRunID. Afterwards meta's
+// LastRunID must resolve to a real directory under runs/.
+func TestDaemonShutdown_UpdateLastRunIDMatchesRunDir(t *testing.T) {
+	dataDir := setDataDir(t)
+	repo := t.TempDir()
+
+	hr, err := OpenRun(repo, "", "test-version", RunOpts{Kind: KindDaemon})
+	if err != nil {
+		t.Fatalf("OpenRun: %v", err)
+	}
+	if err := hr.Finalize(StatusComplete, Totals{}, nil); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if err := UpdateLastRunID(hr.RepoFP(), hr.ID()); err != nil {
+		t.Fatalf("UpdateLastRunID: %v", err)
+	}
+
+	m, err := readMeta(hr.RepoFP())
+	if err != nil {
+		t.Fatalf("readMeta: %v", err)
+	}
+	if m.LastRunID != hr.ID() {
+		t.Fatalf("LastRunID=%q want %q", m.LastRunID, hr.ID())
+	}
+	if m.RunCount != 1 {
+		t.Fatalf("RunCount=%d want 1 (UpdateLastRunID must not bump)", m.RunCount)
+	}
+
+	runDir := filepath.Join(dataDir, "repos", hr.RepoFP(), "runs", m.LastRunID)
+	if _, err := os.Stat(runDir); err != nil {
+		t.Fatalf("LastRunID does not resolve to a run dir: %v", err)
+	}
+	if runDir != hr.Dir() {
+		t.Fatalf("run dir mismatch: meta points to %q, OpenRun created %q", runDir, hr.Dir())
+	}
+}
+
+// TestDaemonShutdown_RetroOverwritesLastRunID verifies that a retro run
+// completing after a daemon run replaces LastRunID with its own id.
+func TestDaemonShutdown_RetroOverwritesLastRunID(t *testing.T) {
+	setDataDir(t)
+	repo := t.TempDir()
+
+	daemonRun, err := OpenRun(repo, "", "v", RunOpts{Kind: KindDaemon})
+	if err != nil {
+		t.Fatalf("OpenRun daemon: %v", err)
+	}
+	if err := daemonRun.Finalize(StatusComplete, Totals{}, nil); err != nil {
+		t.Fatalf("Finalize daemon: %v", err)
+	}
+	if err := UpdateLastRunID(daemonRun.RepoFP(), daemonRun.ID()); err != nil {
+		t.Fatalf("UpdateLastRunID daemon: %v", err)
+	}
+
+	retroRun, err := OpenRun(repo, "", "v", RunOpts{Kind: KindRetro})
+	if err != nil {
+		t.Fatalf("OpenRun retro: %v", err)
+	}
+	if err := retroRun.Finalize(StatusComplete, Totals{}, nil); err != nil {
+		t.Fatalf("Finalize retro: %v", err)
+	}
+	if err := UpdateLastRunID(retroRun.RepoFP(), retroRun.ID()); err != nil {
+		t.Fatalf("UpdateLastRunID retro: %v", err)
+	}
+
+	m, err := readMeta(retroRun.RepoFP())
+	if err != nil {
+		t.Fatalf("readMeta: %v", err)
+	}
+	if m.LastRunID != retroRun.ID() {
+		t.Fatalf("LastRunID=%q want retro id %q (daemon id was %q)", m.LastRunID, retroRun.ID(), daemonRun.ID())
+	}
+}
+
+// TestDaemonShutdown_ConcurrentReposIndependent verifies that two daemons in
+// different repos each update their own LastRunID without cross-repo
+// interference.
+func TestDaemonShutdown_ConcurrentReposIndependent(t *testing.T) {
+	setDataDir(t)
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+
+	runA, err := OpenRun(repoA, "", "v", RunOpts{Kind: KindDaemon})
+	if err != nil {
+		t.Fatalf("OpenRun A: %v", err)
+	}
+	runB, err := OpenRun(repoB, "", "v", RunOpts{Kind: KindDaemon})
+	if err != nil {
+		t.Fatalf("OpenRun B: %v", err)
+	}
+
+	if err := UpdateLastRunID(runA.RepoFP(), runA.ID()); err != nil {
+		t.Fatalf("UpdateLastRunID A: %v", err)
+	}
+	if err := UpdateLastRunID(runB.RepoFP(), runB.ID()); err != nil {
+		t.Fatalf("UpdateLastRunID B: %v", err)
+	}
+
+	mA, err := readMeta(runA.RepoFP())
+	if err != nil {
+		t.Fatalf("readMeta A: %v", err)
+	}
+	mB, err := readMeta(runB.RepoFP())
+	if err != nil {
+		t.Fatalf("readMeta B: %v", err)
+	}
+	if mA.LastRunID != runA.ID() {
+		t.Fatalf("repoA LastRunID=%q want %q", mA.LastRunID, runA.ID())
+	}
+	if mB.LastRunID != runB.ID() {
+		t.Fatalf("repoB LastRunID=%q want %q", mB.LastRunID, runB.ID())
+	}
+	if mA.LastRunID == mB.LastRunID {
+		t.Fatalf("repos share LastRunID %q (cross-repo interference)", mA.LastRunID)
+	}
+}

@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -142,6 +141,9 @@ func main() {
 			cfg.HistoryRun = hr
 			defer func() {
 				_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil)
+				if err := history.UpdateLastRunID(hr.RepoFP(), hr.ID()); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: history.UpdateLastRunID: %v\n", err)
+				}
 			}()
 		}
 	}
@@ -160,8 +162,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Warning: migrate run-history: %v\n", mErr)
 		}
 	}
-	runID := time.Now().UTC().Format("20060102T150405Z")
-	defer func() { mainDeferOnce.Do(func() { runMainDeferred(repoFP, runID) }) }()
 
 	if err := cfg.EnsureDirs(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating directories: %v\n", err)
@@ -237,20 +237,7 @@ func main() {
 	}
 
 	if m, ok := finalModel.(*tui.Model); ok {
-		exit := m.ExitCode()
-		mainDeferOnce.Do(func() { runMainDeferred(repoFP, runID) })
-		os.Exit(exit)
-	}
-}
-
-var mainDeferOnce sync.Once
-
-func runMainDeferred(repoFP, runID string) {
-	if repoFP == "" {
-		return
-	}
-	if err := history.UpdateLastRunID(repoFP, runID); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: history.UpdateLastRunID: %v\n", err)
+		os.Exit(m.ExitCode())
 	}
 }
 
@@ -479,7 +466,12 @@ func runRetro(cfg *config.Config) int {
 		debuglog.Log("history: open retro run failed: %v", runErr)
 	} else {
 		cfg.HistoryRun = hr
-		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil) }()
+		defer func() {
+			_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil)
+			if err := history.UpdateLastRunID(hr.RepoFP(), hr.ID()); err != nil {
+				debuglog.Log("history: UpdateLastRunID: %v", err)
+			}
+		}()
 	}
 
 	fmt.Fprintln(os.Stderr, "Running design retrospective...")
@@ -1223,7 +1215,12 @@ func runMemoryConsolidate(cfg *config.Config) error {
 		debuglog.Log("history: open memory-consolidate run failed: %v", runErr)
 	} else {
 		cfg.HistoryRun = hr
-		defer func() { _ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil) }()
+		defer func() {
+			_ = hr.Finalize(history.StatusComplete, hr.ComputeTotals(), nil)
+			if err := history.UpdateLastRunID(hr.RepoFP(), hr.ID()); err != nil {
+				debuglog.Log("history: UpdateLastRunID: %v", err)
+			}
+		}()
 	}
 
 	runClaude := func(ctx context.Context, projectDir, prompt, logFilePath string) error {

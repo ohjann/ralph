@@ -186,6 +186,9 @@ func (r *Run) ID() string { return r.id }
 // Dir returns the absolute path to the run directory.
 func (r *Run) Dir() string { return r.dir }
 
+// RepoFP returns the fingerprint of the repo this run belongs to.
+func (r *Run) RepoFP() string { return r.manifest.RepoFP }
+
 // UpdateStoryList seeds the manifest.Stories slice with the provided entries.
 // Existing iterations for matching StoryIDs are preserved.
 func (r *Run) UpdateStoryList(stories []StoryRecord) error {
