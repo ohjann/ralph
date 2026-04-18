@@ -43,13 +43,15 @@ func runViewer(args []string) error {
 		return fmt.Errorf("viewer token: %w", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintln(w, "ralph viewer")
-	})
+	// Server lifetime controls the projects.Index fsnotify watcher.
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
 
-	handler := viewer.AuthMiddleware(token, mux)
+	vs, err := viewer.NewServer(serverCtx, token, Version)
+	if err != nil {
+		return fmt.Errorf("viewer server: %w", err)
+	}
+	handler := vs.Handler()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	ln, err := net.Listen("tcp", addr)
