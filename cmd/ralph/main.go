@@ -51,6 +51,16 @@ func main() {
 		os.Exit(0)
 	}
 
+	// viewer is the local web UI; like install-skill it runs without a
+	// config so it works in any cwd and is dispatched before Parse.
+	if len(os.Args) > 1 && os.Args[1] == "viewer" {
+		if err := runViewer(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	cfg, err := config.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
