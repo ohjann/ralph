@@ -143,3 +143,69 @@ func TestParseFile_AbsorbsUnknownTopLevelTypes(t *testing.T) {
 		t.Errorf("turn 0 not synthesised correctly: %+v", turns[0])
 	}
 }
+
+// TestTailer_BuffersPartialTrailingLine is the core tailer contract: stream
+// bytes can arrive mid-line (io.MultiWriter tees RunClaude's stream to the
+// jsonl byte-by-byte in the worst case), and a partial line must not error
+// or emit a partial Turn.
+func TestTailer_BuffersPartialTrailingLine(t *testing.T) {
+	full := `{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant"}}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"message_stop"}}` + "\n"
+
+	// Feed byte-by-byte. Only the final '\n' completes the message_stop line
+	// and emits Turn 1; every prior Feed must be a no-op emit-wise.
+	tl := NewTailer(1)
+	var got []Turn
+	onTurn := func(tt Turn) error { got = append(got, tt); return nil }
+	for i := 0; i < len(full); i++ {
+		if err := tl.Feed([]byte{full[i]}, onTurn); err != nil {
+			t.Fatalf("Feed[%d]: %v", i, err)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d turns, want 1", len(got))
+	}
+	if got[0].Index != 1 || got[0].Role != "assistant" {
+		t.Errorf("turn = %+v, want index=1 role=assistant", got[0])
+	}
+	if len(got[0].Blocks) != 1 || got[0].Blocks[0].Text != "ok" {
+		t.Errorf("block = %+v, want text=ok", got[0].Blocks)
+	}
+}
+
+// TestTailer_MultipleFeedsAdvanceIndex confirms the parser state persists
+// across Feed boundaries: two assistant turns fed across three chunks
+// should yield Index=1 and Index=2.
+func TestTailer_MultipleFeedsAdvanceIndex(t *testing.T) {
+	one := `{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant"}}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}` + "\n"
+	two := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"a"}}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}` + "\n" +
+		`{"type":"stream_event","event":{"type":"message_stop"}}` + "\n"
+	three := one + two // second turn, identical shape
+
+	tl := NewTailer(1)
+	var got []Turn
+	onTurn := func(tt Turn) error { got = append(got, tt); return nil }
+	if err := tl.Feed([]byte(one), onTurn); err != nil {
+		t.Fatalf("Feed 1: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no turns yet, got %d", len(got))
+	}
+	if err := tl.Feed([]byte(two), onTurn); err != nil {
+		t.Fatalf("Feed 2: %v", err)
+	}
+	if err := tl.Feed([]byte(three), onTurn); err != nil {
+		t.Fatalf("Feed 3: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d turns, want 2", len(got))
+	}
+	if got[0].Index != 1 || got[1].Index != 2 {
+		t.Errorf("indices = %d,%d, want 1,2", got[0].Index, got[1].Index)
+	}
+}

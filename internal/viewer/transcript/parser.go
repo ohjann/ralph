@@ -22,6 +22,13 @@ import (
 // Turn is one logical conversation turn reconstructed from the stream.
 // StartedAt is a pointer so an unset zero time is omitted from wire output
 // (Claude stream-json does not carry per-event timestamps today).
+//
+// Index is a stable, monotonically increasing identifier starting at 0 for
+// the synthesised prompt turn. The SPA uses Index as its de-dup key: because
+// a `?follow=true` reconnect replays the entire sequence from Turn 0
+// statelessly, the client must key by Index to render each Turn exactly once
+// across reconnects. This contract is part of the TurnV1 wire schema and
+// must not change without a schema bump.
 type Turn struct {
 	Index      int        `json:"index"`
 	Role       string     `json:"role"`
@@ -134,51 +141,124 @@ type apiEvent struct {
 
 func (p *parser) run(yield func(Turn, error) bool) {
 	for p.sc.Scan() {
-		line := p.sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var outer streamLine
-		if err := json.Unmarshal(line, &outer); err != nil {
-			// Malformed line — skip rather than aborting the stream. A single
-			// corrupt line shouldn't poison the rest of the transcript.
-			continue
-		}
-
-		switch outer.Type {
-		case "system", "result", "rate_limit_event", "assistant":
-			// Metadata-only or redundant top-level envelopes. Explicitly
-			// absorbed per RV-004 acceptance criteria.
-			continue
-		case "user":
-			if t, ok := p.buildUserTurn(outer.Message); ok {
-				if !yield(t, nil) {
-					return
-				}
-				p.idx++
-			}
-			continue
-		case "stream_event":
-			var ev apiEvent
-			if err := json.Unmarshal(outer.Event, &ev); err != nil {
-				continue
-			}
-			if t, emit, stop := p.handleAPIEvent(ev); stop {
-				return
-			} else if emit {
-				if !yield(t, nil) {
-					return
-				}
-				p.idx++
-			}
-		default:
-			// Unknown top-level type — skip without erroring.
-			continue
+		if !p.processLine(p.sc.Bytes(), yield) {
+			return
 		}
 	}
 
 	if err := p.sc.Err(); err != nil && !errors.Is(err, io.EOF) {
 		yield(Turn{}, fmt.Errorf("scan transcript: %w", err))
+	}
+}
+
+// processLine consumes one outer stream-json envelope and yields at most one
+// Turn. Returns false iff the caller should stop iteration (the yield
+// callback returned false, signalling client disconnect).
+func (p *parser) processLine(line []byte, yield func(Turn, error) bool) bool {
+	if len(line) == 0 {
+		return true
+	}
+	var outer streamLine
+	if err := json.Unmarshal(line, &outer); err != nil {
+		// Malformed line — skip rather than aborting the stream. A single
+		// corrupt line shouldn't poison the rest of the transcript.
+		return true
+	}
+
+	switch outer.Type {
+	case "system", "result", "rate_limit_event", "assistant":
+		// Metadata-only or redundant top-level envelopes. Explicitly
+		// absorbed per RV-004 acceptance criteria.
+		return true
+	case "user":
+		if t, ok := p.buildUserTurn(outer.Message); ok {
+			if !yield(t, nil) {
+				return false
+			}
+			p.idx++
+		}
+		return true
+	case "stream_event":
+		var ev apiEvent
+		if err := json.Unmarshal(outer.Event, &ev); err != nil {
+			return true
+		}
+		if t, emit, stop := p.handleAPIEvent(ev); stop {
+			return false
+		} else if emit {
+			if !yield(t, nil) {
+				return false
+			}
+			p.idx++
+		}
+		return true
+	default:
+		// Unknown top-level type — skip without erroring.
+		return true
+	}
+}
+
+// Tailer is a stateful, line-oriented parser for a live stream-json file.
+// Unlike ParseFile, which reads once to EOF, a Tailer is fed byte chunks as
+// they arrive (typically from fsnotify Write events) and buffers any partial
+// trailing line across Feed calls — stream-json is written line-by-line by
+// RunClaude's io.MultiWriter tee, so a Read that happens between two writes
+// can land mid-line without corrupting the parser state.
+type Tailer struct {
+	p   *parser
+	buf []byte
+}
+
+// NewTailer returns a Tailer whose first emitted turn will carry Index =
+// startIdx. Pass 1 when turn 0 has already been emitted from the prompt
+// file; pass 0 to start from the top.
+func NewTailer(startIdx int) *Tailer {
+	return &Tailer{p: &parser{idx: startIdx}}
+}
+
+// Feed appends data to the tailer's buffer, consumes every complete line it
+// contains, and invokes onTurn for each emitted Turn. A trailing partial
+// line (no newline terminator) is retained and reconsidered on the next
+// Feed call. onTurn returning a non-nil error halts processing and
+// propagates the error up.
+func (t *Tailer) Feed(data []byte, onTurn func(Turn) error) error {
+	if len(data) > 0 {
+		t.buf = append(t.buf, data...)
+	}
+	for {
+		idx := bytes.IndexByte(t.buf, '\n')
+		if idx < 0 {
+			return nil
+		}
+		line := t.buf[:idx]
+		// Trim a trailing CR so CRLF-terminated logs (unlikely but cheap)
+		// round-trip cleanly through json.Unmarshal.
+		if n := len(line); n > 0 && line[n-1] == '\r' {
+			line = line[:n-1]
+		}
+		// Copy the line since the backing array will be reused when we
+		// advance buf.
+		lineCopy := append([]byte(nil), line...)
+		t.buf = t.buf[idx+1:]
+
+		var emitErr error
+		cont := t.p.processLine(lineCopy, func(tt Turn, perr error) bool {
+			if perr != nil {
+				emitErr = perr
+				return false
+			}
+			if err := onTurn(tt); err != nil {
+				emitErr = err
+				return false
+			}
+			return true
+		})
+		if emitErr != nil {
+			return emitErr
+		}
+		if !cont {
+			return nil
+		}
 	}
 }
 

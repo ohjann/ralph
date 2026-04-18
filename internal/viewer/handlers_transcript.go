@@ -2,24 +2,35 @@ package viewer
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/ohjann/ralphplusplus/internal/history"
 	"github.com/ohjann/ralphplusplus/internal/userdata"
 	"github.com/ohjann/ralphplusplus/internal/viewer/transcript"
 )
 
+// followIdleDeadline bounds how long the tailer will wait between Write
+// events before re-checking manifest.Status and the daemon socket. Exposed
+// as a package-level var so tests can drop it to a few hundred ms without
+// sleeping 30 s of real time.
+var followIdleDeadline = 30 * time.Second
+
 // resolvedIter holds the filesystem paths for a (run, story, iter) tuple
 // after they have been looked up in the manifest and verified to live under
 // the run's turns/ directory.
 type resolvedIter struct {
+	runID      string
 	runDir     string
 	turnsRoot  string
 	promptFile string
@@ -96,6 +107,7 @@ func resolveIter(fp, runID, storyID, iterStr, role string) (*resolvedIter, int, 
 	}
 
 	return &resolvedIter{
+		runID:      runID,
 		runDir:     runDir,
 		turnsRoot:  turnsRoot,
 		promptFile: promptClean,
@@ -136,9 +148,9 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 // handleTranscript streams the reconstructed Turn sequence as NDJSON, one
 // JSON object per line. Past-run transcripts (no ?follow=true) are sent with
 // an immutable Cache-Control so the SPA can re-render previous iterations
-// without hitting the parser again. ?follow=true is reserved for RV-012's
-// fsnotify tailer and currently behaves the same as the static path — just
-// without the Cache-Control header — so clients can opt out of caching.
+// without hitting the parser again. ?follow=true switches to the fsnotify
+// tailer (see streamTranscriptFollow), which streams existing content plus
+// any subsequent appends and closes on run-terminal / daemon-dead.
 func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	fp := r.PathValue("fp")
 	runID := r.PathValue("runID")
@@ -153,6 +165,11 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if follow {
+		s.streamTranscriptFollow(w, r, fp, res)
+		return
+	}
+
 	seq, err := transcript.ParseFile(res.promptFile, res.jsonlFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -164,9 +181,7 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
-	if !follow {
-		w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
-	}
+	w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
@@ -194,6 +209,169 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = bw.Flush()
+}
+
+// streamTranscriptFollow serves ?follow=true: replay the synthesised prompt
+// turn + everything currently in the jsonl, then fsnotify-watch the jsonl
+// for Write events and stream new Turns as they parse. Replay is stateless —
+// a fresh request always starts at Turn 0 — so clients de-dupe by
+// Turn.Index across reconnects.
+//
+// Termination:
+//   - Client disconnects (r.Context().Done())
+//   - fsnotify reports Remove/Rename on the jsonl (the parent run was rolled
+//     or the file was rotated out from under us)
+//   - No Write event for followIdleDeadline AND the manifest has transitioned
+//     to a terminal status (complete/failed/interrupted). During the idle
+//     window we additionally treat a missing daemon.sock as a close signal
+//     — if the daemon process died without flipping the manifest, the
+//     socket disappearance is our second line of defence.
+func (s *Server) streamTranscriptFollow(w http.ResponseWriter, r *http.Request, fp string, res *resolvedIter) {
+	promptBytes, err := os.ReadFile(res.promptFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "read prompt: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	f, err := os.Open(res.jsonlFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "open jsonl: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		http.Error(w, "fsnotify: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer watcher.Close()
+	if err := watcher.Add(res.jsonlFile); err != nil {
+		http.Error(w, "fsnotify add: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, _ := w.(http.Flusher)
+	bw := bufio.NewWriter(w)
+	enc := json.NewEncoder(bw)
+
+	flush := func() error {
+		if err := bw.Flush(); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+
+	emit := func(t transcript.Turn) error {
+		if err := enc.Encode(t); err != nil {
+			return err
+		}
+		return flush()
+	}
+
+	if err := emit(transcript.Turn{
+		Index:  0,
+		Role:   "user",
+		Blocks: []transcript.Block{{Kind: "text", Text: string(promptBytes)}},
+	}); err != nil {
+		return
+	}
+
+	tailer := transcript.NewTailer(1)
+	drain := func() error {
+		buf := make([]byte, 32*1024)
+		for {
+			n, rerr := f.Read(buf)
+			if n > 0 {
+				if err := tailer.Feed(buf[:n], emit); err != nil {
+					return err
+				}
+			}
+			if rerr == io.EOF {
+				return nil
+			}
+			if rerr != nil {
+				return rerr
+			}
+		}
+	}
+	if err := drain(); err != nil {
+		return
+	}
+
+	idle := time.NewTimer(followIdleDeadline)
+	defer idle.Stop()
+	resetIdle := func() {
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(followIdleDeadline)
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+				return
+			}
+			if ev.Op&fsnotify.Write != 0 {
+				if err := drain(); err != nil {
+					return
+				}
+				resetIdle()
+			}
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			return
+		case <-idle.C:
+			if s.followShouldClose(r.Context(), fp, res.runID) {
+				return
+			}
+			idle.Reset(followIdleDeadline)
+		}
+	}
+}
+
+// followShouldClose returns true when the daemon has gone away or the
+// manifest reports the run is terminal — either condition ends the tail.
+// A terminal manifest is authoritative: even if the socket is still around,
+// no more jsonl writes are coming.
+func (s *Server) followShouldClose(ctx context.Context, fp, runID string) bool {
+	if m, err := history.ReadManifest(fp, runID); err == nil {
+		switch m.Status {
+		case history.StatusComplete, history.StatusFailed, history.StatusInterrupted:
+			return true
+		}
+	}
+	if _, err := s.resolveSock(ctx, fp); err != nil {
+		return true
+	}
+	return false
 }
 
 func isClientGone(r *http.Request) bool {
