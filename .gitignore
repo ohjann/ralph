@@ -12,6 +12,11 @@ progress.md
 build/
 /ralph
 
+# Frontend dependencies (pnpm hoists to the workspace root)
+node_modules/
+frontend/.vite/
+*.tsbuildinfo
+
 # Assets embedded into the binary; `ralph/` in the user's global ignore
 # would otherwise skip these.
 !/internal/assets/files/skills/

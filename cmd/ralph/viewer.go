@@ -51,7 +51,11 @@ func runViewer(args []string) error {
 	if err != nil {
 		return fmt.Errorf("viewer server: %w", err)
 	}
-	handler := vs.Handler()
+	static, err := viewer.StaticHandler(vs.Handler())
+	if err != nil {
+		return fmt.Errorf("static handler: %w", err)
+	}
+	handler := viewer.LoopbackOnly(static)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	ln, err := net.Listen("tcp", addr)

@@ -62,17 +62,24 @@ func LoadOrCreateToken() (string, error) {
 // expected to send X-Ralph-Token. Since the listener binds 127.0.0.1 only,
 // there is no cross-origin Referer leak path.
 func AuthMiddleware(token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isLoopbackHost(r.Host) {
-			http.Error(w, "forbidden: non-loopback Host", http.StatusForbidden)
-			return
-		}
+	return LoopbackOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provided := r.Header.Get("X-Ralph-Token")
 		if provided == "" {
 			provided = r.URL.Query().Get("token")
 		}
 		if provided == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+}
+
+// LoopbackOnly restricts access to loopback clients without requiring a token.
+func LoopbackOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			http.Error(w, "forbidden: non-loopback Host", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
