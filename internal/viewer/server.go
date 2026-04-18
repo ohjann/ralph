@@ -2,12 +2,15 @@ package viewer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 
@@ -46,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/repos/{fp}", s.handleRepoDetail)
 	mux.HandleFunc("GET /api/repos/{fp}/runs", s.handleRunsList)
 	mux.HandleFunc("GET /api/repos/{fp}/runs/{runID}", s.handleRunDetail)
+	mux.HandleFunc("GET /api/repos/{fp}/prd", s.handlePRD)
 	mux.HandleFunc("GET /api/live/{fp}/events", s.handleLiveEvents)
 	mux.HandleFunc("GET /api/live/{fp}/state", s.handleLiveState)
 	mux.HandleFunc("GET /api/live/{fp}/worker/{id}/activity", s.handleLiveWorkerActivity)
@@ -214,6 +218,51 @@ func (s *Server) handleRunDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, RunDetail{Manifest: *m, Summary: summary})
+}
+
+func (s *Server) handlePRD(w http.ResponseWriter, r *http.Request) {
+	fp := r.PathValue("fp")
+	repos, err := s.Index.Get(r.Context())
+	if err != nil {
+		http.Error(w, "load repos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var meta *history.RepoMeta
+	for i := range repos {
+		if repos[i].FP == fp {
+			meta = &repos[i].Meta
+			break
+		}
+	}
+	if meta == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+
+	data, err := os.ReadFile(filepath.Join(meta.Path, "prd.json"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "prd_missing"})
+			return
+		}
+		http.Error(w, "read prd: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+
+	resp := PRDResponse{Hash: hash, Content: json.RawMessage(data)}
+	if runID := r.URL.Query().Get("run_id"); runID != "" {
+		m, err := history.ReadManifest(fp, runID)
+		if err == nil && m.PRDSnapshot != "" {
+			match := m.PRDSnapshot == hash
+			resp.MatchesRunSnapshot = &match
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func aggregate(runs []costs.RunSummary) AggCosts {

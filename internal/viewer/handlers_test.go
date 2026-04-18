@@ -1,7 +1,10 @@
 package viewer_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -288,6 +291,166 @@ func TestHandleRunDetail_404WhenMissing(t *testing.T) {
 	rr := doGet(t, h, "/api/repos/deadbeef/runs/does-not-exist")
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status=%d want 404", rr.Code)
+	}
+}
+
+func TestHandlePRD_HashMatchesAndMismatches(t *testing.T) {
+	t.Setenv("RALPH_DATA_DIR", t.TempDir())
+
+	repoPath := t.TempDir()
+	prdBody := []byte(`{"version":1,"stories":[]}`)
+	prdFile := filepath.Join(repoPath, "prd.json")
+	if err := os.WriteFile(prdFile, prdBody, 0o644); err != nil {
+		t.Fatalf("write prd: %v", err)
+	}
+	sum := sha256.Sum256(prdBody)
+	initialHash := hex.EncodeToString(sum[:])
+
+	reposDir, err := userdata.ReposDir()
+	if err != nil {
+		t.Fatalf("ReposDir: %v", err)
+	}
+	const fp = "abcdefabcdef"
+	const runID = "run-1-prd-test"
+
+	runDir := filepath.Join(reposDir, fp, "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir run: %v", err)
+	}
+	now := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
+	meta := history.RepoMeta{Path: repoPath, Name: "prd-repo", FirstSeen: now, LastSeen: now, RunCount: 1}
+	md, _ := json.MarshalIndent(meta, "", "  ")
+	if err := os.WriteFile(filepath.Join(reposDir, fp, "meta.json"), md, 0o644); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+	man := history.Manifest{
+		SchemaVersion: history.ManifestSchemaVersion,
+		RunID:         runID,
+		Kind:          history.KindDaemon,
+		RepoFP:        fp,
+		RepoPath:      repoPath,
+		PRDSnapshot:   initialHash,
+		StartTime:     now,
+		Status:        history.StatusComplete,
+	}
+	mand, _ := json.MarshalIndent(man, "", "  ")
+	if err := os.WriteFile(filepath.Join(runDir, "manifest.json"), mand, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, h := newTestServer(t)
+
+	rr := doGet(t, h, "/api/repos/"+fp+"/prd?run_id="+runID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-cache, must-revalidate" {
+		t.Errorf("Cache-Control=%q want %q", got, "no-cache, must-revalidate")
+	}
+	var body viewer.PRDResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body=%q", err, rr.Body.String())
+	}
+	if body.Hash != initialHash {
+		t.Errorf("hash=%q want %q", body.Hash, initialHash)
+	}
+	if body.MatchesRunSnapshot == nil || !*body.MatchesRunSnapshot {
+		t.Errorf("matchesRunSnapshot=%v want true", body.MatchesRunSnapshot)
+	}
+	if !bytes.Equal([]byte(body.Content), prdBody) {
+		t.Errorf("content=%s want %s", body.Content, prdBody)
+	}
+
+	// Rewrite prd.json with different bytes — hash changes, manifest's
+	// PRDSnapshot should no longer match.
+	rewritten := []byte(`{"version":2,"stories":[{"id":"X"}]}`)
+	if err := os.WriteFile(prdFile, rewritten, 0o644); err != nil {
+		t.Fatalf("rewrite prd: %v", err)
+	}
+	rr = doGet(t, h, "/api/repos/"+fp+"/prd?run_id="+runID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.MatchesRunSnapshot == nil || *body.MatchesRunSnapshot {
+		t.Errorf("matchesRunSnapshot=%v want false after rewrite", body.MatchesRunSnapshot)
+	}
+	want := sha256.Sum256(rewritten)
+	if body.Hash != hex.EncodeToString(want[:]) {
+		t.Errorf("hash did not update after rewrite: %q", body.Hash)
+	}
+}
+
+func TestHandlePRD_OmitsMatchWhenNoRunID(t *testing.T) {
+	t.Setenv("RALPH_DATA_DIR", t.TempDir())
+
+	repoPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoPath, "prd.json"), []byte(`{"k":1}`), 0o644); err != nil {
+		t.Fatalf("write prd: %v", err)
+	}
+	reposDir, _ := userdata.ReposDir()
+	const fp = "abcdefabcdef"
+	now := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
+	meta := history.RepoMeta{Path: repoPath, Name: "r", FirstSeen: now, LastSeen: now}
+	md, _ := json.Marshal(meta)
+	if err := os.MkdirAll(filepath.Join(reposDir, fp), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reposDir, fp, "meta.json"), md, 0o644); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+
+	_, h := newTestServer(t)
+
+	rr := doGet(t, h, "/api/repos/"+fp+"/prd")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	var body viewer.PRDResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.MatchesRunSnapshot != nil {
+		t.Errorf("matchesRunSnapshot=%v want nil when no run_id", body.MatchesRunSnapshot)
+	}
+	if body.Hash == "" {
+		t.Errorf("hash empty")
+	}
+}
+
+func TestHandlePRD_404WhenMissing(t *testing.T) {
+	t.Setenv("RALPH_DATA_DIR", t.TempDir())
+
+	repoPath := t.TempDir() // no prd.json inside
+	reposDir, _ := userdata.ReposDir()
+	const fp = "abcdefabcdef"
+	now := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
+	meta := history.RepoMeta{Path: repoPath, Name: "r", FirstSeen: now, LastSeen: now}
+	md, _ := json.Marshal(meta)
+	if err := os.MkdirAll(filepath.Join(reposDir, fp), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reposDir, fp, "meta.json"), md, 0o644); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+
+	_, h := newTestServer(t)
+
+	rr := doGet(t, h, "/api/repos/"+fp+"/prd")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d want 404 body=%q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-cache, must-revalidate" {
+		t.Errorf("Cache-Control=%q want no-cache on 404", got)
+	}
+	var errBody map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("unmarshal: %v body=%q", err, rr.Body.String())
+	}
+	if errBody["error"] != "prd_missing" {
+		t.Errorf("error=%q want prd_missing", errBody["error"])
 	}
 }
 

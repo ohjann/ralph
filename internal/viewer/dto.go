@@ -6,6 +6,7 @@
 package viewer
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/ohjann/ralphplusplus/internal/costs"
@@ -77,4 +78,16 @@ type RunListItem struct {
 type RunDetail struct {
 	Manifest history.Manifest  `json:"manifest"`
 	Summary  *costs.RunSummary `json:"summary,omitempty"`
+}
+
+// PRDResponse is GET /api/repos/:fp/prd. Hash is the sha256-hex of the
+// on-disk prd.json; Content is the parsed JSON body. MatchesRunSnapshot
+// is set only when a run_id query param is provided and the referenced
+// manifest carries a PRDSnapshot — then it reports whether the current
+// file hash equals that snapshot. Omitted otherwise so the UI can tell
+// "not compared" from "compared and differs".
+type PRDResponse struct {
+	Hash                string          `json:"hash"`
+	Content             json.RawMessage `json:"content"`
+	MatchesRunSnapshot  *bool           `json:"matchesRunSnapshot,omitempty"`
 }
