@@ -126,6 +126,41 @@ export interface PRDResponse {
   matchesRunSnapshot?: boolean;
 }
 
+// Matches internal/viewer/dto.go SettingsResponse. Exactly one of state
+// (daemon source) or config (file source) is populated per response.
+export interface SettingsResponse {
+  source: 'daemon' | 'file';
+  state?: unknown; // DaemonStateEvent-shaped when source==='daemon'
+  config?: Record<string, unknown>;
+}
+
+// Matches internal/viewer/dto.go RepoMetaResponse.
+export interface RepoMetaAggCosts {
+  runs: number;
+  totalCost: number;
+  durationMinutes: number;
+  totalIterations: number;
+  storiesTotal: number;
+  storiesCompleted: number;
+  storiesFailed: number;
+}
+
+export interface RepoMetaRecord {
+  path: string;
+  name: string;
+  git_first_sha?: string;
+  first_seen: string;
+  last_seen: string;
+  last_run_id?: string;
+  run_count: number;
+}
+
+export interface RepoMetaResponse {
+  meta: RepoMetaRecord;
+  aggCosts: RepoMetaAggCosts;
+  runCountsByKind: Record<string, number>;
+}
+
 export interface RunListItem {
   runId: string;
   kind: string;

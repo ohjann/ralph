@@ -197,6 +197,20 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
       </button>
       {isOpen && (
         <div class="pl-5 pr-3 py-1 bg-neutral-925">
+          <div class="flex items-center gap-3 py-1 text-[11px]">
+            <a
+              href={`/repos/${repo.fp}/meta`}
+              class="text-neutral-400 hover:text-indigo-300 uppercase tracking-wider"
+            >
+              Meta
+            </a>
+            <a
+              href={`/repos/${repo.fp}/settings`}
+              class="text-neutral-400 hover:text-indigo-300 uppercase tracking-wider"
+            >
+              Settings
+            </a>
+          </div>
           {loading && !runs && (
             <div class="py-1 text-[11px] text-neutral-500">Loading runs…</div>
           )}
