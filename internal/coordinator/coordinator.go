@@ -910,6 +910,21 @@ func (c *Coordinator) CancelAll() {
 	}
 }
 
+// Pause flips the paused flag and cancels any active workers. ScheduleReady
+// (line 174) short-circuits while paused, so no new work dispatches until
+// Resume is called. User-initiated pauses go through here; usage-limit
+// pauses also set the same flag at line 436.
+func (c *Coordinator) Pause() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.paused = true
+	for _, w := range c.workers {
+		if w.Cancel != nil {
+			w.Cancel()
+		}
+	}
+}
+
 // CleanupAll destroys all workspaces.
 func (c *Coordinator) CleanupAll(ctx context.Context) {
 	c.mu.Lock()

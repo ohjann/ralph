@@ -196,8 +196,10 @@ func (a *APIServer) handlePause(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	// Coordinator uses paused flag checked by ScheduleReady; cancel active workers
-	a.daemon.Coord.CancelAll()
+	// Pause sets c.paused so ScheduleReady won't dispatch new work, then
+	// cancels any active workers. Without the flag flip, CancelAll alone
+	// would let the next scheduling tick re-dispatch whatever was killed.
+	a.daemon.Coord.Pause()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
 }
 

@@ -6,6 +6,11 @@ import {
   type DaemonStateEvent,
   type WorkerStatus,
 } from '../../lib/live';
+import { pushToast } from '../../lib/toast';
+import { PauseToggle } from '../Commands/PauseToggle';
+import { QuitButton } from '../Commands/QuitButton';
+import { HintComposer } from '../Commands/HintComposer';
+import { ClarifyPrompt } from '../Commands/ClarifyPrompt';
 
 // Per-fp live state, shared across any StatusPanel mounts for the same repo.
 const stateByFP = signal<Record<string, DaemonStateEvent | null>>({});
@@ -17,6 +22,20 @@ export function StatusPanel({ fp }: { fp: string }) {
     const offEvent = live.onEvent((e) => {
       if (e.kind === 'state') {
         stateByFP.value = { ...stateByFP.value, [fp]: e.data };
+      } else if (e.kind === 'merge_result') {
+        const d = e.data;
+        pushToast(
+          d.success ? 'success' : 'error',
+          d.success
+            ? `Merged ${d.story_id}`
+            : `Merge failed: ${d.story_id} — ${d.error ?? 'unknown error'}`,
+        );
+      } else if (e.kind === 'stuck_alert') {
+        const d = e.data;
+        pushToast(
+          'warn',
+          `Worker #${d.worker_id} stuck on ${d.story_id}: ${d.stuck_reason}`,
+        );
       }
     });
     const offStatus = live.onStatus((s) => {
@@ -150,6 +169,20 @@ export function StatusPanel({ fp }: { fp: string }) {
           </dl>
         </section>
       )}
+
+      <section class="mt-4 pt-3 border-t border-neutral-800">
+        <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-2">
+          Controls
+        </div>
+        <div class="flex items-center gap-2 mb-3">
+          <PauseToggle fp={fp} paused={state.paused} />
+          <QuitButton fp={fp} />
+        </div>
+        <HintComposer fp={fp} workers={workers} />
+        <div class="mt-3">
+          <ClarifyPrompt fp={fp} enabled={false} />
+        </div>
+      </section>
     </aside>
   );
 }

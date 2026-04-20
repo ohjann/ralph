@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar/Sidebar';
 import { Home } from './routes/Home';
 import { RunRoute } from './routes/RunRoute';
 import { IterRoute } from './routes/IterRoute';
+import { ToastStack } from './components/Toast';
 
 export function App() {
   return (
@@ -21,6 +22,7 @@ export function App() {
           </Router>
         </main>
       </div>
+      <ToastStack />
     </LocationProvider>
   );
 }
