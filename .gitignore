@@ -34,3 +34,6 @@ frontend/.vite/
 /memory/
 memory/chroma/
 memory/conda-env/
+
+# Design handoff (reference only, not for commit)
+/design_handoff_ralph_viewer/

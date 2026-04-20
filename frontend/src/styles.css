@@ -1,1 +1,276 @@
 @import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+ * Design tokens — Rosé Pine palette (default).
+ *
+ * Hex values taken from the design handoff. Light ≈ "Dawn", dark ≈ "Main".
+ * Tokens are referenced everywhere via var(--foo) so a future palette
+ * picker can swap the whole look by overriding the block under :root.
+ * ------------------------------------------------------------------------ */
+
+@font-face { font-display: swap; }
+
+:root {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  /* Density */
+  --row-h: 32px;
+  --row-pad-y: 6px;
+  --row-gap: 2px;
+  --section-gap: 18px;
+  --fs-ui: 13px;
+  --fs-mono: 12px;
+  --fs-label: 11px;
+}
+
+/* Light theme (Rosé Pine — Dawn) */
+html[data-theme="light"] {
+  --page:       #faf4ed;
+  --bg:         #faf4ed;
+  --bg-sidebar: #faf4ed;
+  --bg-card:    #fffaf3;
+  --bg-elev:    #fffaf3;
+  --bg-sunken:  #f4ede4;
+  --bg-hover:   #f2e9e1;
+  --bg-active:  #eee0d4;
+
+  --fg:        #575279;
+  --fg-muted:  #797593;
+  --fg-faint:  #9893a5;
+  --fg-ghost:  #b4afc2;
+
+  --border:        #dfdad9;
+  --border-strong: #cecacd;
+  --border-soft:   #ece4db;
+
+  --sidebar-fg:       #575279;
+  --sidebar-fg-muted: #797593;
+  --sidebar-fg-faint: #9893a5;
+  --sidebar-fg-ghost: #b4afc2;
+  --sidebar-hover:    #ece2d6;
+  --sidebar-active:   #e4d5c5;
+  --sidebar-border:   #e5ddd2;
+
+  --accent:        #b4637a;
+  --accent-strong: #96485e;
+  --accent-soft:   rgba(180, 99, 122, 0.12);
+  --accent-border: rgba(180, 99, 122, 0.32);
+  --accent-ink:    #96485e;
+
+  --ok:      #286983;
+  --ok-soft: rgba(40, 105, 131, 0.10);
+  --warn:    #ea9d34;
+  --warn-soft: rgba(234, 157, 52, 0.14);
+  --err:     #b4637a;
+  --err-soft: rgba(180, 99, 122, 0.12);
+  --neutral-dot: #b4afc2;
+
+  --shadow-sm: 0 1px 2px rgba(87, 82, 121, 0.06);
+  --shadow-md: 0 10px 40px rgba(87, 82, 121, 0.14);
+}
+
+/* Dark theme (Rosé Pine — Main) */
+html[data-theme="dark"] {
+  --page:       #191724;
+  --bg:         #191724;
+  --bg-sidebar: #191724;
+  --bg-card:    #1f1d2e;
+  --bg-elev:    #26233a;
+  --bg-sunken:  #191724;
+  --bg-hover:   #26233a;
+  --bg-active:  #302d41;
+
+  --fg:        #e0def4;
+  --fg-muted:  #c4c0d6;
+  --fg-faint:  #908caa;
+  --fg-ghost:  #6e6a86;
+
+  --border:        #26233a;
+  --border-strong: #393552;
+  --border-soft:   #1e1c2e;
+
+  --sidebar-fg:       #e0def4;
+  --sidebar-fg-muted: #c4c0d6;
+  --sidebar-fg-faint: #908caa;
+  --sidebar-fg-ghost: #6e6a86;
+  --sidebar-hover:    #1c1a28;
+  --sidebar-active:   #26233a;
+  --sidebar-border:   #26233a;
+
+  --accent:        #ebbcba;
+  --accent-strong: #d9a5a3;
+  --accent-soft:   rgba(235, 188, 186, 0.14);
+  --accent-border: rgba(235, 188, 186, 0.38);
+  --accent-ink:    #f2d1d0;
+
+  --ok:      #9ccfd8;
+  --ok-soft: rgba(156, 207, 216, 0.16);
+  --warn:    #f6c177;
+  --warn-soft: rgba(246, 193, 119, 0.16);
+  --err:     #eb6f92;
+  --err-soft: rgba(235, 111, 146, 0.18);
+  --neutral-dot: #6e6a86;
+
+  --shadow-sm: 0 1px 2px #0006;
+  --shadow-md: 0 10px 40px #000a;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-ui);
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--accent-ink); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-ghost);
+  background-clip: content-box;
+  border: 2px solid transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* -------------------------------------------------------------------------
+ * Utility primitives used by components.
+ * ---------------------------------------------------------------------- */
+
+/* Status dots — neutral by default, colored via modifier classes. */
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--neutral-dot);
+  position: relative;
+  flex-shrink: 0;
+}
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.err { background: var(--err); }
+
+/* Pulse animation for .dot.ok.live / .dot.ok.pulse */
+.dot.ok.live::after,
+.dot.ok.pulse::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 var(--ok);
+  animation: rv-pulse 1.6s cubic-bezier(.2, .7, .4, 1) infinite;
+}
+@keyframes rv-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--ok); opacity: 0.55; }
+  70%  { box-shadow: 0 0 0 6px rgba(0,0,0,0); opacity: 0; }
+  100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); opacity: 0; }
+}
+
+/* Chips — small squared labels. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.chip.mono { font-family: var(--font-mono); font-size: 11px; }
+.chip.indigo {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+}
+.chip.ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.chip.err  { background: var(--err-soft);  color: var(--err);  border-color: var(--err); }
+
+/* Pills — fully rounded. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.pill.ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.pill.err  { background: var(--err-soft);  color: var(--err);  border-color: var(--err); }
+.pill.indigo {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: var(--accent-border);
+}
+
+/* Code block */
+pre.code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.tok-k { color: var(--accent-ink); }
+.tok-s { color: var(--ok); }
+.tok-n { color: var(--warn); }
+.tok-c { color: var(--fg-faint); font-style: italic; }
+
+/* Glyph carets per design spec */
+.caret {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  width: 10px;
+  display: inline-block;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}

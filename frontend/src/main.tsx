@@ -1,6 +1,9 @@
 import { render } from 'preact';
 import { App } from './App';
+import { installTheme } from './lib/theme';
 import './styles.css';
+
+installTheme();
 
 const token = new URLSearchParams(location.search).get('token');
 if (token) {
