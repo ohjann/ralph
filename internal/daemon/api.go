@@ -200,6 +200,10 @@ func (a *APIServer) handlePause(w http.ResponseWriter, r *http.Request) {
 	// cancels any active workers. Without the flag flip, CancelAll alone
 	// would let the next scheduling tick re-dispatch whatever was killed.
 	a.daemon.Coord.Pause()
+	// Broadcast a fresh state snapshot so SSE subscribers (the viewer)
+	// see the Paused flag flip immediately rather than at the next
+	// state-emitting event (which may be minutes away on an idle daemon).
+	a.daemon.broadcast(a.daemon.buildStateEvent())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
 }
 
@@ -209,6 +213,7 @@ func (a *APIServer) handleResume(w http.ResponseWriter, r *http.Request) {
 	}
 	a.daemon.Coord.Resume()
 	a.daemon.Coord.ScheduleReady(a.daemon.ctx)
+	a.daemon.broadcast(a.daemon.buildStateEvent())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
 }
 
