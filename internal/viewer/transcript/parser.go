@@ -290,10 +290,11 @@ func (p *parser) handleAPIEvent(ev apiEvent) (Turn, bool, bool) {
 			return Turn{}, false, false
 		}
 		var cb struct {
-			Type string `json:"type"`
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
 		}
 		_ = json.Unmarshal(ev.ContentBlock, &cb)
 		p.inputBuf.Reset()
@@ -302,7 +303,10 @@ func (p *parser) handleAPIEvent(ev apiEvent) (Turn, bool, bool) {
 		case "text":
 			nb = Block{Kind: "text", Text: cb.Text}
 		case "thinking":
-			nb = Block{Kind: "thinking"}
+			// Some streams deliver the thinking text inline on content_block_start
+			// rather than via thinking_delta events; capture it here so we don't
+			// drop it. Empty string is fine — deltas may still append.
+			nb = Block{Kind: "thinking", Text: cb.Thinking}
 		case "tool_use":
 			nb = Block{Kind: "tool_use", ToolName: cb.Name, ToolUseID: cb.ID}
 		default:
