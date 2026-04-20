@@ -26,94 +26,20 @@
   --fs-label: 11px;
 }
 
-/* Light theme (Rosé Pine — Dawn) */
+/* Palette variables (--page, --bg, --fg, --accent, etc.) are applied by JS
+ * (installTheme + setPalette in lib/theme.ts + lib/palettes.ts) as inline
+ * custom properties on <html>. That lets the palette picker swap all
+ * tokens atomically. --neutral-dot and shadow tokens are theme-mode
+ * dependent but not palette-specific, so they live here under
+ * html[data-theme="light"|"dark"]. */
+
 html[data-theme="light"] {
-  --page:       #faf4ed;
-  --bg:         #faf4ed;
-  --bg-sidebar: #faf4ed;
-  --bg-card:    #fffaf3;
-  --bg-elev:    #fffaf3;
-  --bg-sunken:  #f4ede4;
-  --bg-hover:   #f2e9e1;
-  --bg-active:  #eee0d4;
-
-  --fg:        #575279;
-  --fg-muted:  #797593;
-  --fg-faint:  #9893a5;
-  --fg-ghost:  #b4afc2;
-
-  --border:        #dfdad9;
-  --border-strong: #cecacd;
-  --border-soft:   #ece4db;
-
-  --sidebar-fg:       #575279;
-  --sidebar-fg-muted: #797593;
-  --sidebar-fg-faint: #9893a5;
-  --sidebar-fg-ghost: #b4afc2;
-  --sidebar-hover:    #ece2d6;
-  --sidebar-active:   #e4d5c5;
-  --sidebar-border:   #e5ddd2;
-
-  --accent:        #b4637a;
-  --accent-strong: #96485e;
-  --accent-soft:   rgba(180, 99, 122, 0.12);
-  --accent-border: rgba(180, 99, 122, 0.32);
-  --accent-ink:    #96485e;
-
-  --ok:      #286983;
-  --ok-soft: rgba(40, 105, 131, 0.10);
-  --warn:    #ea9d34;
-  --warn-soft: rgba(234, 157, 52, 0.14);
-  --err:     #b4637a;
-  --err-soft: rgba(180, 99, 122, 0.12);
   --neutral-dot: #b4afc2;
-
   --shadow-sm: 0 1px 2px rgba(87, 82, 121, 0.06);
   --shadow-md: 0 10px 40px rgba(87, 82, 121, 0.14);
 }
-
-/* Dark theme (Rosé Pine — Main) */
 html[data-theme="dark"] {
-  --page:       #191724;
-  --bg:         #191724;
-  --bg-sidebar: #191724;
-  --bg-card:    #1f1d2e;
-  --bg-elev:    #26233a;
-  --bg-sunken:  #191724;
-  --bg-hover:   #26233a;
-  --bg-active:  #302d41;
-
-  --fg:        #e0def4;
-  --fg-muted:  #c4c0d6;
-  --fg-faint:  #908caa;
-  --fg-ghost:  #6e6a86;
-
-  --border:        #26233a;
-  --border-strong: #393552;
-  --border-soft:   #1e1c2e;
-
-  --sidebar-fg:       #e0def4;
-  --sidebar-fg-muted: #c4c0d6;
-  --sidebar-fg-faint: #908caa;
-  --sidebar-fg-ghost: #6e6a86;
-  --sidebar-hover:    #1c1a28;
-  --sidebar-active:   #26233a;
-  --sidebar-border:   #26233a;
-
-  --accent:        #ebbcba;
-  --accent-strong: #d9a5a3;
-  --accent-soft:   rgba(235, 188, 186, 0.14);
-  --accent-border: rgba(235, 188, 186, 0.38);
-  --accent-ink:    #f2d1d0;
-
-  --ok:      #9ccfd8;
-  --ok-soft: rgba(156, 207, 216, 0.16);
-  --warn:    #f6c177;
-  --warn-soft: rgba(246, 193, 119, 0.16);
-  --err:     #eb6f92;
-  --err-soft: rgba(235, 111, 146, 0.18);
   --neutral-dot: #6e6a86;
-
   --shadow-sm: 0 1px 2px #0006;
   --shadow-md: 0 10px 40px #000a;
 }

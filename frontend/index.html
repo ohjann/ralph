@@ -11,7 +11,9 @@
       rel="stylesheet">
     <script>
       // Resolve theme pre-hydration so the background doesn't flash the
-      // wrong color on first paint.
+      // wrong color on first paint. Applies the persisted palette's
+      // --page/--bg/--fg values directly so the main card shows through
+      // on the correct base before the JS bundle loads.
       (function () {
         const saved = localStorage.getItem('ralph.theme');
         const mode = saved || 'system';
@@ -19,6 +21,15 @@
         const resolved = mode === 'system' ? (mql.matches ? 'dark' : 'light') : mode;
         document.documentElement.dataset.theme = resolved;
         document.documentElement.dataset.themeMode = mode;
+        try {
+          var p = localStorage.getItem('ralph.palette');
+          var fallback = {
+            light: { '--page': '#faf4ed', '--bg': '#faf4ed', '--bg-card': '#fffaf3', '--fg': '#575279' },
+            dark:  { '--page': '#191724', '--bg': '#191724', '--bg-card': '#1f1d2e', '--fg': '#e0def4' },
+          };
+          var vars = fallback[resolved];
+          for (var k in vars) document.documentElement.style.setProperty(k, vars[k]);
+        } catch (e) {}
       })();
     </script>
   </head>

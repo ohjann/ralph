@@ -4,6 +4,7 @@ import { useLocation } from 'preact-iso';
 import { apiGet, type RepoSummary, type RunListItem } from '../../lib/api';
 import { probeReach } from '../../lib/live';
 import { themeMode, setThemeMode, type ThemeMode } from '../../lib/theme';
+import { PalettePicker } from './PalettePicker';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -659,15 +660,7 @@ function Footer() {
         gap: 8,
       }}
     >
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--sidebar-fg-faint)',
-          fontFamily: 'var(--font-mono)',
-        }}
-      >
-        Rosé Pine
-      </div>
+      <PalettePicker />
       <ThemeIcons />
     </div>
   );
