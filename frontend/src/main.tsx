@@ -1,9 +1,11 @@
 import { render } from 'preact';
 import { App } from './App';
 import { installTheme } from './lib/theme';
+import { installTweaks } from './lib/tweaks';
 import './styles.css';
 
 installTheme();
+installTweaks();
 
 const token = new URLSearchParams(location.search).get('token');
 if (token) {

@@ -7,6 +7,7 @@ import { IterRoute } from './routes/IterRoute';
 import { SettingsRoute } from './routes/SettingsRoute';
 import { RepoMetaRoute } from './routes/RepoMetaRoute';
 import { ToastStack } from './components/Toast';
+import { TweaksPanel } from './components/TweaksPanel';
 
 export function App() {
   return (
@@ -61,6 +62,7 @@ export function App() {
         </main>
       </div>
       <ToastStack />
+      <TweaksPanel />
     </LocationProvider>
   );
 }

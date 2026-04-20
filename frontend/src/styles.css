@@ -16,7 +16,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
     Consolas, monospace;
 
-  /* Density */
+  /* Density (default) */
   --row-h: 32px;
   --row-pad-y: 6px;
   --row-gap: 2px;
@@ -24,6 +24,21 @@
   --fs-ui: 13px;
   --fs-mono: 12px;
   --fs-label: 11px;
+}
+
+html[data-density="compact"] {
+  --row-h: 28px;
+  --row-pad-y: 4px;
+  --section-gap: 14px;
+  --fs-ui: 12.5px;
+  --fs-mono: 11.5px;
+}
+html[data-density="roomy"] {
+  --row-h: 38px;
+  --row-pad-y: 9px;
+  --section-gap: 24px;
+  --fs-ui: 13.5px;
+  --fs-mono: 12.5px;
 }
 
 /* Palette variables (--page, --bg, --fg, --accent, etc.) are applied by JS
@@ -104,9 +119,11 @@ a:hover { text-decoration: underline; }
 .dot.warn { background: var(--warn); }
 .dot.err { background: var(--err); }
 
-/* Pulse animation for .dot.ok.live / .dot.ok.pulse */
-.dot.ok.live::after,
-.dot.ok.pulse::after {
+/* Pulse animation for .dot.ok.live / .dot.ok.pulse — default behavior */
+html:not([data-dotstyle]) .dot.ok.live::after,
+html[data-dotstyle="pulse"] .dot.ok.live::after,
+html:not([data-dotstyle]) .dot.ok.pulse::after,
+html[data-dotstyle="pulse"] .dot.ok.pulse::after {
   content: "";
   position: absolute;
   inset: -3px;
@@ -119,6 +136,28 @@ a:hover { text-decoration: underline; }
   70%  { box-shadow: 0 0 0 6px rgba(0,0,0,0); opacity: 0; }
   100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); opacity: 0; }
 }
+
+/* Static: no pulse, solid dot. */
+html[data-dotstyle="static"] .dot.ok.live::after,
+html[data-dotstyle="static"] .dot.ok.pulse::after {
+  display: none;
+}
+
+/* Glyph: replace dots with Unicode characters. */
+html[data-dotstyle="glyph"] .dot {
+  width: auto;
+  height: auto;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--neutral-dot);
+}
+html[data-dotstyle="glyph"] .dot::before { content: "◌"; }
+html[data-dotstyle="glyph"] .dot.ok::before   { content: "●"; color: var(--ok); }
+html[data-dotstyle="glyph"] .dot.warn::before { content: "◐"; color: var(--warn); }
+html[data-dotstyle="glyph"] .dot.err::before  { content: "✕"; color: var(--err); }
+html[data-dotstyle="glyph"] .dot::after { display: none !important; }
 
 /* Chips — small squared labels. */
 .chip {
