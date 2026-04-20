@@ -32,8 +32,11 @@ func TestDeployStuckPreventionHook(t *testing.T) {
 		t.Fatalf("settings.json not found: %v", err)
 	}
 	settingsStr := string(data)
-	if !strings.Contains(settingsStr, "preToolUse") {
-		t.Errorf("settings.json missing preToolUse hook config")
+	if !strings.Contains(settingsStr, "PreToolUse") {
+		t.Errorf("settings.json missing PreToolUse hook config")
+	}
+	if !strings.Contains(settingsStr, `"matcher"`) {
+		t.Errorf("settings.json missing matcher field in hook config")
 	}
 	if !strings.Contains(settingsStr, "stuck-prevention.sh") {
 		t.Errorf("settings.json missing hook path")
@@ -117,7 +120,7 @@ func TestDeployPreservesExistingSettings(t *testing.T) {
 	if !strings.Contains(settingsStr, "existingKey") {
 		t.Errorf("existing settings key was lost")
 	}
-	if !strings.Contains(settingsStr, "preToolUse") {
+	if !strings.Contains(settingsStr, "PreToolUse") {
 		t.Errorf("hook config not added")
 	}
 }

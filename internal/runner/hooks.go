@@ -70,10 +70,15 @@ exit 0
 func claudeSettingsForHook(hookPath string) map[string]interface{} {
 	return map[string]interface{}{
 		"hooks": map[string]interface{}{
-			"preToolUse": []interface{}{
+			"PreToolUse": []interface{}{
 				map[string]interface{}{
-					"type":    "command",
-					"command": hookPath,
+					"matcher": "*",
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": hookPath,
+						},
+					},
 				},
 			},
 		},
@@ -111,7 +116,7 @@ func DeployStuckPreventionHook(wsDir string, isFixStory bool) (hookDir string, e
 		}
 	}
 
-	// Set hooks.preToolUse
+	// Set hooks.PreToolUse
 	hookSettings := claudeSettingsForHook(hookPath)
 	settings["hooks"] = hookSettings["hooks"]
 
