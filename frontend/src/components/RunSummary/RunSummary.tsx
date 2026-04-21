@@ -6,6 +6,7 @@ import {
   type PRDResponse,
   type StoryRecord,
 } from '../../lib/api';
+import { probeReach } from '../../lib/live';
 import { StatusPanel } from '../StatusPanel/StatusPanel';
 
 const loading = signal<boolean>(false);
@@ -13,6 +14,7 @@ const error = signal<string>('');
 const detail = signal<RunDetail | null>(null);
 const prd = signal<PRDResponse | null>(null);
 const currentKey = signal<string>('');
+const reachByFP = signal<Record<string, boolean>>({});
 
 async function load(fp: string, runId: string) {
   const key = `${fp}/${runId}`;
@@ -65,6 +67,16 @@ function short(s: string, n = 8) {
 export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
   useEffect(() => {
     void load(fp, runId);
+    // Probe reachability so the status pill can distinguish truly-running
+    // from an orphaned manifest whose daemon has died without updating it.
+    let cancelled = false;
+    void (async () => {
+      const ok = await probeReach(fp);
+      if (!cancelled) reachByFP.value = { ...reachByFP.value, [fp]: ok };
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [fp, runId]);
 
   if (loading.value && !detail.value) {
@@ -84,7 +96,13 @@ export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
   const m = detail.value.manifest;
   const s = detail.value.summary;
   const p = prd.value;
-  const isLive = m.status === 'running';
+  const daemonReachable = reachByFP.value[fp] === true;
+  // Effective status honours reachability: a manifest claiming 'running' with
+  // a dead daemon is actually orphaned/interrupted. Only show StatusPanel when
+  // the daemon is actually reachable.
+  const effectiveStatus =
+    m.status === 'running' && !daemonReachable ? 'interrupted' : m.status;
+  const isLive = effectiveStatus === 'running';
 
   return (
     <div
@@ -165,7 +183,7 @@ export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
                 </span>
               )}
               <span class="pill indigo">{m.kind}</span>
-              <StatusPill status={m.status} />
+              <StatusPill status={effectiveStatus} />
             </div>
             <div
               class="mono"

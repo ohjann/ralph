@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ohjann/ralphplusplus/internal/history"
 	"github.com/ohjann/ralphplusplus/internal/viewer"
 )
 
@@ -49,6 +50,14 @@ func runViewer(args []string) error {
 	token, err := viewer.LoadOrCreateToken()
 	if err != nil {
 		return fmt.Errorf("viewer token: %w", err)
+	}
+
+	// Flip any orphaned "running" manifests from dead daemons on this host
+	// to "interrupted" so the UI doesn't lie about their status. Safe to run
+	// on every viewer start — it only touches manifests whose stamped PID is
+	// no longer alive; live daemons are untouched.
+	if sweepErr := history.SweepInterrupted(); sweepErr != nil {
+		fmt.Fprintf(os.Stderr, "warn: sweep interrupted manifests: %v\n", sweepErr)
 	}
 
 	// Server lifetime controls the projects.Index fsnotify watcher.
