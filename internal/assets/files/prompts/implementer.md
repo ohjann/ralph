@@ -106,6 +106,31 @@ runtimes, verify each.
 - Server/daemon stories: spawn the process, make the AC-specified request,
   and assert on the response.
 
+### UI/UX quality pass (frontend stories)
+
+For any story that touches the user interface, treat UX quality as part
+of the acceptance criteria even when the AC text doesn't spell it out.
+The `impeccable:*` skills are available and exist exactly for this job —
+use the appropriate one at the relevant stage:
+
+- Designing a new view / component → `impeccable:frontend-design` for
+  the initial shape.
+- Finishing an implementation → `impeccable:polish` to catch alignment,
+  spacing, and consistency issues that separate good from great.
+- Labels, microcopy, error messages → `impeccable:clarify`.
+- Error handling, edge cases, text overflow, empty states →
+  `impeccable:harden`.
+- Before declaring the story done → `impeccable:audit` for a
+  comprehensive accessibility + responsive + theming + performance
+  pass. Log findings in progress.md under the Verification Log.
+
+You do NOT need to run every impeccable skill on every story — pick the
+one(s) that match the work. A typical UI story might use `polish` +
+`clarify` + `audit`; a brand-new component story might lead with
+`frontend-design` then finish with `polish`. When in doubt, run
+`impeccable:audit` at the end — it flags severity-rated issues and
+tells you which other impeccable skill to apply.
+
 Consult CLAUDE.md for project-specific fixture conventions (throwaway
 directories, dev credentials, daemon startup flags).
 

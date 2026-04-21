@@ -14,6 +14,12 @@ Always run `make build` after verifications.
 - Start the viewer: `./build/ralph viewer --web`
 - Extract URL + token from stdout
 - Point the `rodney` skill at the URL
+- For UX quality, apply `impeccable:*` skills during/after implementation:
+  `impeccable:frontend-design` for new views, `impeccable:polish` for
+  finishing touches, `impeccable:clarify` for microcopy,
+  `impeccable:harden` for error/edge states, `impeccable:audit` as a
+  final comprehensive check. Pick what matches the work — don't run
+  all of them.
 
 **Daemon-dependent stories** (live socket, live-badge, command proxies):
 - Create a throwaway repo: `make scratch-repo`
