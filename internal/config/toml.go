@@ -2,11 +2,13 @@ package config
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/lockfile"
 )
 
 // TomlConfig mirrors the tunable subset of Config.
@@ -210,6 +212,10 @@ func (tc *TomlConfig) applyTo(cfg *Config) {
 }
 
 // SaveConfig writes the current tunable settings to .ralph/config.toml.
+// Writes are serialized across processes via an fcntl advisory lock on
+// .ralph/config.toml.lock, and land atomically via a tmp file + os.Rename
+// so concurrent writers always see a complete file (one of the writes wins
+// in full; there is no intermediate half-written state).
 func (cfg *Config) SaveConfig() error {
 	cfg.mu.RLock()
 	tc := TomlConfig{
@@ -246,7 +252,48 @@ func (cfg *Config) SaveConfig() error {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(dir, "config.toml"), buf.Bytes(), 0o644)
+	target := filepath.Join(dir, "config.toml")
+	lockPath := target + ".lock"
+
+	lock, err := lockfile.Acquire(lockPath)
+	if err != nil {
+		return fmt.Errorf("lock config.toml: %w", err)
+	}
+	defer lock.Release()
+
+	tmp, err := os.CreateTemp(dir, "config.toml.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config.toml: %w", err)
+	}
+	tmpPath := tmp.Name()
+	// Best-effort cleanup if we fail before the rename.
+	cleanup := func() { _ = os.Remove(tmpPath) }
+
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp config.toml: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp config.toml: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sync temp config.toml: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp config.toml: %w", err)
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		cleanup()
+		return fmt.Errorf("rename config.toml: %w", err)
+	}
+	debuglog.Log("config.toml: saved %d bytes to %s", buf.Len(), target)
+	return nil
 }
 
 func boolPtr(v bool) *bool      { return &v }

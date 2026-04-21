@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -614,6 +615,107 @@ func TestIdleTimeoutShutdown(t *testing.T) {
 	}
 	dmn.Shutdown() // cleanup if test fails
 	t.Error("daemon did not auto-shutdown after idle timeout")
+}
+
+// TestSecondDaemonRefusedByLockFirstKeepsServing is the RV-208 singleton
+// guarantee: a second daemon.Run on the same repo sees the live lock,
+// returns AlreadyRunningError with the first daemon's pid, and the first
+// daemon's socket keeps serving.
+func TestSecondDaemonRefusedByLockFirstKeepsServing(t *testing.T) {
+	dmn1, _, tmpDir := testDaemonShort(t)
+	startDaemon(t, dmn1)
+	defer dmn1.Shutdown()
+
+	// Build a second daemon against the same project dir (same lock path).
+	cfg2 := &config.Config{
+		ProjectDir: tmpDir,
+		PRDFile:    "/dev/null",
+		NoFusion:   true,
+		Workers:    1,
+	}
+	d2 := &dag.DAG{Nodes: map[string]*dag.StoryNode{"T-001": {StoryID: "T-001"}}}
+	stories := []prd.UserStory{{ID: "T-001", Title: "Test Story", Priority: 1}}
+	coord2 := coordinator.New(cfg2, d2, 1, stories)
+	dmn2 := daemon.New(cfg2, coord2, daemon.DaemonOpts{TotalStories: 1})
+
+	err := dmn2.Run()
+	if err == nil {
+		t.Fatal("second daemon Run returned nil, expected AlreadyRunningError")
+	}
+	if !daemon.IsAlreadyRunning(err) {
+		t.Fatalf("expected AlreadyRunningError, got %T: %v", err, err)
+	}
+	var already *daemon.AlreadyRunningError
+	if !errors.As(err, &already) {
+		t.Fatalf("errors.As failed")
+	}
+	if already.PID != os.Getpid() {
+		t.Errorf("expected AlreadyRunningError PID=%d, got %d", os.Getpid(), already.PID)
+	}
+	if already.StartedAt.IsZero() {
+		t.Error("AlreadyRunningError.StartedAt is zero")
+	}
+
+	// First daemon's socket must still serve.
+	client, err := daemon.Connect(dmn1.SocketPath())
+	if err != nil {
+		t.Fatalf("first daemon unreachable after second refused: %v", err)
+	}
+	state, err := client.GetState()
+	if err != nil {
+		t.Fatalf("GetState on first daemon: %v", err)
+	}
+	if state.Phase != "parallel" {
+		t.Errorf("first daemon unhealthy: phase=%q", state.Phase)
+	}
+}
+
+// TestDaemonStartClearsStaleLock verifies that a lockfile pointing at a
+// dead pid is treated as abandoned and cleaned up so a fresh daemon can
+// start — otherwise a crash would brick the repo.
+func TestDaemonStartClearsStaleLock(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("/tmp", "rd")
+	if err != nil {
+		t.Fatalf("mktemp: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ralphDir := filepath.Join(tmpDir, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0o755); err != nil {
+		t.Fatalf("mkdir .ralph: %v", err)
+	}
+
+	stalePID := 99999
+	if proc, err := os.FindProcess(stalePID); err == nil {
+		if err := proc.Signal(syscall.Signal(0)); err == nil {
+			stalePID = 99998
+		}
+	}
+	stalePayload := []byte(`{"pid":` + strconv.Itoa(stalePID) + `,"startedAt":"2000-01-01T00:00:00Z"}`)
+	if err := os.WriteFile(filepath.Join(ralphDir, "daemon.lock"), stalePayload, 0o644); err != nil {
+		t.Fatalf("seed stale lock: %v", err)
+	}
+
+	cfg := &config.Config{ProjectDir: tmpDir, PRDFile: "/dev/null", NoFusion: true, Workers: 1}
+	d := &dag.DAG{Nodes: map[string]*dag.StoryNode{"T-001": {StoryID: "T-001"}}}
+	stories := []prd.UserStory{{ID: "T-001", Title: "Test Story", Priority: 1}}
+	coord := coordinator.New(cfg, d, 1, stories)
+	dmn := daemon.New(cfg, coord, daemon.DaemonOpts{TotalStories: 1})
+
+	go dmn.Run() //nolint:errcheck
+	defer dmn.Shutdown()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		client, err := daemon.Connect(dmn.SocketPath())
+		if err == nil {
+			if _, err := client.GetState(); err == nil {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("daemon did not come up after stale-lock cleanup within 2s")
 }
 
 func TestIdleTimeoutResetOnClientConnect(t *testing.T) {

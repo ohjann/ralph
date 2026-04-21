@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,9 +21,28 @@ import (
 	rexec "github.com/ohjann/ralphplusplus/internal/exec"
 	"github.com/ohjann/ralphplusplus/internal/fusion"
 	"github.com/ohjann/ralphplusplus/internal/judge"
+	"github.com/ohjann/ralphplusplus/internal/lockfile"
 	"github.com/ohjann/ralphplusplus/internal/notify"
 	"github.com/ohjann/ralphplusplus/internal/worker"
 )
+
+// AlreadyRunningError is returned by Daemon.Run when another daemon holds
+// the per-repo singleton lock. The second invocation is expected to print
+// a friendly message and exit 0 (the race was resolved, not a failure).
+type AlreadyRunningError struct {
+	PID       int
+	StartedAt time.Time
+}
+
+func (e *AlreadyRunningError) Error() string {
+	return fmt.Sprintf("already running at pid %d (started %s)", e.PID, e.StartedAt.Format(time.RFC3339))
+}
+
+// IsAlreadyRunning reports whether err wraps AlreadyRunningError.
+func IsAlreadyRunning(err error) bool {
+	var e *AlreadyRunningError
+	return errors.As(err, &e)
+}
 
 // Daemon owns the coordinator and runs the coordination event loop,
 // replacing the TUI's Update() handler for worker/merge messages.
@@ -43,11 +63,13 @@ type Daemon struct {
 	apiServer *APIServer
 
 	// Lifecycle
-	ctx        context.Context
-	cancel     context.CancelFunc
-	pidFile    string
-	socketPath string
-	startTime  time.Time
+	ctx          context.Context
+	cancel       context.CancelFunc
+	pidFile      string
+	socketPath   string
+	lockPath     string
+	singleton    *lockfile.Handle
+	startTime    time.Time
 
 	// Client connect/disconnect notifications for idle timer
 	clientNotifyCh chan struct{}
@@ -83,6 +105,7 @@ func New(cfg *config.Config, coord *coordinator.Coordinator, opts DaemonOpts) *D
 		cancel:       cancel,
 		pidFile:      filepath.Join(cfg.ProjectDir, ".ralph", "daemon.pid"),
 		socketPath:   filepath.Join(cfg.ProjectDir, ".ralph", "daemon.sock"),
+		lockPath:     filepath.Join(cfg.ProjectDir, ".ralph", "daemon.lock"),
 		startTime:      time.Now(),
 		totalStories:   opts.TotalStories,
 		sseClients:     make([]chan DaemonEvent, 0),
@@ -90,11 +113,31 @@ func New(cfg *config.Config, coord *coordinator.Coordinator, opts DaemonOpts) *D
 	}
 }
 
-// Run starts the daemon: writes PID file, installs signal handlers,
-// starts the status page, and enters the coordination event loop.
-// It blocks until shutdown is triggered.
+// Run starts the daemon: acquires the per-repo singleton lock, writes PID
+// file, installs signal handlers, starts the status page, and enters the
+// coordination event loop. It blocks until shutdown is triggered.
+//
+// If a live daemon already holds the singleton lock, Run returns an
+// *AlreadyRunningError without touching any other state — the existing
+// daemon keeps running untouched.
 func (d *Daemon) Run() error {
+	handle, existing, err := lockfile.TryAcquire(d.lockPath)
+	if err == lockfile.ErrLocked {
+		return &AlreadyRunningError{PID: existing.PID, StartedAt: existing.StartedAt}
+	}
+	if err != nil {
+		return fmt.Errorf("acquire daemon lock: %w", err)
+	}
+	d.singleton = handle
+	if err := d.singleton.WriteInfo(lockfile.Info{PID: os.Getpid(), StartedAt: d.startTime}); err != nil {
+		d.singleton.Release()
+		d.singleton = nil
+		return fmt.Errorf("write daemon lock payload: %w", err)
+	}
+
 	if err := d.writePIDFile(); err != nil {
+		d.singleton.Release()
+		d.singleton = nil
 		return fmt.Errorf("write PID file: %w", err)
 	}
 	defer d.cleanup()
@@ -617,6 +660,14 @@ func (d *Daemon) cleanup() {
 
 	// Remove Unix socket
 	_ = os.Remove(d.socketPath)
+
+	// Release singleton lock and drop the lockfile so the next daemon
+	// starts against a clean slate.
+	if d.singleton != nil {
+		d.singleton.Release()
+		d.singleton = nil
+		_ = os.Remove(d.lockPath)
+	}
 
 	debuglog.Log("daemon: cleanup complete")
 }

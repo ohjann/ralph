@@ -559,6 +559,11 @@ func runDaemonMode(cfg *config.Config) {
 	})
 
 	if err := d.Run(); err != nil {
+		var already *daemon.AlreadyRunningError
+		if errors.As(err, &already) {
+			fmt.Printf("already running at pid %d (started %s)\n", already.PID, already.StartedAt.Format(time.RFC3339))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(1)
 	}
