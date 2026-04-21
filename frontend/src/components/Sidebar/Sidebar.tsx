@@ -117,9 +117,31 @@ const RUN_KIND_LABEL: Record<string, string> = {
   unknown: 'Other',
 };
 
+// Pair-and-hide: a `ralph --web` invocation produces two manifests — the
+// daemon (where the work is) and an ad-hoc TUI session (bookkeeping, often
+// empty). Showing both in the sidebar makes every run look like a duplicate.
+// For any daemon run that has an ad-hoc run starting within 10s for the same
+// repo, we hide the ad-hoc half. Solo ad-hoc runs (no nearby daemon) stay
+// visible in case the user genuinely interacted with the TUI alone.
+const PAIR_WINDOW_MS = 10_000;
+
+function hidePairedAdHoc(runs: RunListItem[]): RunListItem[] {
+  const daemonTimes: number[] = runs
+    .filter((r) => r.kind === 'daemon')
+    .map((r) => Date.parse(r.startTime))
+    .filter((t) => !Number.isNaN(t));
+  return runs.filter((r) => {
+    if (r.kind !== 'ad-hoc') return true;
+    const t = Date.parse(r.startTime);
+    if (Number.isNaN(t)) return true;
+    return !daemonTimes.some((d) => Math.abs(d - t) <= PAIR_WINDOW_MS);
+  });
+}
+
 function groupByKind(runs: RunListItem[]): Array<[string, RunListItem[]]> {
+  const visible = hidePairedAdHoc(runs);
   const groups: Record<string, RunListItem[]> = {};
-  for (const r of runs) {
+  for (const r of visible) {
     const k = r.kind || 'unknown';
     (groups[k] ??= []).push(r);
   }
