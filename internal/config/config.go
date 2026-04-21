@@ -752,6 +752,41 @@ func (c *Config) Snapshot() ConfigSnapshot {
 	}
 }
 
+// NewForRepo returns a *Config seeded with defaults plus any persisted
+// values from <repoPath>/.ralph/config.toml. It is the headless write path
+// the viewer uses when the daemon is offline — same defaults as Parse(),
+// no CLI args, no env loading. Callers can call ApplySettings then
+// SaveConfig to round-trip a merged TOML back to disk.
+func NewForRepo(repoPath string) (*Config, error) {
+	abs, err := filepath.Abs(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo path: %w", err)
+	}
+	cfg := &Config{
+		ProjectDir:         abs,
+		JudgeEnabled:       true,
+		JudgeMaxRejections: 2,
+		Workers:            1,
+		WorkspaceBase:      "/tmp/ralph-workspaces",
+		QualityReview:      true,
+		QualityWorkers:     3,
+		QualityMaxIters:    2,
+		SpriteEnabled:      true,
+		UtilityModel:       "haiku",
+		AutoMaxWorkers:     5,
+		FusionWorkers:      2,
+		IdleTimeout:        5 * time.Minute,
+		Memory:             DefaultMemoryConfig(),
+	}
+	tc, tcErr := loadTomlConfig(cfg.ProjectDir)
+	if tcErr != nil {
+		debuglog.Log("config.toml: NewForRepo error loading: %v", tcErr)
+	} else if tc != nil {
+		tc.applyTo(cfg)
+	}
+	return cfg, nil
+}
+
 // ApplySettings applies the non-nil fields of tc to the live Config under
 // the write-lock and returns the TOML tag names of fields that were
 // overwritten. Callers typically follow up with SaveConfig() so disk

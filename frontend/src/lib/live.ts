@@ -42,6 +42,31 @@ export interface FusionMetrics {
   [k: string]: unknown;
 }
 
+// SettingsSnapshot mirrors internal/daemon/protocol.go SettingsSnapshot —
+// the live tunable values the daemon emits in every daemon_state event.
+// Used by the SettingsRoute editor to seed inputs when source==='daemon'.
+export interface SettingsSnapshot {
+  judge_enabled: boolean;
+  judge_max_rejections: number;
+  workers: number;
+  workers_auto: boolean;
+  auto_max_workers: number;
+  quality_review: boolean;
+  quality_workers: number;
+  quality_max_iterations: number;
+  memory_disable: boolean;
+  no_architect: boolean;
+  no_simplify: boolean;
+  no_fusion: boolean;
+  fusion_workers: number;
+  sprite_enabled: boolean;
+  workspace_base: string;
+  model_override: string;
+  architect_model: string;
+  implementer_model: string;
+  utility_model: string;
+}
+
 export interface DaemonStateEvent {
   workers: Record<string, WorkerStatus>;
   stories: Record<string, StoryStatus>;
@@ -58,6 +83,7 @@ export interface DaemonStateEvent {
   fusion_metrics: FusionMetrics;
   uptime: string;
   client_count: number;
+  settings: SettingsSnapshot;
   timestamp: string;
 }
 

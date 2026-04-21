@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/costs"
 	"github.com/ohjann/ralphplusplus/internal/history"
 )
@@ -91,6 +92,28 @@ type SettingsResponse struct {
 	Source string                 `json:"source"`
 	State  json.RawMessage        `json:"state,omitempty"`
 	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+// SettingsUpdateRequest is the body of POST /api/live/:fp/settings. It is a
+// type alias for config.TomlConfig so the wire schema and field names always
+// match the canonical config struct — adding a tunable to TomlConfig
+// automatically extends the editor's accepted payload.
+type SettingsUpdateRequest = config.TomlConfig
+
+// SettingsUpdateResponse is the body of a successful POST /api/live/:fp/settings.
+// Source distinguishes whether the write hit the live daemon or fell back to
+// the on-disk config.toml; Applied is the list of TOML tag names that were
+// changed (empty means the request had no non-nil fields).
+type SettingsUpdateResponse struct {
+	Source  string   `json:"source"`
+	Applied []string `json:"applied"`
+}
+
+// SettingsValidationError is the body of a 400 validation_failed response from
+// POST /api/live/:fp/settings. Fields is a TOML-tag-keyed map of error messages.
+type SettingsValidationError struct {
+	Error  string            `json:"error"`
+	Fields map[string]string `json:"fields"`
 }
 
 // RepoMetaResponse is GET /api/repos/:fp/meta. Bundles the on-disk RepoMeta

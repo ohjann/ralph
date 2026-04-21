@@ -34,15 +34,27 @@ type DaemonStateEvent struct {
 
 // SettingsSnapshot mirrors the tunable subset of config.Config on the wire,
 // so SPA clients can render the live values that ApplySettings updates.
+// Field set is the same 19 tunables the SettingsRoute editor exposes.
 type SettingsSnapshot struct {
-	Workers         int  `json:"workers"`
-	NoArchitect     bool `json:"no_architect"`
-	JudgeEnabled    bool `json:"judge_enabled"`
-	FusionWorkers   int  `json:"fusion_workers"`
-	NoFusion        bool `json:"no_fusion"`
-	QualityReview   bool `json:"quality_review"`
-	QualityWorkers  int  `json:"quality_workers"`
-	QualityMaxIters int  `json:"quality_max_iterations"`
+	JudgeEnabled       bool   `json:"judge_enabled"`
+	JudgeMaxRejections int    `json:"judge_max_rejections"`
+	Workers            int    `json:"workers"`
+	WorkersAuto        bool   `json:"workers_auto"`
+	AutoMaxWorkers     int    `json:"auto_max_workers"`
+	QualityReview      bool   `json:"quality_review"`
+	QualityWorkers     int    `json:"quality_workers"`
+	QualityMaxIters    int    `json:"quality_max_iterations"`
+	MemoryDisable      bool   `json:"memory_disable"`
+	NoArchitect        bool   `json:"no_architect"`
+	NoSimplify         bool   `json:"no_simplify"`
+	NoFusion           bool   `json:"no_fusion"`
+	FusionWorkers      int    `json:"fusion_workers"`
+	SpriteEnabled      bool   `json:"sprite_enabled"`
+	WorkspaceBase      string `json:"workspace_base"`
+	ModelOverride      string `json:"model_override"`
+	ArchitectModel     string `json:"architect_model"`
+	ImplementerModel   string `json:"implementer_model"`
+	UtilityModel       string `json:"utility_model"`
 }
 
 // WorkerStatus mirrors the fields the TUI reads from worker.Worker.

@@ -31,6 +31,7 @@ type TomlConfig struct {
 	ModelOverride      *string `toml:"model_override" json:"model_override,omitempty"`
 	ArchitectModel     *string `toml:"architect_model" json:"architect_model,omitempty"`
 	ImplementerModel   *string `toml:"implementer_model" json:"implementer_model,omitempty"`
+	UtilityModel       *string `toml:"utility_model" json:"utility_model,omitempty"`
 	NoSimplify         *bool   `toml:"no_simplify" json:"no_simplify,omitempty"`
 	NoFusion           *bool   `toml:"no_fusion" json:"no_fusion,omitempty"`
 	FusionWorkers      *int    `toml:"fusion_workers" json:"fusion_workers,omitempty"`
@@ -137,6 +138,9 @@ func (tc *TomlConfig) ChangedFields() []string {
 	if tc.ImplementerModel != nil {
 		out = append(out, "implementer_model")
 	}
+	if tc.UtilityModel != nil {
+		out = append(out, "utility_model")
+	}
 	if tc.NoSimplify != nil {
 		out = append(out, "no_simplify")
 	}
@@ -200,6 +204,9 @@ func (tc *TomlConfig) applyTo(cfg *Config) {
 	if tc.ImplementerModel != nil {
 		cfg.ImplementerModel = *tc.ImplementerModel
 	}
+	if tc.UtilityModel != nil {
+		cfg.UtilityModel = *tc.UtilityModel
+	}
 	if tc.NoSimplify != nil {
 		cfg.NoSimplify = *tc.NoSimplify
 	}
@@ -234,6 +241,7 @@ func (cfg *Config) SaveConfig() error {
 		ModelOverride:      stringPtr(cfg.ModelOverride),
 		ArchitectModel:     stringPtr(cfg.ArchitectModel),
 		ImplementerModel:   stringPtr(cfg.ImplementerModel),
+		UtilityModel:       stringPtr(cfg.UtilityModel),
 		NoSimplify:         boolPtr(cfg.NoSimplify),
 		NoFusion:           boolPtr(cfg.NoFusion),
 		FusionWorkers:      intPtr(cfg.FusionWorkers),

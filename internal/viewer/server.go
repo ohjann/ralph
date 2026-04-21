@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/live/{fp}/state", s.handleLiveState)
 	mux.HandleFunc("GET /api/live/{fp}/worker/{id}/activity", s.handleLiveWorkerActivity)
 	mux.HandleFunc("GET /api/live/{fp}/settings", s.handleSettings)
+	mux.HandleFunc("POST /api/live/{fp}/settings", s.handleSettingsPost)
 	mux.HandleFunc("/api/live/{fp}/pause", s.handleLiveCommand("pause"))
 	mux.HandleFunc("/api/live/{fp}/resume", s.handleLiveCommand("resume"))
 	mux.HandleFunc("/api/live/{fp}/hint", s.handleLiveCommand("hint"))

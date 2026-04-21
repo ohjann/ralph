@@ -204,6 +204,44 @@ export interface SettingsResponse {
   config?: Record<string, unknown>;
 }
 
+// SettingsValues mirrors internal/config.TomlConfig — the 19 tunables the
+// editor can read from disk or the daemon snapshot and write back via
+// POST /api/live/:fp/settings. All fields optional: omitted means "leave
+// the on-disk / live value unchanged".
+export interface SettingsValues {
+  judge_enabled?: boolean;
+  judge_max_rejections?: number;
+  workers?: number;
+  workers_auto?: boolean;
+  auto_max_workers?: number;
+  quality_review?: boolean;
+  quality_workers?: number;
+  quality_max_iterations?: number;
+  memory_disable?: boolean;
+  no_architect?: boolean;
+  sprite_enabled?: boolean;
+  workspace_base?: string;
+  model_override?: string;
+  architect_model?: string;
+  implementer_model?: string;
+  utility_model?: string;
+  no_simplify?: boolean;
+  no_fusion?: boolean;
+  fusion_workers?: number;
+}
+
+// Matches internal/viewer/dto.go SettingsUpdateResponse.
+export interface SettingsUpdateResponse {
+  source: 'daemon' | 'file';
+  applied: string[];
+}
+
+// Matches internal/viewer/dto.go SettingsValidationError.
+export interface SettingsValidationError {
+  error: 'validation_failed';
+  fields: Record<string, string>;
+}
+
 // Matches internal/viewer/dto.go RepoMetaResponse.
 export interface RepoMetaAggCosts {
   runs: number;

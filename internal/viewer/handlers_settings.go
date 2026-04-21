@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/ohjann/ralphplusplus/internal/config"
 	"github.com/ohjann/ralphplusplus/internal/costs"
 	"github.com/ohjann/ralphplusplus/internal/history"
 )
@@ -65,6 +67,124 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 var errRepoNotFound = errors.New("repo_not_found")
+
+// handleSettingsPost serves POST /api/live/:fp/settings. The body is a
+// SettingsUpdateRequest (= config.TomlConfig). When the daemon socket is
+// reachable, the request is forwarded to the daemon's POST /api/settings —
+// the daemon mutates its live Config under cfg.mu, persists to disk, and
+// broadcasts a daemon_state SSE so other viewers see the change. Source is
+// "daemon" in that case.
+//
+// When the daemon is offline, the viewer validates and writes
+// <RepoMeta.Path>/.ralph/config.toml directly via config.SaveConfig — the
+// daemon will pick up the new values on its next start. Source is "file".
+//
+// On a TOML validation error (workers < 1, etc.) the response is 400 with
+// {error:"validation_failed", fields:{...}}, regardless of source. On
+// successful daemon-forward where the daemon returns 4xx, the daemon's
+// response body is propagated verbatim.
+func (s *Server) handleSettingsPost(w http.ResponseWriter, r *http.Request) {
+	fp := r.PathValue("fp")
+	w.Header().Set("Cache-Control", "no-store")
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":  "read_body",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	var tc SettingsUpdateRequest
+	if err := json.Unmarshal(body, &tc); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":  "invalid_json",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	// Client-side validation also lives in the SPA, but server-side is
+	// authoritative — same rules whether the daemon is up or down.
+	if errs := tc.Validate(); len(errs) > 0 {
+		writeJSON(w, http.StatusBadRequest, SettingsValidationError{
+			Error:  "validation_failed",
+			Fields: errs,
+		})
+		return
+	}
+
+	// Daemon-forward path: round-trip POST /api/settings on the unix socket.
+	if sock, sockErr := s.resolveSock(r.Context(), fp); sockErr == nil {
+		if status, applied, fwdErr := forwardSettingsToDaemon(r.Context(), sock, body); fwdErr == nil {
+			if status == http.StatusOK {
+				writeJSON(w, http.StatusOK, SettingsUpdateResponse{
+					Source:  "daemon",
+					Applied: applied,
+				})
+				return
+			}
+			// Daemon returned a non-200 — propagate its status and an opaque
+			// error so the SPA knows the daemon rejected the write rather
+			// than silently falling back.
+			writeJSON(w, status, map[string]any{
+				"error":  "daemon_rejected",
+				"status": status,
+			})
+			return
+		}
+		// Forward failed (transient socket issue). Fall through to file
+		// fallback so the user's edit is not lost.
+	}
+
+	// File fallback: validate, then load + merge + save through SaveConfig.
+	meta, ok := s.lookupRepo(w, r, fp)
+	if !ok {
+		return
+	}
+	cfg, loadErr := config.NewForRepo(meta.Path)
+	if loadErr != nil {
+		http.Error(w, "load config: "+loadErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	applied := cfg.ApplySettings(&tc)
+	if err := cfg.SaveConfig(); err != nil {
+		http.Error(w, "save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, SettingsUpdateResponse{
+		Source:  "file",
+		Applied: applied,
+	})
+}
+
+// forwardSettingsToDaemon proxies the POST body to the daemon's
+// /api/settings endpoint and returns the daemon's status code plus the
+// "applied" field from a successful response. A non-nil error means the
+// round-trip itself failed (socket gone, transport error) and the caller
+// should fall through to the file path.
+func forwardSettingsToDaemon(ctx context.Context, sock string, body []byte) (int, []string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/api/settings", bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := unixRoundTrip(sock, req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, nil, nil
+	}
+	var parsed struct {
+		Applied []string `json:"applied"`
+	}
+	_ = json.Unmarshal(respBody, &parsed)
+	return resp.StatusCode, parsed.Applied, nil
+}
 
 // readRepoConfigToml resolves :fp to RepoMeta.Path and parses
 // <Path>/.ralph/config.toml into a generic map. Returns errRepoNotFound when
