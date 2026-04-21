@@ -110,8 +110,10 @@ runtimes, verify each.
 
 For any story that touches the user interface, treat UX quality as part
 of the acceptance criteria even when the AC text doesn't spell it out.
-The `impeccable:*` skills are available and exist exactly for this job —
-use the appropriate one at the relevant stage:
+The `impeccable:*` skill family exists exactly for this job. First check
+whether the skills are available in this session (the available-skills
+list at the top of your context); if they are, reach for the appropriate
+one at the relevant stage:
 
 - Designing a new view / component → `impeccable:frontend-design` for
   the initial shape.
@@ -123,6 +125,12 @@ use the appropriate one at the relevant stage:
 - Before declaring the story done → `impeccable:audit` for a
   comprehensive accessibility + responsive + theming + performance
   pass. Log findings in progress.md under the Verification Log.
+
+If the impeccable plugin is NOT available in this session, proceed
+without it — do not block the story on a missing plugin. Note the
+skipped quality pass in progress.md's Verification Log with a
+`"impeccable unavailable"` line so a reviewer can apply the skills
+manually later.
 
 You do NOT need to run every impeccable skill on every story — pick the
 one(s) that match the work. A typical UI story might use `polish` +

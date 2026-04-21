@@ -42,6 +42,15 @@ Pre-built tarballs ship only the `ralph` binary. You still need the following on
 - **`jj`** and **`git`** — required for version control operations
 - **`claude`** — the Claude Code CLI, installed separately via `npm install -g @anthropic-ai/claude-code`
 
+### Recommended Claude Code plugins
+
+Ralph's implementer prompt references these Claude Code plugins and will use them when present. They are **optional** — Ralph runs without them and the prompt degrades gracefully — but having them installed improves the output, particularly on UI-heavy stories.
+
+- **`rodney`** — headless Chrome CLI used for browser verification of frontend stories. Install per the `rodney-tips` skill's guidance.
+- **`impeccable`** — family of UX-quality skills (`impeccable:polish`, `:clarify`, `:harden`, `:audit`, `:frontend-design`, etc.) that the implementer prompt reaches for on UI work. Install from the Claude Code plugin marketplace.
+
+If neither is available, Ralph stays functional — UI stories simply skip the browser-verification and UX-quality passes with a "Verification Blocked" entry in progress.md rather than failing.
+
 ## Installing a released tarball
 
 Tagged releases (`v*`) publish darwin and linux tarballs with SHA256 checksums via GoReleaser. A single-binary install on macOS arm64 looks like:
