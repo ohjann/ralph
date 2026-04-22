@@ -45,7 +45,7 @@ func TestSaveConfig_ConcurrentWritersProduceOneValidFile(t *testing.T) {
 			t.Fatalf("trial %d: read result: %v", trial, err)
 		}
 
-		var parsed tomlConfig
+		var parsed TomlConfig
 		if err := toml.Unmarshal(data, &parsed); err != nil {
 			t.Fatalf("trial %d: result is not valid TOML: %v\n--- data ---\n%s", trial, err, data)
 		}

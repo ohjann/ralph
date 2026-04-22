@@ -2384,8 +2384,23 @@ func checkpointOverlapsPRD(cp *checkpoint.Checkpoint, prdFile string) bool {
 // transitionToComplete handles the "all stories done" transition.
 // If quality review is enabled and hasn't run yet, starts quality review.
 // Otherwise, transitions to summary generation.
+//
+// When the TUI is attached to a daemon (m.client != nil) the daemon
+// owns the post-completion pipeline. The TUI just drops into
+// phaseInteractive and lets daemon broadcasts drive the display —
+// running the pipeline locally would duplicate every step (SUMMARY.md
+// generation, quality review, retro, run-history append, etc.).
 func (m *Model) transitionToComplete() (tea.Model, tea.Cmd) {
 	debuglog.Log("transitionToComplete: iteration=%d, currentStory=%s", m.iteration, m.currentStoryID)
+	if m.client != nil {
+		m.phase = phaseInteractive
+		m.allComplete = true
+		m.claudeContent += "\n" + tsLog("── All stories complete — daemon is running post-run tasks ──\n")
+		m.claudeVP.SetContent(m.claudeContent)
+		m.claudeVP.GotoBottom()
+		m.prevClaudeLen = len(m.claudeContent)
+		return m, nil
+	}
 	if m.cfg.QualityReview && m.qualityIteration == 0 {
 		m.qualityIteration = 1
 		m.phase = phaseQualityReview
