@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ohjann/ralphplusplus/internal/config"
+	"github.com/ohjann/ralphplusplus/internal/memory"
 	"github.com/ohjann/ralphplusplus/internal/quality"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 )
@@ -38,6 +39,12 @@ type RetroResult struct {
 // It reads the PRD and SUMMARY.md, gets a file manifest, spawns a Claude
 // session to analyze the code holistically, and returns improvement suggestions.
 func RunRetrospective(ctx context.Context, cfg *config.Config, projectDir, logDir, prdFile, model string) (*RetroResult, error) {
+	return RunRetrospectiveWith(ctx, cfg, projectDir, logDir, prdFile, defaultRunClaude(cfg, model))
+}
+
+// RunRetrospectiveWith is RunRetrospective with the Claude invocation
+// injected, so tests can short-circuit the Claude call.
+func RunRetrospectiveWith(ctx context.Context, cfg *config.Config, projectDir, logDir, prdFile string, runClaude memory.RunClaudeFunc) (*RetroResult, error) {
 	// Read PRD
 	prdData, err := os.ReadFile(prdFile)
 	if err != nil {
@@ -71,13 +78,7 @@ func RunRetrospective(ctx context.Context, cfg *config.Config, projectDir, logDi
 
 	// Run Claude
 	logPath := filepath.Join(logDir, "retro.log")
-	_, err = runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logPath, runner.IterationOpts{
-		StoryID: "_retro",
-		Role:    "retro",
-		Iter:    1,
-		Model:   model,
-	})
-	if err != nil {
+	if err := runClaude(ctx, projectDir, prompt, logPath); err != nil {
 		return nil, fmt.Errorf("claude retrospective: %w", err)
 	}
 
@@ -247,4 +248,16 @@ func groupByCategory(improvements []Improvement) []categoryGroup {
 		groups = append(groups, categoryGroup{name: cat, items: items})
 	}
 	return groups
+}
+
+func defaultRunClaude(cfg *config.Config, model string) memory.RunClaudeFunc {
+	return func(ctx context.Context, projectDir, prompt, logFilePath string) error {
+		_, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logFilePath, runner.IterationOpts{
+			StoryID: "_retro",
+			Role:    "retro",
+			Iter:    1,
+			Model:   model,
+		})
+		return err
+	}
 }

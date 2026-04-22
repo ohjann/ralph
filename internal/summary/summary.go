@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/ohjann/ralphplusplus/internal/config"
+	"github.com/ohjann/ralphplusplus/internal/memory"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 )
 
@@ -21,6 +22,14 @@ import (
 // The call records an iteration under StoryID "_summary" Role "summary"
 // when cfg.HistoryRun is active, matching the pre-port TUI behavior.
 func Generate(ctx context.Context, cfg *config.Config) (string, error) {
+	return GenerateWith(ctx, cfg, defaultRunClaude(cfg))
+}
+
+// GenerateWith is Generate with the Claude invocation injected. Callers
+// supply a RunClaudeFunc so tests can record prompts / short-circuit the
+// Claude call, and so alternative attributions (e.g. utility role) can
+// be chosen by the caller.
+func GenerateWith(ctx context.Context, cfg *config.Config, runClaude memory.RunClaudeFunc) (string, error) {
 	summaryPath := filepath.Join(cfg.ProjectDir, "SUMMARY.md")
 	_ = os.Remove(summaryPath)
 
@@ -50,12 +59,19 @@ Be concise but thorough. Focus on actionable information the developer needs to 
 `, string(prdData), string(progressData))
 
 	logPath := filepath.Join(cfg.LogDir, "summary.log")
-	_, err := runner.RunClaudeForIteration(ctx, cfg, cfg.ProjectDir, prompt, logPath, runner.IterationOpts{
-		StoryID: "_summary",
-		Role:    "summary",
-		Iter:    1,
-	})
+	err := runClaude(ctx, cfg.ProjectDir, prompt, logPath)
 
 	content, _ := os.ReadFile(summaryPath)
 	return string(content), err
+}
+
+func defaultRunClaude(cfg *config.Config) memory.RunClaudeFunc {
+	return func(ctx context.Context, projectDir, prompt, logFilePath string) error {
+		_, err := runner.RunClaudeForIteration(ctx, cfg, projectDir, prompt, logFilePath, runner.IterationOpts{
+			StoryID: "_summary",
+			Role:    "summary",
+			Iter:    1,
+		})
+		return err
+	}
 }
