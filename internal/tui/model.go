@@ -36,6 +36,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/roles"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/storystate"
+	"github.com/ohjann/ralphplusplus/internal/userdata"
 	"github.com/ohjann/ralphplusplus/internal/worker"
 )
 
@@ -186,6 +187,9 @@ func NewModel(cfg *config.Config, version string, client *daemon.DaemonClient) *
 	// Always create notifier for terminal notifications; ntfy push only fires if topic is set
 	n := notify.NewNotifier(cfg.NotifyTopic, cfg.NtfyServer)
 	n.SetDisabled(!cfg.NotifyEnabled)
+	if fp, err := userdata.Fingerprint(cfg.ProjectDir); err == nil {
+		n.SetRepoFP(fp)
+	}
 
 	hi := textarea.New()
 	hi.Placeholder = "Type a hint for Claude..."

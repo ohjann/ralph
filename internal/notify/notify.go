@@ -3,21 +3,24 @@ package notify
 import (
 	"context"
 	"fmt"
-	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/ohjann/ralphplusplus/internal/debuglog"
+	"github.com/ohjann/ralphplusplus/internal/userdata"
 )
 
 // Notifier sends push notifications via ntfy.sh and/or local terminal notifications.
 type Notifier struct {
 	topic     string
 	serverURL string
-	terminal  bool // send macOS/terminal notifications
-	disabled  bool // when true, all notifications are suppressed
+	terminal  bool   // send macOS/terminal notifications
+	disabled  bool   // when true, all notifications are suppressed
+	repoFP    string // when set, ntfy notifications include a Click header to the viewer
 }
 
 // NewNotifier creates a Notifier. If serverURL is empty, defaults to "https://ntfy.sh".
@@ -49,6 +52,32 @@ func (n *Notifier) SetTopic(topic string) {
 	if n != nil {
 		n.topic = topic
 	}
+}
+
+// SetRepoFP records the daemon's repo fingerprint so each ntfy push can carry
+// a Click header that opens the viewer at /repos/<fp>. Without this, push
+// notifications still fire but tapping them does nothing on mobile. The base
+// URL itself is read from <userdata>/viewer-url at send time, so a viewer
+// started after the daemon will Just Work on the next notification.
+func (n *Notifier) SetRepoFP(fp string) {
+	if n != nil {
+		n.repoFP = fp
+	}
+}
+
+// clickURL returns the deep-link to embed in the next ntfy push, or "" when
+// no link should be attached (no fp configured, no viewer hint file present,
+// hint malformed). Falling back to "" keeps notifications best-effort —
+// missing the deep-link is strictly better than failing the send.
+func (n *Notifier) clickURL() string {
+	if n == nil || n.repoFP == "" {
+		return ""
+	}
+	base := userdata.ReadViewerURL()
+	if base == "" {
+		return ""
+	}
+	return strings.TrimRight(base, "/") + "/repos/" + n.repoFP
 }
 
 // Topic returns the current ntfy topic.
@@ -83,6 +112,9 @@ func (n *Notifier) Notify(ctx context.Context, title string, message string, pri
 			req.Header.Set("Title", title)
 			req.Header.Set("Priority", strconv.Itoa(priority))
 			req.Header.Set("Tags", "robot")
+			if click := n.clickURL(); click != "" {
+				req.Header.Set("Click", click)
+			}
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {

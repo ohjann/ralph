@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -13,6 +14,27 @@ import (
 
 	"github.com/ohjann/ralphplusplus/internal/userdata"
 )
+
+// ctxTrustKey is the context key set when a request has already been
+// authenticated out-of-band — currently only by the tsnet listener, which
+// calls WhoIs on the peer and injects trust on success. LoopbackOnly and
+// AuthMiddleware both short-circuit when this is present, so the same
+// composed handler can front both listeners without a separate chain.
+type ctxTrustKey struct{}
+
+// WithTrust returns a request whose context is marked trusted. Used by the
+// tailnet front-door after a successful WhoIs; downstream middleware then
+// skips loopback + token checks.
+func WithTrust(r *http.Request, who string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), ctxTrustKey{}, who))
+}
+
+// IsTrusted reports whether the request carries a trust marker from an
+// upstream authenticator (tailnet WhoIs today).
+func IsTrusted(r *http.Request) bool {
+	_, ok := r.Context().Value(ctxTrustKey{}).(string)
+	return ok
+}
 
 // TokenPath returns <userdata>/viewer.token.
 func TokenPath() (string, error) {
@@ -58,11 +80,16 @@ func LoadOrCreateToken() (string, error) {
 //     through an attacker-controlled hostname.
 //   - X-Ralph-Token header (or ?token= query) must match (401 otherwise).
 //
-// The URL query form exists for the first page load; subsequent XHRs are
-// expected to send X-Ralph-Token. Since the listener binds 127.0.0.1 only,
-// there is no cross-origin Referer leak path.
+// Trusted requests (tsnet-authenticated, see WithTrust) bypass both checks —
+// the tailnet handshake already authenticated the caller and the request did
+// not arrive on the loopback interface at all. The URL query form of the
+// token exists for the first page load; subsequent XHRs send X-Ralph-Token.
 func AuthMiddleware(token string, next http.Handler) http.Handler {
 	return LoopbackOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsTrusted(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		provided := r.Header.Get("X-Ralph-Token")
 		if provided == "" {
 			provided = r.URL.Query().Get("token")
@@ -76,8 +103,15 @@ func AuthMiddleware(token string, next http.Handler) http.Handler {
 }
 
 // LoopbackOnly restricts access to loopback clients without requiring a token.
+// Trusted requests (set by an upstream authenticator such as the tailnet
+// front-door) bypass the host check, since they never touched the loopback
+// listener in the first place.
 func LoopbackOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsTrusted(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !isLoopbackHost(r.Host) {
 			http.Error(w, "forbidden: non-loopback Host", http.StatusForbidden)
 			return

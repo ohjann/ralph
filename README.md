@@ -114,6 +114,19 @@ Either way, the viewer binds **loopback-only** and is gated by a per-user token 
 
 For frontend development, run `ralph viewer --dev` in one terminal and `pnpm --filter ./frontend dev` in another; the Go server reverse-proxies `/` to Vite on `127.0.0.1:5173` while keeping `/api/**` on the Go side.
 
+### Remote access via Tailscale
+
+To check on Ralph from your phone or another machine without typing tokens, run the viewer with `--tailscale`. It joins your tailnet as a node named `ralph` (override with `--tailscale-hostname`), so any device on the tailnet can reach the UI at `http://ralph/` — Tailscale's mutual auth is the access boundary, no token required.
+
+```bash
+ralph viewer --tailscale            # also keeps the loopback URL working
+ralph viewer --tailscale --tailscale-hostname myralph
+```
+
+First launch prints a Tailscale login link to authorize the node; subsequent launches reconnect silently. State persists under `<userdata>/ralph/tsnet/<hostname>/`.
+
+Push notifications include a `Click` header pointing to the tailnet URL when `--tailscale` is on (loopback URL otherwise), so tapping a notification on your phone opens the viewer at the relevant repo.
+
 ## What it does
 
 - DAG analysis finds story dependencies, independent stories run across N workers in isolated jj workspaces (`--workers 3` or `--workers auto`)

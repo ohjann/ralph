@@ -35,6 +35,7 @@ import (
 	"github.com/ohjann/ralphplusplus/internal/retro"
 	"github.com/ohjann/ralphplusplus/internal/runner"
 	"github.com/ohjann/ralphplusplus/internal/tui"
+	"github.com/ohjann/ralphplusplus/internal/userdata"
 	"github.com/ohjann/ralphplusplus/internal/viewer"
 	"github.com/ohjann/ralphplusplus/internal/worker"
 )
@@ -541,6 +542,9 @@ func runDaemonMode(cfg *config.Config) {
 
 	n := notify.NewNotifier(cfg.NotifyTopic, cfg.NtfyServer)
 	n.SetDisabled(!cfg.NotifyEnabled)
+	if fp, err := userdata.Fingerprint(cfg.ProjectDir); err == nil {
+		n.SetRepoFP(fp)
+	}
 	coord.SetNotifier(n)
 
 	// Create and run daemon
