@@ -77,6 +77,9 @@ type claudeDoneMsg struct {
 type judgeDoneMsg struct {
 	Result judge.Result
 }
+type devilsAdvocateDoneMsg struct {
+	Result judge.DevilsAdvocateResult
+}
 type stuckDetectedMsg struct {
 	Info runner.StuckInfo
 }

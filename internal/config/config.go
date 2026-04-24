@@ -41,10 +41,11 @@ type ConfigSnapshot struct {
 	ArchiveDir         string
 	LastBranchFile     string
 	LogDir             string
-	JudgeEnabled       bool
-	JudgeMaxRejections int
-	JudgeTestIntegrity bool
-	Workers            int
+	JudgeEnabled        bool
+	JudgeMaxRejections  int
+	JudgeTestIntegrity  bool
+	JudgeDevilsAdvocate bool
+	Workers             int
 	WorkersAuto        bool
 	AutoMaxWorkers     int
 	WorkspaceBase      string
@@ -73,10 +74,11 @@ type Config struct {
 
 	ProjectDir         string
 	RalphHome          string
-	JudgeEnabled       bool
-	JudgeMaxRejections int
-	JudgeTestIntegrity bool   // --no-test-integrity disables the pre-LLM test-integrity gate
-	IdleMode           bool
+	JudgeEnabled        bool
+	JudgeMaxRejections  int
+	JudgeTestIntegrity  bool // --no-test-integrity disables the pre-LLM test-integrity gate
+	JudgeDevilsAdvocate bool // --no-devils-advocate disables appellate review; falls back to legacy auto-pass
+	IdleMode            bool
 	Workers            int    // --workers N, default 1 (serial)
 	WorkspaceBase      string // default /tmp/ralph-workspaces
 	PlanFile           string // --plan <path> to generate prd.json from a plan file
@@ -136,10 +138,11 @@ type Config struct {
 
 func Parse(args []string) (*Config, error) {
 	cfg := &Config{
-		JudgeEnabled:       true,
-		JudgeMaxRejections: 2,
-		JudgeTestIntegrity: true,
-		Workers:            1,
+		JudgeEnabled:        true,
+		JudgeMaxRejections:  2,
+		JudgeTestIntegrity:  true,
+		JudgeDevilsAdvocate: true,
+		Workers:             1,
 		WorkspaceBase:      "/tmp/ralph-workspaces",
 		QualityReview:      true,
 		QualityWorkers:     3,
@@ -445,6 +448,9 @@ func Parse(args []string) (*Config, error) {
 		case "--no-test-integrity":
 			cfg.JudgeTestIntegrity = false
 			i++
+		case "--no-devils-advocate":
+			cfg.JudgeDevilsAdvocate = false
+			i++
 		case "--no-fusion":
 			cfg.NoFusion = true
 			i++
@@ -734,10 +740,11 @@ func (c *Config) Snapshot() ConfigSnapshot {
 		ArchiveDir:         c.ArchiveDir,
 		LastBranchFile:     c.LastBranchFile,
 		LogDir:             c.LogDir,
-		JudgeEnabled:       c.JudgeEnabled,
-		JudgeMaxRejections: c.JudgeMaxRejections,
-		JudgeTestIntegrity: c.JudgeTestIntegrity,
-		Workers:            c.Workers,
+		JudgeEnabled:        c.JudgeEnabled,
+		JudgeMaxRejections:  c.JudgeMaxRejections,
+		JudgeTestIntegrity:  c.JudgeTestIntegrity,
+		JudgeDevilsAdvocate: c.JudgeDevilsAdvocate,
+		Workers:             c.Workers,
 		WorkersAuto:        c.WorkersAuto,
 		AutoMaxWorkers:     c.AutoMaxWorkers,
 		WorkspaceBase:      c.WorkspaceBase,
@@ -771,10 +778,11 @@ func NewForRepo(repoPath string) (*Config, error) {
 	}
 	cfg := &Config{
 		ProjectDir:         abs,
-		JudgeEnabled:       true,
-		JudgeMaxRejections: 2,
-		JudgeTestIntegrity: true,
-		Workers:            1,
+		JudgeEnabled:        true,
+		JudgeMaxRejections:  2,
+		JudgeTestIntegrity:  true,
+		JudgeDevilsAdvocate: true,
+		Workers:             1,
 		WorkspaceBase:      "/tmp/ralph-workspaces",
 		QualityReview:      true,
 		QualityWorkers:     3,
@@ -887,7 +895,9 @@ Model Selection:
 
 Judge:
   --no-judge                      Disable LLM-as-Judge verification (enabled by default)
-  --judge-max-rejections <n>      Max judge rejections per story before auto-passing (default: 2)
+  --judge-max-rejections <n>      Max judge rejections per story before devil's-advocate review (default: 2)
+  --no-test-integrity             Disable the pre-LLM test-integrity gate (tautological-assertion / empty-test / fake-test detector)
+  --no-devils-advocate            Disable appellate review at the rejection threshold; fall back to legacy auto-pass
 
 Quality:
   --no-quality-review             Disable final quality review (enabled by default)

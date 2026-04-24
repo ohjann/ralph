@@ -2021,6 +2021,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseIterating
 		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
 
+	case devilsAdvocateDoneMsg:
+		debuglog.Log("devilsAdvocateDone: story=%s verdict=%s warning=%s", m.currentStoryID, msg.Result.Verdict, msg.Result.Warning)
+		m.judgeContent += judge.FormatDevilsAdvocateResult(m.currentStoryID, msg.Result)
+		m.ctxMode = contextJudge
+		// Three outcomes:
+		//   - Warning non-empty: appellate call errored; fall through as
+		//     auto-pass so we do not hang the pipeline.
+		//   - PASS: override — clear counters, story is done.
+		//   - FAIL: uphold — clear counters, mark for human review, story
+		//     moves on but progress.md flags it.
+		switch {
+		case msg.Result.Warning != "":
+			judge.AppendDevilsAdvocateWarning(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
+		case msg.Result.Verdict == "PASS":
+			judge.AppendDevilsAdvocateOverride(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
+		case msg.Result.Verdict == "FAIL":
+			judge.AppendDevilsAdvocateConcur(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
+			// Mark story as failing so it does not re-enter the judge
+			// on a subsequent iteration. The rejection history remains
+			// in place for human review.
+			if p, perr := prd.Load(m.cfg.PRDFile); perr == nil {
+				p.SetPasses(m.currentStoryID, false)
+				_ = prd.Save(m.cfg.PRDFile, p)
+			}
+		default:
+			// Unknown verdict — treat as warning fallthrough.
+			judge.AppendDevilsAdvocateWarning(m.cfg.ProgressFile, m.currentStoryID, msg.Result)
+		}
+		judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+		judge.ClearFeedbackHistory(m.cfg.ProjectDir, m.currentStoryID)
+		_ = events.Append(m.cfg.ProjectDir, events.Event{
+			Type:    events.EventJudgeResult,
+			StoryID: m.currentStoryID,
+			Summary: "Devil's Advocate: " + msg.Result.Reason,
+			Meta:    map[string]string{"verdict": strings.ToLower(msg.Result.Verdict), "reviewer": "devils_advocate"},
+		})
+		m.phase = phaseIterating
+		cmds = append(cmds, findNextStoryCmd(m.cfg.PRDFile))
+
 	// --- Quality review messages ---
 	case qualityReviewDoneMsg:
 		m.ctxMode = contextQuality
@@ -2609,10 +2648,22 @@ func (m *Model) handleJudgeCheck() tea.Cmd {
 	// Story claims to pass — run judge
 	rejections := judge.GetRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
 	if rejections >= m.cfg.JudgeMaxRejections {
-		debuglog.Log("handleJudgeCheck: auto-passing %s after %d rejections", m.currentStoryID, rejections)
-		// Auto-pass
+		// At the rejection threshold the judge has bounced this story
+		// enough times that we no longer trust it to self-resolve. If
+		// the Devil's Advocate is enabled, dispatch an appellate review
+		// that decides whether the judge was pedantic or correct. If
+		// disabled, fall back to the legacy auto-pass for compatibility.
+		if m.cfg.JudgeDevilsAdvocate {
+			debuglog.Log("handleJudgeCheck: dispatching devil's advocate for %s after %d rejections", m.currentStoryID, rejections)
+			m.phase = phaseJudgeRun
+			m.judgeContent += fmt.Sprintf("\n── DA reviewing %s after %d rejections... ──\n", m.currentStoryID, rejections)
+			m.ctxMode = contextJudge
+			return runDevilsAdvocateCmd(m.ctx, m.cfg, m.currentStoryID, m.preRevs, rejections)
+		}
+		debuglog.Log("handleJudgeCheck: auto-passing %s after %d rejections (DA disabled)", m.currentStoryID, rejections)
 		judge.AppendAutoPass(m.cfg.ProgressFile, m.currentStoryID, rejections)
 		judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+		judge.ClearFeedbackHistory(m.cfg.ProjectDir, m.currentStoryID)
 		m.judgeContent += fmt.Sprintf("\n── Judge: %s ── AUTO-PASS after %d rejections [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, rejections)
 		m.ctxMode = contextJudge
 		return nil

@@ -47,6 +47,7 @@ func newSettingsState(cfg *config.Config) settingsState {
 			{Label: "Judge Enabled", Type: settingBool, BoolVal: cfg.JudgeEnabled, DefaultB: true},
 			{Label: "Judge Max Rejections", Type: settingInt, IntVal: cfg.JudgeMaxRejections, DefaultI: 2, Min: 0},
 			{Label: "Judge Test Integrity", Type: settingBool, BoolVal: cfg.JudgeTestIntegrity, DefaultB: true},
+			{Label: "Judge Devil's Advocate", Type: settingBool, BoolVal: cfg.JudgeDevilsAdvocate, DefaultB: true},
 			{Label: "Workers", Type: settingInt, IntVal: cfg.Workers, DefaultI: 1, Min: 1},
 			{Label: "Quality Review", Type: settingBool, BoolVal: cfg.QualityReview, DefaultB: true},
 			{Label: "Quality Workers", Type: settingInt, IntVal: cfg.QualityWorkers, DefaultI: 3, Min: 1},
@@ -134,18 +135,20 @@ func (s *settingsState) applyTo(cfg *config.Config) {
 		case 2:
 			cfg.JudgeTestIntegrity = e.BoolVal
 		case 3:
-			cfg.Workers = e.IntVal
+			cfg.JudgeDevilsAdvocate = e.BoolVal
 		case 4:
-			cfg.QualityReview = e.BoolVal
+			cfg.Workers = e.IntVal
 		case 5:
-			cfg.QualityWorkers = e.IntVal
+			cfg.QualityReview = e.BoolVal
 		case 6:
-			cfg.QualityMaxIters = e.IntVal
+			cfg.QualityWorkers = e.IntVal
 		case 7:
-			cfg.Memory.Disabled = e.BoolVal
+			cfg.QualityMaxIters = e.IntVal
 		case 8:
-			cfg.NoArchitect = e.BoolVal
+			cfg.Memory.Disabled = e.BoolVal
 		case 9:
+			cfg.NoArchitect = e.BoolVal
+		case 10:
 			cfg.SpriteEnabled = e.BoolVal
 		}
 	}

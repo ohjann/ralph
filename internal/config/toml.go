@@ -16,9 +16,10 @@ import (
 // Both TOML and JSON tags are present because the struct is decoded from
 // TOML (config.toml) and JSON (daemon /api/settings).
 type TomlConfig struct {
-	JudgeEnabled       *bool   `toml:"judge_enabled" json:"judge_enabled,omitempty"`
-	JudgeMaxRejections *int    `toml:"judge_max_rejections" json:"judge_max_rejections,omitempty"`
-	JudgeTestIntegrity *bool   `toml:"judge_test_integrity" json:"judge_test_integrity,omitempty"`
+	JudgeEnabled        *bool   `toml:"judge_enabled" json:"judge_enabled,omitempty"`
+	JudgeMaxRejections  *int    `toml:"judge_max_rejections" json:"judge_max_rejections,omitempty"`
+	JudgeTestIntegrity  *bool   `toml:"judge_test_integrity" json:"judge_test_integrity,omitempty"`
+	JudgeDevilsAdvocate *bool   `toml:"judge_devils_advocate" json:"judge_devils_advocate,omitempty"`
 	Workers            *int    `toml:"workers" json:"workers,omitempty"`
 	WorkersAuto        *bool   `toml:"workers_auto" json:"workers_auto,omitempty"`
 	AutoMaxWorkers     *int    `toml:"auto_max_workers" json:"auto_max_workers,omitempty"`
@@ -103,6 +104,9 @@ func (tc *TomlConfig) ChangedFields() []string {
 	if tc.JudgeTestIntegrity != nil {
 		out = append(out, "judge_test_integrity")
 	}
+	if tc.JudgeDevilsAdvocate != nil {
+		out = append(out, "judge_devils_advocate")
+	}
 	if tc.Workers != nil {
 		out = append(out, "workers")
 	}
@@ -172,6 +176,9 @@ func (tc *TomlConfig) applyTo(cfg *Config) {
 	if tc.JudgeTestIntegrity != nil {
 		cfg.JudgeTestIntegrity = *tc.JudgeTestIntegrity
 	}
+	if tc.JudgeDevilsAdvocate != nil {
+		cfg.JudgeDevilsAdvocate = *tc.JudgeDevilsAdvocate
+	}
 	if tc.Workers != nil {
 		cfg.Workers = *tc.Workers
 	}
@@ -233,10 +240,11 @@ func (tc *TomlConfig) applyTo(cfg *Config) {
 func (cfg *Config) SaveConfig() error {
 	cfg.mu.RLock()
 	tc := TomlConfig{
-		JudgeEnabled:       boolPtr(cfg.JudgeEnabled),
-		JudgeMaxRejections: intPtr(cfg.JudgeMaxRejections),
-		JudgeTestIntegrity: boolPtr(cfg.JudgeTestIntegrity),
-		Workers:            intPtr(cfg.Workers),
+		JudgeEnabled:        boolPtr(cfg.JudgeEnabled),
+		JudgeMaxRejections:  intPtr(cfg.JudgeMaxRejections),
+		JudgeTestIntegrity:  boolPtr(cfg.JudgeTestIntegrity),
+		JudgeDevilsAdvocate: boolPtr(cfg.JudgeDevilsAdvocate),
+		Workers:             intPtr(cfg.Workers),
 		WorkersAuto:        boolPtr(cfg.WorkersAuto),
 		AutoMaxWorkers:     intPtr(cfg.AutoMaxWorkers),
 		QualityReview:      boolPtr(cfg.QualityReview),

@@ -502,6 +502,14 @@ func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID string, preRev
 	}
 }
 
+func runDevilsAdvocateCmd(ctx context.Context, cfg *config.Config, storyID string, preRevs []judge.DirRev, rejections int) tea.Cmd {
+	snap := cfg.Snapshot()
+	return func() tea.Msg {
+		result := judge.RunDevilsAdvocate(ctx, snap.RalphHome, snap.ProjectDir, snap.PRDFile, storyID, preRevs, rejections)
+		return devilsAdvocateDoneMsg{Result: result}
+	}
+}
+
 func captureRevsCmd(ctx context.Context, dirs []string) []judge.DirRev {
 	var revs []judge.DirRev
 	for _, dir := range dirs {

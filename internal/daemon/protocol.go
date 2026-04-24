@@ -36,9 +36,10 @@ type DaemonStateEvent struct {
 // so SPA clients can render the live values that ApplySettings updates.
 // Field set is the same 19 tunables the SettingsRoute editor exposes.
 type SettingsSnapshot struct {
-	JudgeEnabled       bool   `json:"judge_enabled"`
-	JudgeMaxRejections int    `json:"judge_max_rejections"`
-	JudgeTestIntegrity bool   `json:"judge_test_integrity"`
+	JudgeEnabled        bool   `json:"judge_enabled"`
+	JudgeMaxRejections  int    `json:"judge_max_rejections"`
+	JudgeTestIntegrity  bool   `json:"judge_test_integrity"`
+	JudgeDevilsAdvocate bool   `json:"judge_devils_advocate"`
 	Workers            int    `json:"workers"`
 	WorkersAuto        bool   `json:"workers_auto"`
 	AutoMaxWorkers     int    `json:"auto_max_workers"`
