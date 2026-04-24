@@ -291,11 +291,20 @@ function ActivityChart({ points }: { points: ActivityPoint[] }) {
           fontSize: 10,
           color: 'var(--fg-faint)',
           marginTop: 6,
-          fontFamily: 'var(--font-mono)',
         }}
       >
-        <span>{points[0]?.date ?? ''}</span>
-        <span>{points[points.length - 1]?.date ?? ''}</span>
+        <span>
+          {points.length - 1} days ago{' '}
+          <span class="mono" style={{ color: 'var(--fg-ghost)' }}>
+            · {points[0]?.date ?? ''}
+          </span>
+        </span>
+        <span>
+          today{' '}
+          <span class="mono" style={{ color: 'var(--fg-ghost)' }}>
+            · {points[points.length - 1]?.date ?? ''}
+          </span>
+        </span>
       </div>
     </section>
   );

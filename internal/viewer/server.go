@@ -52,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/repos/{fp}/runs/{runID}", s.handleRunDetail)
 	mux.HandleFunc("GET /api/repos/{fp}/prd", s.handlePRDGet)
 	mux.HandleFunc("POST /api/repos/{fp}/prd", s.handlePRDPost)
+	mux.HandleFunc("GET /api/repos/{fp}/runs/{runID}/prd", s.handleRunPRDGet)
 	mux.HandleFunc("GET /api/repos/{fp}/meta", s.handleRepoMeta)
 	mux.HandleFunc("GET /api/repos/{fp}/runs/{runID}/transcript/{story}/{iter}", s.handleTranscript)
 	mux.HandleFunc("GET /api/repos/{fp}/runs/{runID}/prompt/{story}/{iter}", s.handlePrompt)

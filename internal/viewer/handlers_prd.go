@@ -49,6 +49,52 @@ func (s *Server) handlePRDGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleRunPRDGet serves GET /api/repos/:fp/runs/:runID/prd. Prefers the
+// prd.json snapshot archived in the run directory at OpenRun time. Falls
+// back to the current on-disk PRD (with matchesRunSnapshot flagged) for
+// runs written before the archive existed, so the UI always has something
+// to show even for legacy entries.
+func (s *Server) handleRunPRDGet(w http.ResponseWriter, r *http.Request) {
+	fp := r.PathValue("fp")
+	runID := r.PathValue("runID")
+	meta, ok := s.lookupRepo(w, r, fp)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+
+	if data, err := history.ReadArchivedPRD(fp, runID); err == nil {
+		hash := hashBytes(data)
+		matches := true
+		writeJSON(w, http.StatusOK, PRDResponse{
+			Hash:               hash,
+			Content:            json.RawMessage(data),
+			MatchesRunSnapshot: &matches,
+			Archived:           true,
+		})
+		return
+	}
+
+	// No archive — fall back to the live PRD so legacy runs still render.
+	data, err := os.ReadFile(filepath.Join(meta.Path, "prd.json"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "prd_missing"})
+			return
+		}
+		http.Error(w, "read prd: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hash := hashBytes(data)
+	resp := PRDResponse{Hash: hash, Content: json.RawMessage(data)}
+	if m, err := history.ReadManifest(fp, runID); err == nil && m.PRDSnapshot != "" {
+		match := m.PRDSnapshot == hash
+		resp.MatchesRunSnapshot = &match
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // handlePRDPost serves POST /api/repos/:fp/prd — validates the submitted
 // PRD, writes it to disk, and returns the new hash. Optimistic concurrency
 // is enforced with an optional If-Match header carrying the sha256 hash

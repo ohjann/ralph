@@ -126,7 +126,6 @@ export function DocsRoute() {
           borderRight: '1px solid var(--border)',
           overflowY: 'auto',
           padding: '16px 4px 32px',
-          background: 'var(--bg-sunken)',
         }}
       >
         <div

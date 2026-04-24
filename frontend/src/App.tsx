@@ -122,6 +122,10 @@ export function App() {
                 <Route path="/repos/:fp/runs/:runId" component={RunRoute} />
                 <Route path="/repos/:fp/meta" component={RepoMetaRoute} />
                 <Route path="/repos/:fp/prd" component={PRDEditorRoute} />
+                <Route
+                  path="/repos/:fp/runs/:runId/prd"
+                  component={PRDEditorRoute}
+                />
                 <Route path="/repos/:fp/docs" component={DocsRoute} />
                 <Route path="/docs" component={DocsRoute} />
                 <Route default component={Home} />

@@ -189,6 +189,14 @@ func OpenRun(projectDir, prdFile, version string, opts RunOpts) (*Run, error) {
 	if err := r.writeManifest(); err != nil {
 		return nil, err
 	}
+	// Archive the PRD as it stood when the run started so historical views
+	// always show what the run actually ran against — live edits to
+	// prd.json between runs no longer rewrite the past.
+	if prdFile != "" {
+		if data, err := os.ReadFile(prdFile); err == nil {
+			_ = os.WriteFile(filepath.Join(dir, "prd.json"), data, 0o644)
+		}
+	}
 	return r, nil
 }
 
@@ -618,6 +626,17 @@ func prdSnapshot(path string) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// ReadArchivedPRD returns the prd.json content that was in effect when the
+// given run started. Returns os.ErrNotExist for runs written before the
+// archive existed so callers can fall back to the current on-disk PRD.
+func ReadArchivedPRD(fp, runID string) ([]byte, error) {
+	dir, err := runDirFor(fp, runID)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(dir, "prd.json"))
 }
 
 // ReadManifest parses <userdata>/repos/<fp>/runs/<runID>/manifest.json.

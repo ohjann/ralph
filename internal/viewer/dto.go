@@ -127,6 +127,10 @@ type RepoStatsSummary struct {
 	LastSeen         time.Time `json:"lastSeen"`
 }
 
+// (PRDResponse.Archived is set by /api/repos/:fp/runs/:runID/prd when the
+// returned content was served from the per-run snapshot rather than the
+// current on-disk PRD; see handleRunPRDGet.)
+
 // IntegrationStatus reflects one optional external integration. URL is the
 // canonical address the user can open when Enabled is true; Hint is a short
 // instruction shown when Enabled is false.
@@ -197,4 +201,8 @@ type PRDResponse struct {
 	Hash                string          `json:"hash"`
 	Content             json.RawMessage `json:"content"`
 	MatchesRunSnapshot  *bool           `json:"matchesRunSnapshot,omitempty"`
+	// Archived is true when Content was served from the per-run snapshot
+	// rather than the live prd.json (set by handleRunPRDGet). Lets the UI
+	// label the view as historical and disable editing.
+	Archived bool `json:"archived,omitempty"`
 }

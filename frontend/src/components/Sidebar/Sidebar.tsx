@@ -539,11 +539,30 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
   const loading = loadingRuns.value.has(repo.fp);
   const daemonReachable = reachByFP.value[repo.fp] === true;
   const dotClass = daemonReachable ? 'dot ok live' : 'dot';
+  const loc = useLocation();
+  const href = `/repos/${repo.fp}/meta`;
+  const active = loc.path === href;
+
+  // Clicking a repo row does two things: navigate to its meta page AND
+  // expand the dropdown if not already open. Collapsing happens only when
+  // you click the caret (to avoid an accidental collapse stealing the
+  // click-to-navigate affordance).
+  const onRowClick = (e: MouseEvent) => {
+    const isCaret = (e.target as HTMLElement)?.closest?.('[data-rv-caret]');
+    if (isCaret) {
+      e.preventDefault();
+      toggleRepo(repo.fp);
+      return;
+    }
+    if (!isOpen) toggleRepo(repo.fp);
+    // let the anchor navigate naturally
+  };
 
   return (
     <div>
-      <button
-        onClick={() => toggleRepo(repo.fp)}
+      <a
+        href={href}
+        onClick={onRowClick}
         style={{
           width: '100%',
           display: 'flex',
@@ -554,18 +573,31 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
           fontSize: 'var(--fs-ui)',
           minHeight: 'var(--row-h)',
           textAlign: 'left',
-          background: 'transparent',
+          textDecoration: 'none',
+          color: 'var(--sidebar-fg)',
+          background: active ? 'var(--sidebar-active)' : 'transparent',
           transition: 'background 80ms',
         }}
-        onMouseEnter={(e) =>
-          ((e.currentTarget as HTMLElement).style.background =
-            'var(--sidebar-hover)')
-        }
-        onMouseLeave={(e) =>
-          ((e.currentTarget as HTMLElement).style.background = 'transparent')
-        }
+        onMouseEnter={(e) => {
+          if (!active)
+            (e.currentTarget as HTMLElement).style.background =
+              'var(--sidebar-hover)';
+        }}
+        onMouseLeave={(e) => {
+          if (!active)
+            (e.currentTarget as HTMLElement).style.background = 'transparent';
+        }}
       >
-        <span class="caret" style={{ color: 'var(--sidebar-fg-ghost)' }}>
+        <span
+          data-rv-caret
+          class="caret"
+          style={{
+            color: 'var(--sidebar-fg-ghost)',
+            cursor: 'pointer',
+            padding: '0 2px',
+          }}
+          title={isOpen ? 'Collapse' : 'Expand'}
+        >
           {isOpen ? '▾' : '▸'}
         </span>
         <span
@@ -602,7 +634,7 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         >
           {repo.runCount}
         </span>
-      </button>
+      </a>
 
       {isOpen && (
         <div
@@ -614,56 +646,6 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
             marginBottom: 4,
           }}
         >
-          <div
-            class="mono"
-            style={{
-              fontSize: 10.5,
-              color: 'var(--sidebar-fg-faint)',
-              padding: '2px 6px',
-            }}
-          >
-            {repo.path}
-          </div>
-          <div
-            style={{ display: 'flex', gap: 8, padding: '2px 6px 4px' }}
-          >
-            <a
-              href={`/repos/${repo.fp}/meta`}
-              style={{
-                fontSize: 10,
-                color: 'var(--sidebar-fg-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                textDecoration: 'none',
-              }}
-            >
-              Meta
-            </a>
-            <a
-              href={`/repos/${repo.fp}/prd`}
-              style={{
-                fontSize: 10,
-                color: 'var(--sidebar-fg-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                textDecoration: 'none',
-              }}
-            >
-              PRD
-            </a>
-            <a
-              href={`/repos/${repo.fp}/docs`}
-              style={{
-                fontSize: 10,
-                color: 'var(--sidebar-fg-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                textDecoration: 'none',
-              }}
-            >
-              Docs
-            </a>
-          </div>
           {loading && !runs && (
             <div
               style={{

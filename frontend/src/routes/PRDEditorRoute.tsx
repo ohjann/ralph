@@ -21,7 +21,10 @@ const error = signal<string>('');
 const prdDoc = signal<PRDDocument | null>(null);
 const hash = signal<string>('');
 const staleHash = signal<boolean>(false);
-const currentFP = signal<string>('');
+const currentKey = signal<string>('');
+// archived flags a read-only per-run snapshot; set by load() after the
+// response comes back so the editor knows to disable mutating affordances.
+const archived = signal<boolean>(false);
 
 function normalize(input: unknown): PRDDocument {
   const d = (input as Partial<PRDDocument>) ?? {};
@@ -47,18 +50,22 @@ function normalize(input: unknown): PRDDocument {
   };
 }
 
-async function load(fp: string, force = false) {
-  if (!force && currentFP.value === fp && prdDoc.value) return;
-  currentFP.value = fp;
+async function load(fp: string, runId: string | undefined, force = false) {
+  const key = runId ? `${fp}@${runId}` : fp;
+  if (!force && currentKey.value === key && prdDoc.value) return;
+  currentKey.value = key;
   loading.value = true;
   error.value = '';
   staleHash.value = false;
+  archived.value = false;
+  const url = runId
+    ? `/api/repos/${encodeURIComponent(fp)}/runs/${encodeURIComponent(runId)}/prd`
+    : `/api/repos/${encodeURIComponent(fp)}/prd`;
   try {
-    const r = await apiGet<PRDResponse>(
-      `/api/repos/${encodeURIComponent(fp)}/prd`,
-    );
+    const r = await apiGet<PRDResponse>(url);
     prdDoc.value = normalize(r.content);
     hash.value = r.hash;
+    archived.value = !!r.archived;
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
       prdDoc.value = normalize({ project: '' });
@@ -130,11 +137,13 @@ async function save(fp: string, doc: PRDDocument): Promise<boolean> {
 export function PRDEditorRoute() {
   const { params } = useRoute();
   const fp = params.fp;
+  const runId = params.runId;
+  const readonly = !!runId;
   const [jsonMode, setJsonMode] = useState(false);
 
   useEffect(() => {
-    if (fp) void load(fp);
-  }, [fp]);
+    if (fp) void load(fp, runId);
+  }, [fp, runId]);
 
   if (!fp) return null;
   if (loading.value && !prdDoc.value)
@@ -153,7 +162,7 @@ export function PRDEditorRoute() {
   return (
     <div style={{ padding: '22px 28px 80px', minHeight: '100%' }}>
       <div style={{ maxWidth: 880, margin: '0 auto' }}>
-        <Breadcrumb />
+        <Breadcrumb runId={runId} />
 
         <div
           style={{
@@ -186,7 +195,7 @@ export function PRDEditorRoute() {
               </div>
             )}
           </div>
-          {!jsonMode && (
+          {!jsonMode && !readonly && (
             <button
               type="button"
               onClick={() => setJsonMode(true)}
@@ -198,20 +207,22 @@ export function PRDEditorRoute() {
                 fontSize: 12.5,
                 fontWeight: 600,
                 borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-elev)',
-                color: 'var(--fg)',
+                border: '1px solid var(--accent-border)',
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-ink)',
                 cursor: 'pointer',
               }}
+              title="Switch to JSON view for bulk edits"
             >
               <PencilIcon />
               Edit JSON
             </button>
           )}
+          {readonly && <ReadonlyBadge archived={archived.value} fp={fp} />}
         </div>
 
         {staleHash.value && (
-          <StaleHashBanner onReload={() => void load(fp, true)} />
+          <StaleHashBanner onReload={() => void load(fp, runId, true)} />
         )}
 
         {jsonMode ? (
@@ -228,17 +239,19 @@ export function PRDEditorRoute() {
           <>
             <PRDOverview doc={doc} />
             <StoriesReadView stories={doc.userStories} />
-            <AddStoryForm
-              existingIds={new Set(doc.userStories.map((s) => s.id))}
-              onAdd={async (story) => {
-                const next: PRDDocument = {
-                  ...doc,
-                  userStories: [...doc.userStories, story],
-                };
-                await save(fp, next);
-              }}
-              saving={saving.value}
-            />
+            {!readonly && (
+              <AddStoryForm
+                existingIds={new Set(doc.userStories.map((s) => s.id))}
+                onAdd={async (story) => {
+                  const next: PRDDocument = {
+                    ...doc,
+                    userStories: [...doc.userStories, story],
+                  };
+                  await save(fp, next);
+                }}
+                saving={saving.value}
+              />
+            )}
           </>
         )}
       </div>
@@ -246,7 +259,7 @@ export function PRDEditorRoute() {
   );
 }
 
-function Breadcrumb() {
+function Breadcrumb({ runId }: { runId?: string }) {
   return (
     <div
       style={{
@@ -259,9 +272,64 @@ function Breadcrumb() {
         marginBottom: 12,
       }}
     >
-      <span>repo</span>
-      <span style={{ color: 'var(--fg-ghost)' }}>/</span>
-      <span style={{ color: 'var(--fg)' }}>prd</span>
+      {runId ? (
+        <>
+          <span>run</span>
+          <span style={{ color: 'var(--fg-ghost)' }}>/</span>
+          <span>{runId.slice(0, 12)}</span>
+          <span style={{ color: 'var(--fg-ghost)' }}>/</span>
+          <span style={{ color: 'var(--fg)' }}>prd</span>
+        </>
+      ) : (
+        <>
+          <span>repo</span>
+          <span style={{ color: 'var(--fg-ghost)' }}>/</span>
+          <span style={{ color: 'var(--fg)' }}>prd</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReadonlyBadge({ archived, fp }: { archived: boolean; fp: string }) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        gap: 4,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10.5,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          fontWeight: 600,
+          color: archived ? 'var(--fg-muted)' : 'var(--warn)',
+          padding: '3px 9px',
+          borderRadius: 99,
+          border: `1px solid ${archived ? 'var(--border)' : 'var(--warn)'}`,
+          background: archived ? 'var(--bg-elev)' : 'var(--warn-soft)',
+        }}
+        title={
+          archived
+            ? 'Historical snapshot — edits are disabled.'
+            : 'No snapshot recorded. Showing the current PRD (may have changed since this run).'
+        }
+      >
+        {archived ? 'read-only · historical' : 'no snapshot'}
+      </span>
+      <a
+        href={`/repos/${fp}/prd`}
+        style={{
+          fontSize: 11,
+          color: 'var(--accent-ink)',
+        }}
+      >
+        open live PRD editor →
+      </a>
     </div>
   );
 }

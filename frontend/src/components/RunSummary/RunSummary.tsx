@@ -362,7 +362,7 @@ export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
         </Section>
 
         {/* PRD */}
-        {p && <Section title="PRD"><PRDBlock fp={fp} prd={p} /></Section>}
+        {p && <Section title="PRD"><PRDBlock fp={fp} runId={runId} prd={p} /></Section>}
 
         {/* Stories */}
         <Section
@@ -631,7 +631,7 @@ function Metric({
   );
 }
 
-function PRDBlock({ fp, prd }: { fp: string; prd: PRDResponse }) {
+function PRDBlock({ fp, runId, prd }: { fp: string; runId: string; prd: PRDResponse }) {
   const unchanged = prd.matchesRunSnapshot === true;
   const changed = prd.matchesRunSnapshot === false;
   const tone = unchanged ? 'ok' : changed ? 'warn' : 'neutral';
@@ -676,8 +676,11 @@ function PRDBlock({ fp, prd }: { fp: string; prd: PRDResponse }) {
         sha256:{short(prd.hash, 12)}
       </span>
       <span style={{ flex: 1 }}>{label}</span>
-      <a href={`/repos/${fp}/prd`} style={{ fontSize: 12 }}>
-        open PRD editor →
+      <a
+        href={`/repos/${fp}/runs/${runId}/prd`}
+        style={{ fontSize: 12 }}
+      >
+        view this run's PRD →
       </a>
     </div>
   );

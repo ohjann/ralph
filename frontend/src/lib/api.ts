@@ -157,6 +157,8 @@ export interface PRDResponse {
   hash: string;
   content: unknown;
   matchesRunSnapshot?: boolean;
+  /** True when the server returned the archived per-run snapshot. */
+  archived?: boolean;
 }
 
 // PRD user story — mirrors internal/prd.UserStory. `passes` is daemon-owned
