@@ -492,8 +492,12 @@ func pollStuckCmd(projectDir string, iteration int) tea.Cmd {
 }
 
 func runJudgeCmd(ctx context.Context, cfg *config.Config, storyID string, preRevs []judge.DirRev) tea.Cmd {
+	snap := cfg.Snapshot()
 	return func() tea.Msg {
-		result := judge.RunJudge(ctx, cfg.RalphHome, cfg.ProjectDir, cfg.PRDFile, storyID, preRevs)
+		result := judge.RunJudge(
+			ctx, snap.RalphHome, snap.ProjectDir, snap.PRDFile, storyID, preRevs,
+			judge.WithIntegrityGate(snap.JudgeTestIntegrity),
+		)
 		return judgeDoneMsg{Result: result}
 	}
 }

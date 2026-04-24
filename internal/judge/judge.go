@@ -9,12 +9,29 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ohjann/ralphplusplus/internal/assets"
 	"github.com/ohjann/ralphplusplus/internal/costs"
 	"github.com/ohjann/ralphplusplus/internal/debuglog"
 	rexec "github.com/ohjann/ralphplusplus/internal/exec"
 	"github.com/ohjann/ralphplusplus/internal/prd"
+	"github.com/ohjann/ralphplusplus/internal/testintegrity"
+)
+
+// FailCategory classifies why a judge rejected a story. Callers use it to
+// route rejections to the correct counter and escalation path.
+const (
+	// FailCategoryJudgment means the LLM judge found that the change does
+	// not satisfy the acceptance criteria. This is a judgment call and is
+	// eligible for Devil's Advocate review at the rejection threshold.
+	FailCategoryJudgment = "judgment"
+	// FailCategoryBuild means the pre-judge build check failed. Mechanical.
+	FailCategoryBuild = "build"
+	// FailCategoryIntegrity means the test-integrity gate found blocker-
+	// severity findings (tautological assertions, empty test bodies, etc.).
+	// Mechanical — never eligible for Devil's Advocate override.
+	FailCategoryIntegrity = "integrity"
 )
 
 // DirRev associates a directory with revisions for diffing.
@@ -41,10 +58,14 @@ type Result struct {
 	CriteriaFailed []string
 	Suggestion     string
 	TokenUsage     costs.TokenUsage
+	// FailCategory is set on Passed=false results to one of the
+	// FailCategory* constants. Empty on Passed=true.
+	FailCategory string
 }
 
 // RunJudge performs the full judge flow for a story.
-func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID string, preRevs []DirRev) Result {
+func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID string, preRevs []DirRev, opts ...Option) Result {
+	cfg := buildOptions(opts)
 	p, err := prd.Load(prdFile)
 	if err != nil {
 		return Result{Passed: true, Warning: fmt.Sprintf("could not load prd.json: %v", err)}
@@ -81,6 +102,7 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 			Reason:         "Pre-judge build check failed: " + buildErr,
 			CriteriaFailed: []string{"Code compiles successfully"},
 			Suggestion:     "Fix the compilation error before the judge can review your changes.",
+			FailCategory:   FailCategoryBuild,
 		}
 	}
 
@@ -92,6 +114,39 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 			Reason:         "No code changes were produced for this story",
 			CriteriaFailed: []string{"Implementation produces code changes"},
 			Suggestion:     "The worker did not produce any diff. The story needs to be re-attempted.",
+			FailCategory:   FailCategoryJudgment,
+		}
+	}
+
+	// Test-integrity gate: cheap mechanical check for test cheating. Blockers
+	// short-circuit before the LLM judge; signals flow into the prompt as
+	// additional context.
+	var integritySignals string
+	if cfg.integrityEnabled {
+		report := testintegrity.Check(diff, projectDir)
+		if report.HasBlocker() {
+			reason, suggestion := formatIntegrityBlockers(report)
+			debuglog.Log("judge integrity gate failed for %s: %s", storyID, reason)
+			v := &Verdict{
+				Verdict:        "FAIL",
+				CriteriaFailed: []string{"Tests genuinely exercise the changed behaviour"},
+				Reason:         reason,
+				Suggestion:     suggestion,
+			}
+			writeFeedback(projectDir, storyID, v)
+			appendFeedbackHistory(projectDir, storyID, v)
+			p.SetPasses(storyID, false)
+			_ = prd.Save(prdFile, p)
+			return Result{
+				Passed:         false,
+				Reason:         reason,
+				CriteriaFailed: []string{"Tests genuinely exercise the changed behaviour"},
+				Suggestion:     suggestion,
+				FailCategory:   FailCategoryIntegrity,
+			}
+		}
+		if sigs := report.Signals(); len(sigs) > 0 {
+			integritySignals = formatIntegritySignals(sigs)
 		}
 	}
 
@@ -107,6 +162,7 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	prompt = strings.ReplaceAll(prompt, "{{STORY_DESCRIPTION}}", story.Description)
 	prompt = strings.ReplaceAll(prompt, "{{ACCEPTANCE_CRITERIA}}", criteriaStr)
 	prompt = strings.ReplaceAll(prompt, "{{DIFF}}", diff)
+	prompt = strings.ReplaceAll(prompt, "{{INTEGRITY_SIGNALS}}", integritySignals)
 
 	// Run Claude judge
 	output, tokenUsage, err := rexec.RunClaudeJudge(ctx, prompt)
@@ -131,8 +187,9 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 	}
 
 	if verdict.Verdict == "FAIL" {
-		// Write feedback file
+		// Write feedback file + append to history for the DA to read later.
 		writeFeedback(projectDir, storyID, verdict)
+		appendFeedbackHistory(projectDir, storyID, verdict)
 
 		// Revert passes to false in prd.json
 		p.SetPasses(storyID, false)
@@ -145,6 +202,7 @@ func RunJudge(ctx context.Context, ralphHome, projectDir, prdFile, storyID strin
 			CriteriaFailed: verdict.CriteriaFailed,
 			Suggestion:     verdict.Suggestion,
 			TokenUsage:     tokenUsage,
+			FailCategory:   FailCategoryJudgment,
 		}
 	}
 
@@ -396,4 +454,142 @@ func parseBuildCommand(buildCommand string) (string, []string) {
 	}
 	parts := strings.Fields(buildCommand)
 	return parts[0], parts[1:]
+}
+
+// Option configures RunJudge behaviour.
+type Option func(*runOptions)
+
+type runOptions struct {
+	integrityEnabled bool
+}
+
+// WithIntegrityGate toggles the test-integrity gate (default: on).
+func WithIntegrityGate(enabled bool) Option {
+	return func(o *runOptions) { o.integrityEnabled = enabled }
+}
+
+func buildOptions(opts []Option) runOptions {
+	cfg := runOptions{integrityEnabled: true}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// formatIntegrityBlockers renders a concise reason + suggestion for a FAIL.
+func formatIntegrityBlockers(r testintegrity.Report) (string, string) {
+	blockers := r.Blockers()
+	var reasonLines, files []string
+	seen := make(map[string]struct{})
+	for _, f := range blockers {
+		loc := f.File
+		if f.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
+		}
+		reasonLines = append(reasonLines, fmt.Sprintf("[%s] %s — %s: %s", f.Severity, loc, f.Rule, f.Message))
+		if _, ok := seen[f.File]; !ok {
+			seen[f.File] = struct{}{}
+			files = append(files, f.File)
+		}
+	}
+	reason := "Test integrity gate: " + strings.Join(reasonLines, "; ")
+	suggestion := "Rewrite the flagged tests so they call the code under test with concrete inputs and assert on the observed output. Remove tautological assertions (e.g. assert True, expect(1).toBe(1)) and empty test bodies."
+	if len(files) > 0 {
+		suggestion += " Files to fix: " + strings.Join(files, ", ") + "."
+	}
+	return reason, suggestion
+}
+
+// formatIntegritySignals renders advisory findings for injection into the
+// judge prompt. Returns empty string if there are none.
+func formatIntegritySignals(findings []testintegrity.Finding) string {
+	if len(findings) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Test Integrity Signals\n\n")
+	sb.WriteString("The following advisory signals were found in the diff. They are not automatic failures but warrant scrutiny:\n\n")
+	for _, f := range findings {
+		loc := f.File
+		if f.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] %s — %s: %s\n", f.Severity, loc, f.Rule, f.Message))
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// GetIntegrityRejectionCount reads the integrity-specific rejection count.
+func GetIntegrityRejectionCount(projectDir, storyID string) int {
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-integrity-rejections-%s.count", storyID))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return n
+}
+
+// IncrementIntegrityRejectionCount increments the integrity-specific counter.
+func IncrementIntegrityRejectionCount(projectDir, storyID string) {
+	current := GetIntegrityRejectionCount(projectDir, storyID)
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-integrity-rejections-%s.count", storyID))
+	_ = os.WriteFile(path, []byte(strconv.Itoa(current+1)), 0o644)
+}
+
+// ClearIntegrityRejectionCount removes the integrity-specific counter.
+func ClearIntegrityRejectionCount(projectDir, storyID string) {
+	os.Remove(filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-integrity-rejections-%s.count", storyID)))
+}
+
+// AppendIntegrityHalt writes a marker to progress.md indicating the integrity
+// gate tripped its rejection threshold and the story needs a human.
+func AppendIntegrityHalt(progressFile, storyID string, count int) {
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n## [Judge] %s halted after %d integrity-gate rejections [HUMAN REVIEW NEEDED]\n---\n", storyID, count)
+}
+
+// appendFeedbackHistory appends the current verdict to a running history file
+// so Devil's Advocate can see the full sequence of judge objections, not just
+// the most recent one.
+func appendFeedbackHistory(projectDir, storyID string, v *Verdict) {
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-feedback-history-%s.md", storyID))
+	entry := fmt.Sprintf(`## Rejection at %s
+
+**Reason:** %s
+
+**Failed criteria:** %s
+
+**Suggestion:** %s
+
+---
+`, time.Now().Format(time.RFC3339), v.Reason, strings.Join(v.CriteriaFailed, ", "), v.Suggestion)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(entry)
+}
+
+// ReadFeedbackHistory returns the contents of the feedback-history file, or
+// an empty string if none exists.
+func ReadFeedbackHistory(projectDir, storyID string) string {
+	path := filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-feedback-history-%s.md", storyID))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// ClearFeedbackHistory removes the feedback-history file. Called alongside
+// ClearRejectionCount when a story passes or is otherwise resolved.
+func ClearFeedbackHistory(projectDir, storyID string) {
+	os.Remove(filepath.Join(projectDir, ".ralph", fmt.Sprintf("judge-feedback-history-%s.md", storyID)))
 }

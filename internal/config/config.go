@@ -43,6 +43,7 @@ type ConfigSnapshot struct {
 	LogDir             string
 	JudgeEnabled       bool
 	JudgeMaxRejections int
+	JudgeTestIntegrity bool
 	Workers            int
 	WorkersAuto        bool
 	AutoMaxWorkers     int
@@ -74,6 +75,7 @@ type Config struct {
 	RalphHome          string
 	JudgeEnabled       bool
 	JudgeMaxRejections int
+	JudgeTestIntegrity bool   // --no-test-integrity disables the pre-LLM test-integrity gate
 	IdleMode           bool
 	Workers            int    // --workers N, default 1 (serial)
 	WorkspaceBase      string // default /tmp/ralph-workspaces
@@ -136,6 +138,7 @@ func Parse(args []string) (*Config, error) {
 	cfg := &Config{
 		JudgeEnabled:       true,
 		JudgeMaxRejections: 2,
+		JudgeTestIntegrity: true,
 		Workers:            1,
 		WorkspaceBase:      "/tmp/ralph-workspaces",
 		QualityReview:      true,
@@ -439,6 +442,9 @@ func Parse(args []string) (*Config, error) {
 		case "--no-simplify":
 			cfg.NoSimplify = true
 			i++
+		case "--no-test-integrity":
+			cfg.JudgeTestIntegrity = false
+			i++
 		case "--no-fusion":
 			cfg.NoFusion = true
 			i++
@@ -730,6 +736,7 @@ func (c *Config) Snapshot() ConfigSnapshot {
 		LogDir:             c.LogDir,
 		JudgeEnabled:       c.JudgeEnabled,
 		JudgeMaxRejections: c.JudgeMaxRejections,
+		JudgeTestIntegrity: c.JudgeTestIntegrity,
 		Workers:            c.Workers,
 		WorkersAuto:        c.WorkersAuto,
 		AutoMaxWorkers:     c.AutoMaxWorkers,
@@ -766,6 +773,7 @@ func NewForRepo(repoPath string) (*Config, error) {
 		ProjectDir:         abs,
 		JudgeEnabled:       true,
 		JudgeMaxRejections: 2,
+		JudgeTestIntegrity: true,
 		Workers:            1,
 		WorkspaceBase:      "/tmp/ralph-workspaces",
 		QualityReview:      true,

@@ -402,6 +402,7 @@ func (d *Daemon) BuildStateSnapshot() DaemonStateEvent {
 		Settings: SettingsSnapshot{
 			JudgeEnabled:       snap.JudgeEnabled,
 			JudgeMaxRejections: snap.JudgeMaxRejections,
+			JudgeTestIntegrity: snap.JudgeTestIntegrity,
 			Workers:            snap.Workers,
 			WorkersAuto:        snap.WorkersAuto,
 			AutoMaxWorkers:     snap.AutoMaxWorkers,

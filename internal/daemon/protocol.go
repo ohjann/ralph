@@ -38,6 +38,7 @@ type DaemonStateEvent struct {
 type SettingsSnapshot struct {
 	JudgeEnabled       bool   `json:"judge_enabled"`
 	JudgeMaxRejections int    `json:"judge_max_rejections"`
+	JudgeTestIntegrity bool   `json:"judge_test_integrity"`
 	Workers            int    `json:"workers"`
 	WorkersAuto        bool   `json:"workers_auto"`
 	AutoMaxWorkers     int    `json:"auto_max_workers"`

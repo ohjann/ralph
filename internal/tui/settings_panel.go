@@ -46,6 +46,7 @@ func newSettingsState(cfg *config.Config) settingsState {
 		Entries: []settingEntry{
 			{Label: "Judge Enabled", Type: settingBool, BoolVal: cfg.JudgeEnabled, DefaultB: true},
 			{Label: "Judge Max Rejections", Type: settingInt, IntVal: cfg.JudgeMaxRejections, DefaultI: 2, Min: 0},
+			{Label: "Judge Test Integrity", Type: settingBool, BoolVal: cfg.JudgeTestIntegrity, DefaultB: true},
 			{Label: "Workers", Type: settingInt, IntVal: cfg.Workers, DefaultI: 1, Min: 1},
 			{Label: "Quality Review", Type: settingBool, BoolVal: cfg.QualityReview, DefaultB: true},
 			{Label: "Quality Workers", Type: settingInt, IntVal: cfg.QualityWorkers, DefaultI: 3, Min: 1},
@@ -131,18 +132,20 @@ func (s *settingsState) applyTo(cfg *config.Config) {
 		case 1:
 			cfg.JudgeMaxRejections = e.IntVal
 		case 2:
-			cfg.Workers = e.IntVal
+			cfg.JudgeTestIntegrity = e.BoolVal
 		case 3:
-			cfg.QualityReview = e.BoolVal
+			cfg.Workers = e.IntVal
 		case 4:
-			cfg.QualityWorkers = e.IntVal
+			cfg.QualityReview = e.BoolVal
 		case 5:
-			cfg.QualityMaxIters = e.IntVal
+			cfg.QualityWorkers = e.IntVal
 		case 6:
-			cfg.Memory.Disabled = e.BoolVal
+			cfg.QualityMaxIters = e.IntVal
 		case 7:
-			cfg.NoArchitect = e.BoolVal
+			cfg.Memory.Disabled = e.BoolVal
 		case 8:
+			cfg.NoArchitect = e.BoolVal
+		case 9:
 			cfg.SpriteEnabled = e.BoolVal
 		}
 	}

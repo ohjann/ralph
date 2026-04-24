@@ -20,6 +20,8 @@ The diff below may contain changes from multiple repositories. When multiple rep
 {{DIFF}}
 ```
 
+{{INTEGRITY_SIGNALS}}
+
 ## Review Instructions
 
 Evaluate the diff ONLY against the acceptance criteria listed above.

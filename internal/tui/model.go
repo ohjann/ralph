@@ -1985,6 +1985,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.Result.Passed {
 			judge.ClearRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			judge.ClearIntegrityRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			judge.ClearFeedbackHistory(m.cfg.ProjectDir, m.currentStoryID)
 			_ = events.Append(m.cfg.ProjectDir, events.Event{
 				Type:    events.EventJudgeResult,
 				StoryID: m.currentStoryID,
@@ -1993,13 +1995,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		} else {
 			m.notifier.StoryFailed(m.ctx, m.currentStoryID, "Judge rejected: "+msg.Result.Reason)
-			judge.IncrementRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			// Mechanical integrity failures use a separate counter; they
+			// are never eligible for Devil's Advocate override. At
+			// threshold we halt the story for human review.
+			if msg.Result.FailCategory == judge.FailCategoryIntegrity {
+				judge.IncrementIntegrityRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+				count := judge.GetIntegrityRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+				if count >= m.cfg.JudgeMaxRejections {
+					judge.AppendIntegrityHalt(m.cfg.ProgressFile, m.currentStoryID, count)
+					judge.ClearIntegrityRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+					m.judgeContent += fmt.Sprintf("\n── Judge: %s ── HALT: integrity gate rejected %d times [HUMAN REVIEW NEEDED] ──\n", m.currentStoryID, count)
+				}
+			} else {
+				judge.IncrementRejectionCount(m.cfg.ProjectDir, m.currentStoryID)
+			}
 			_ = events.Append(m.cfg.ProjectDir, events.Event{
 				Type:    events.EventJudgeResult,
 				StoryID: m.currentStoryID,
 				Summary: "Judge failed: " + msg.Result.Reason,
 				Errors:  msg.Result.CriteriaFailed,
-				Meta:    map[string]string{"verdict": "fail"},
+				Meta:    map[string]string{"verdict": "fail", "category": msg.Result.FailCategory},
 			})
 		}
 		// Either way, move to next iteration
