@@ -131,6 +131,8 @@ Push notifications include a `Click` header pointing to the tailnet URL when `--
 
 - DAG analysis finds story dependencies, independent stories run across N workers in isolated jj workspaces (`--workers 3` or `--workers auto`)
 - A separate Claude instance (Sonnet) reviews each story after implementation and can reject it (`--no-judge` to disable)
+- Before each LLM judge call, a mechanical test-integrity gate scans the diff for tautological assertions, empty test bodies, and fake tests across Go/TS/Python (`--no-test-integrity` to disable)
+- At the rejection threshold, a Devil's Advocate appellate reviewer evaluates whether the judge's objections are grounded in the acceptance criteria or pedantic — replaces the legacy silent auto-pass (`--no-devils-advocate` for the old behaviour)
 - Complex stories spawn competing implementations in parallel; the judge picks the best one
 - After all stories pass, lens reviewers (security, efficiency, DRY, error handling, testing) examine the full changeset
 - If Claude gets stuck in a loop, Ralph detects it, notifies you, and lets you inject a hint

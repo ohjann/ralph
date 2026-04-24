@@ -62,14 +62,29 @@ A separate Claude instance (Sonnet) reviews each story after implementation. Dis
 ```bash
 ralph --no-judge                    # disable judge
 ralph --judge-max-rejections 3      # allow up to 3 rejections
+ralph --no-test-integrity           # skip the mechanical test-integrity gate
+ralph --no-devils-advocate          # use legacy auto-pass instead of appellate review
 ```
 
 1. Claude implements a story and sets `passes: true`
-2. The judge reviews the diff against acceptance criteria
-3. If rejected, `passes` resets to `false` and feedback is written for the next iteration
-4. After N rejections (default: 2), the story is auto-passed with `[HUMAN REVIEW NEEDED]`
+2. **Pre-LLM build check** — story is failed immediately if the project's configured build command does not pass
+3. **Pre-LLM test-integrity gate** — mechanical scan of the diff (Go, TypeScript, Python) for tautological assertions (`assert True`, `expect(1).toBe(1)`), empty test bodies, test files with no source import, and assertion-value churn. Critical/High findings fail the story with feedback; Medium/Low findings are injected as signals for the LLM judge. Disable with `--no-test-integrity`
+4. The LLM judge reviews the diff against acceptance criteria
+5. If rejected, `passes` resets to `false` and feedback is written for the next iteration
+6. After N rejections (default: 2), the **Devil's Advocate** appellate reviewer fires. It reads the full rejection history (not just the latest) and decides whether the judge's objections are grounded in the acceptance criteria:
+   - **PASS** (override): judge was pedantic; clear counters, story passes
+   - **FAIL** (uphold): judge was correct; mark story `[HUMAN REVIEW NEEDED]`, move on
+   - **ERROR**: fall through to legacy auto-pass so the pipeline does not hang
 
-The judge is advisory -- if it crashes or times out, Ralph treats it as a pass and continues.
+The judge and appellate reviewer are advisory -- if either crashes or times out, Ralph treats the story as a pass and continues.
+
+### Mechanical vs judgment failures
+
+The test-integrity gate uses a **separate** rejection counter so mechanical cheating (fake tests) can never auto-pass or be overridden by the Devil's Advocate. After N integrity-gate rejections the story is halted with `[HUMAN REVIEW NEEDED]` directly — no appellate review.
+
+### Feedback history
+
+Every rejection is appended to `.ralph/judge-feedback-history-<storyID>.md` in addition to the single-shot `.ralph/judge-feedback-<storyID>.md`. The appellate reviewer reads the full history so it can detect goalpost-shifting (judge rejects for reason A, implementer fixes A, judge rejects for new reason B).
 
 ## Interactive Mode
 

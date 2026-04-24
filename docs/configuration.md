@@ -15,7 +15,9 @@ Options:
   --no-fusion                     Disable automatic fusion mode for complex stories
   --fusion-workers <n>            Competing implementations per complex story (default: 2)
   --no-judge                      Disable judge verification (enabled by default)
-  --judge-max-rejections <n>      Max rejections before auto-pass (default: 2)
+  --judge-max-rejections <n>      Max judge rejections before devil's-advocate review (default: 2)
+  --no-test-integrity             Disable the pre-LLM mechanical test-integrity gate
+  --no-devils-advocate            Disable appellate review; fall back to legacy silent auto-pass
   --no-quality-review             Disable final quality review (enabled by default)
   --quality-workers <n>           Parallel quality reviewers (default: 3)
   --quality-max-iterations <n>    Max review-fix cycles (default: 2)
