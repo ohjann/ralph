@@ -134,6 +134,9 @@ func collectDocs(root string) []DocFile {
 				if e.IsDir() || !isMarkdown(e.Name()) {
 					continue
 				}
+				if isAgentInternalDoc(e.Name()) {
+					continue
+				}
 				if _, dup := seen[e.Name()]; dup {
 					continue
 				}
@@ -164,6 +167,9 @@ func collectDocs(root string) []DocFile {
 				return nil
 			}
 			rel = filepath.ToSlash(rel)
+			if isAgentInternalDoc(rel) {
+				return nil
+			}
 			if _, dup := seen[rel]; dup {
 				return nil
 			}
@@ -202,6 +208,20 @@ func describeDoc(root, rel string) (DocFile, bool) {
 
 func isMarkdown(name string) bool {
 	return strings.ToLower(filepath.Ext(name)) == ".md"
+}
+
+// isAgentInternalDoc filters the Docs listing. These files are consumed by
+// Ralph/Claude (agent instructions, run progress, repo summaries) and
+// aren't user-facing documentation — listing them in the sidebar only
+// clutters the view. The raw-read endpoint still serves them so deep
+// links keep working.
+func isAgentInternalDoc(rel string) bool {
+	base := strings.ToLower(filepath.Base(rel))
+	switch base {
+	case "claude.md", "progress.md", "summary.md":
+		return true
+	}
+	return false
 }
 
 func isVendorDir(name string) bool {
