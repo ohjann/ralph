@@ -80,11 +80,15 @@ export function RepoMetaRoute() {
 
   if (!fp) return null;
   if (loading.value && !resp.value) {
-    return <div class="p-8 text-sm text-neutral-500">Loading repo meta…</div>;
+    return (
+      <div style={{ padding: 32, fontSize: 13, color: 'var(--fg-faint)' }}>
+        Loading repo meta…
+      </div>
+    );
   }
   if (error.value) {
     return (
-      <div class="p-8 text-sm text-red-400">
+      <div style={{ padding: 32, fontSize: 13, color: 'var(--err)' }}>
         Failed to load: {error.value}
       </div>
     );
@@ -98,121 +102,219 @@ export function RepoMetaRoute() {
   const totalByKind = kinds.reduce((s, [, n]) => s + n, 0);
 
   return (
-    <div class="p-6 max-w-3xl">
-      <header class="mb-6 flex items-start justify-between gap-4">
-        <div class="min-w-0">
-          <h1 class="text-xl font-semibold">{meta.name || meta.path}</h1>
-          <div class="text-xs text-neutral-500 font-mono break-all">
+    <div style={{ padding: 24, maxWidth: 960 }}>
+      <header
+        style={{
+          marginBottom: 24,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 600,
+              letterSpacing: '-0.015em',
+              margin: 0,
+              color: 'var(--fg)',
+            }}
+          >
+            {meta.name || meta.path}
+          </h1>
+          <div
+            class="mono"
+            style={{
+              fontSize: 11.5,
+              color: 'var(--fg-faint)',
+              marginTop: 4,
+              wordBreak: 'break-all',
+            }}
+          >
             {meta.path}
           </div>
         </div>
-        <button
-          type="button"
-          disabled={retroBusy.value}
-          onClick={() => void triggerRetro(fp)}
-          class="shrink-0 px-3 py-1.5 text-xs font-semibold rounded border border-neutral-700 bg-neutral-800 text-neutral-100 hover:bg-neutral-700 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {retroBusy.value ? 'Starting…' : 'Run retrospective'}
-        </button>
+        <RetroButton busy={retroBusy.value} onClick={() => void triggerRetro(fp)} />
       </header>
 
-      <section class="mb-6">
-        <h2 class="text-xs uppercase tracking-wider text-neutral-500 mb-2">
-          Identity
-        </h2>
-        <dl class="border border-neutral-800 rounded divide-y divide-neutral-800">
-          <Row label="Fingerprint" value={fp} mono />
-          <Row
-            label="First git SHA"
-            value={meta.git_first_sha ? meta.git_first_sha.slice(0, 16) : '—'}
-            mono
-          />
-          <Row label="First seen" value={fmtTime(meta.first_seen)} />
-          <Row label="Last seen" value={fmtTime(meta.last_seen)} />
-          <Row
-            label="Last run"
-            value={
-              meta.last_run_id ? meta.last_run_id.slice(0, 16) : '—'
-            }
-            mono
-          />
-          <Row label="Total invocations" value={String(meta.run_count)} mono />
-        </dl>
-      </section>
+      <SectionHeader>Identity</SectionHeader>
+      <dl
+        style={{
+          margin: '0 0 24px',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          background: 'var(--bg-elev)',
+          overflow: 'hidden',
+        }}
+      >
+        <Row label="Fingerprint" value={fp} mono first />
+        <Row
+          label="First git SHA"
+          value={meta.git_first_sha ? meta.git_first_sha.slice(0, 16) : '—'}
+          mono
+        />
+        <Row label="First seen" value={fmtTime(meta.first_seen)} />
+        <Row label="Last seen" value={fmtTime(meta.last_seen)} />
+        <Row
+          label="Last run"
+          value={meta.last_run_id ? meta.last_run_id.slice(0, 16) : '—'}
+          mono
+        />
+        <Row label="Total invocations" value={String(meta.run_count)} mono />
+      </dl>
 
-      <section class="mb-6">
-        <h2 class="text-xs uppercase tracking-wider text-neutral-500 mb-2">
-          Aggregate stats
-        </h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card label="Stored runs" value={String(aggCosts.runs)} />
+      <SectionHeader>Aggregate stats</SectionHeader>
+      <div
+        style={{
+          marginBottom: 24,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+          gap: 8,
+        }}
+      >
+        <Card label="Stored runs" value={String(aggCosts.runs)} />
+        <Card
+          label="Total cost"
+          value={`$${aggCosts.totalCost.toFixed(2)}`}
+          accent
+        />
+        <Card label="Duration" value={fmtDuration(aggCosts.durationMinutes)} />
+        <Card label="Iterations" value={String(aggCosts.totalIterations)} />
+        <Card label="Stories total" value={String(aggCosts.storiesTotal)} />
+        <Card label="Stories done" value={String(aggCosts.storiesCompleted)} />
+        <Card
+          label="Stories failed"
+          value={String(aggCosts.storiesFailed)}
+          tone={aggCosts.storiesFailed > 0 ? 'warn' : undefined}
+        />
+        {aggCosts.storiesTotal > 0 && (
           <Card
-            label="Total cost"
-            value={`$${aggCosts.totalCost.toFixed(2)}`}
+            label="Completion rate"
+            value={`${Math.round(
+              (aggCosts.storiesCompleted / aggCosts.storiesTotal) * 100,
+            )}%`}
           />
-          <Card
-            label="Duration"
-            value={fmtDuration(aggCosts.durationMinutes)}
-          />
-          <Card
-            label="Iterations"
-            value={String(aggCosts.totalIterations)}
-          />
-          <Card label="Stories total" value={String(aggCosts.storiesTotal)} />
-          <Card
-            label="Stories done"
-            value={String(aggCosts.storiesCompleted)}
-          />
-          <Card
-            label="Stories failed"
-            value={String(aggCosts.storiesFailed)}
-            tone={aggCosts.storiesFailed > 0 ? 'warn' : undefined}
-          />
-          {aggCosts.storiesTotal > 0 && (
-            <Card
-              label="Completion rate"
-              value={`${Math.round(
-                (aggCosts.storiesCompleted / aggCosts.storiesTotal) * 100,
-              )}%`}
-            />
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h2 class="text-xs uppercase tracking-wider text-neutral-500 mb-2">
-          Runs by kind
-        </h2>
-        {kinds.length === 0 ? (
-          <div class="text-sm text-neutral-500 italic">
-            No stored manifests.
-          </div>
-        ) : (
-          <table class="w-full text-xs border border-neutral-800 rounded">
-            <thead>
-              <tr class="text-left text-neutral-500 border-b border-neutral-800">
-                <th class="px-3 py-2 font-normal">Kind</th>
-                <th class="px-3 py-2 font-normal">Count</th>
-                <th class="px-3 py-2 font-normal">Share</th>
-              </tr>
-            </thead>
-            <tbody>
-              {kinds.map(([k, n]) => (
-                <tr key={k} class="border-t border-neutral-800">
-                  <td class="px-3 py-2 text-neutral-200 font-mono">{k}</td>
-                  <td class="px-3 py-2 text-neutral-200 font-mono">{n}</td>
-                  <td class="px-3 py-2 text-neutral-500 font-mono">
-                    {totalByKind > 0
-                      ? `${Math.round((n / totalByKind) * 100)}%`
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
-      </section>
+      </div>
+
+      <SectionHeader>Runs by kind</SectionHeader>
+      {kinds.length === 0 ? (
+        <div
+          style={{
+            fontSize: 13,
+            color: 'var(--fg-faint)',
+            fontStyle: 'italic',
+          }}
+        >
+          No stored manifests.
+        </div>
+      ) : (
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: 12,
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            overflow: 'hidden',
+            background: 'var(--bg-elev)',
+          }}
+        >
+          <thead>
+            <tr>
+              <TH>Kind</TH>
+              <TH>Count</TH>
+              <TH>Share</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {kinds.map(([k, n], i) => (
+              <tr
+                key={k}
+                style={{
+                  borderTop: i === 0 ? 'none' : '1px solid var(--border-soft)',
+                }}
+              >
+                <TD mono>{k}</TD>
+                <TD mono>{n}</TD>
+                <TD mono muted>
+                  {totalByKind > 0
+                    ? `${Math.round((n / totalByKind) * 100)}%`
+                    : '—'}
+                </TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
+  );
+}
+
+function SectionHeader({ children }: { children: preact.ComponentChildren }) {
+  return (
+    <h2
+      style={{
+        fontSize: 12.5,
+        fontWeight: 600,
+        margin: '0 0 10px',
+        color: 'var(--fg-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.07em',
+      }}
+    >
+      {children}
+    </h2>
+  );
+}
+
+function RetroButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      style={{
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 7,
+        padding: '7px 12px',
+        fontSize: 12.5,
+        fontWeight: 600,
+        borderRadius: 6,
+        border: '1px solid var(--accent-border)',
+        background: 'var(--accent-soft)',
+        color: 'var(--accent-ink)',
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+      }}
+    >
+      <RetroIcon />
+      {busy ? 'Starting…' : 'Run retrospective'}
+    </button>
+  );
+}
+
+function RetroIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <polyline points="3 4 3 10 9 10" />
+    </svg>
   );
 }
 
@@ -220,19 +322,41 @@ function Row({
   label,
   value,
   mono,
+  first,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  first?: boolean;
 }) {
   return (
-    <div class="flex items-center gap-4 px-3 py-2">
-      <dt class="text-xs text-neutral-400 w-40 shrink-0">{label}</dt>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 16,
+        padding: '8px 14px',
+        borderTop: first ? 'none' : '1px solid var(--border-soft)',
+      }}
+    >
+      <dt
+        style={{
+          fontSize: 11.5,
+          color: 'var(--fg-faint)',
+          width: 160,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </dt>
       <dd
-        class={
-          'text-xs text-neutral-200 break-all ' +
-          (mono ? 'font-mono' : '')
-        }
+        class={mono ? 'mono' : ''}
+        style={{
+          fontSize: mono ? 12 : 13,
+          color: 'var(--fg)',
+          margin: 0,
+          wordBreak: 'break-all',
+        }}
       >
         {value}
       </dd>
@@ -244,22 +368,96 @@ function Card({
   label,
   value,
   tone,
+  accent,
 }: {
   label: string;
   value: string;
   tone?: 'warn';
+  accent?: boolean;
 }) {
-  const valueClass =
+  const valueColor =
     tone === 'warn'
-      ? 'text-amber-300'
-      : 'text-neutral-100';
+      ? 'var(--warn)'
+      : accent
+        ? 'var(--accent-ink)'
+        : 'var(--fg)';
   return (
-    <div class="bg-neutral-900 border border-neutral-800 rounded px-3 py-2">
-      <div class="text-[10px] uppercase tracking-wider text-neutral-500">
+    <div
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        padding: '10px 12px',
+        background: 'var(--bg-elev)',
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          color: 'var(--fg-faint)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.07em',
+          fontWeight: 600,
+        }}
+      >
         {label}
       </div>
-      <div class={`font-mono text-sm ${valueClass}`}>{value}</div>
+      <div
+        class="mono"
+        style={{
+          fontSize: 18,
+          fontWeight: 500,
+          marginTop: 2,
+          color: valueColor,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {value}
+      </div>
     </div>
+  );
+}
+
+function TH({ children }: { children: preact.ComponentChildren }) {
+  return (
+    <th
+      style={{
+        textAlign: 'left',
+        fontWeight: 500,
+        padding: '8px 12px',
+        fontSize: 11,
+        color: 'var(--fg-faint)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        borderBottom: '1px solid var(--border-soft)',
+        background: 'var(--bg-sunken)',
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function TD({
+  children,
+  mono,
+  muted,
+}: {
+  children: preact.ComponentChildren;
+  mono?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <td
+      class={mono ? 'mono' : ''}
+      style={{
+        padding: '8px 12px',
+        fontSize: mono ? 12 : 13,
+        color: muted ? 'var(--fg-faint)' : 'var(--fg)',
+      }}
+    >
+      {children}
+    </td>
   );
 }
 

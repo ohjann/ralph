@@ -534,6 +534,11 @@ function PRDBlock({ fp, prd }: { fp: string; prd: PRDResponse }) {
       : tone === 'warn'
         ? 'var(--warn)'
         : 'var(--border)';
+  const label = unchanged
+    ? 'Matches the PRD at run start — no edits since.'
+    : changed
+      ? 'PRD has been edited since this run started.'
+      : 'No PRD snapshot was captured for this run.';
   return (
     <div
       style={{
@@ -551,18 +556,10 @@ function PRDBlock({ fp, prd }: { fp: string; prd: PRDResponse }) {
       <span class="mono" style={{ fontSize: 11, opacity: 0.8 }}>
         sha256:{short(prd.hash, 12)}
       </span>
-      <span style={{ flex: 1 }}>
-        {unchanged
-          ? 'PRD unchanged since this run.'
-          : changed
-            ? 'PRD has changed since this run.'
-            : 'No PRD snapshot recorded for this run.'}
-      </span>
-      {(unchanged || changed) && (
-        <a href={`/repos/${fp}/meta`} style={{ fontSize: 12 }}>
-          view current →
-        </a>
-      )}
+      <span style={{ flex: 1 }}>{label}</span>
+      <a href={`/repos/${fp}/prd`} style={{ fontSize: 12 }}>
+        open PRD editor →
+      </a>
     </div>
   );
 }
