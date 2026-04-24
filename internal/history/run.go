@@ -104,6 +104,11 @@ type RunOpts struct {
 	Kind         string
 	ClaudeModels map[string]string
 	Flags        []string
+	// DisplayName, when non-empty and valid, overrides the deterministic
+	// adjective-noun slug. Callers compute this via the cmd-layer LLM
+	// helper; OpenRun re-validates before accepting so invalid inputs fall
+	// back to the hashed default.
+	DisplayName string
 }
 
 // Run owns a live run directory and its manifest. Methods are
@@ -153,10 +158,15 @@ func OpenRun(projectDir, prdFile, version string, opts RunOpts) (*Run, error) {
 
 	branch, head := gitState(projectDir)
 
+	displayName := DisplayNameFor(id)
+	if nm := normaliseDisplayName(opts.DisplayName); nm != "" && IsValidDisplayName(nm) {
+		displayName = nm
+	}
+
 	m := Manifest{
 		SchemaVersion: ManifestSchemaVersion,
 		RunID:         id,
-		DisplayName:   DisplayNameFor(id),
+		DisplayName:   displayName,
 		Kind:          kind,
 		RepoFP:        fp,
 		RepoPath:      meta.Path,

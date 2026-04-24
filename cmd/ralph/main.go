@@ -147,7 +147,11 @@ func main() {
 	// once a daemon is attached, so it skips OpenRun here; runRetro and
 	// runMemoryConsolidate each open their own run before reaching this line.
 	if cfg.DaemonMode {
-		hr, runErr := history.OpenRun(cfg.ProjectDir, cfg.PRDFile, Version, history.RunOpts{Kind: history.KindDaemon})
+		dispName := deriveRunDisplayName(context.Background(), cfg.PRDFile, cfg.UtilityModel)
+		hr, runErr := history.OpenRun(cfg.ProjectDir, cfg.PRDFile, Version, history.RunOpts{
+			Kind:        history.KindDaemon,
+			DisplayName: dispName,
+		})
 		if runErr != nil {
 			debuglog.Log("history: open run failed: %v", runErr)
 		} else {

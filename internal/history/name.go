@@ -46,6 +46,33 @@ func normaliseDisplayName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// IsValidDisplayName checks that an LLM-suggested name fits the slug shape
+// we show in the UI: kebab-case, 2-40 chars, letters/digits/hyphens only,
+// no leading/trailing hyphen, no consecutive hyphens. Callers should pass
+// the already-normalised form (see normaliseDisplayName).
+func IsValidDisplayName(s string) bool {
+	if len(s) < 2 || len(s) > 40 {
+		return false
+	}
+	if s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	if strings.Contains(s, "--") {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Word lists curated for memorability + neutrality. No proper nouns, no
 // jargon, all single-syllable-dominant for quick recall. Alphabetical for
 // diff-ability; order is insignificant to the hash.
@@ -73,5 +100,4 @@ var nameNouns = []string{
 	"willow", "zephyr",
 }
 
-var _ = namePoolSize    // silence unused-export lint in packages without tests
-var _ = normaliseDisplayName
+var _ = namePoolSize // silence unused-export lint in packages without tests
