@@ -271,7 +271,12 @@ export function Sidebar() {
 
         <Section label="system">
           <NavRow href="/settings" label="Settings" icon="settings" />
-          <NavRow href="/docs" label="Docs" icon="link" />
+          <NavRow
+            href="/docs"
+            label="Docs"
+            icon="link"
+            matches={(p) => p === '/docs' || /^\/repos\/[^/]+\/docs$/.test(p)}
+          />
         </Section>
       </nav>
       <Footer />
@@ -463,13 +468,18 @@ function NavRow({
   href,
   label,
   icon,
+  matches,
 }: {
   href: string;
   label: string;
   icon?: NavIcon;
+  // Optional predicate for when the row should show as active on paths
+  // other than `href` itself — e.g. Docs redirects to /repos/:fp/docs, so
+  // the row should stay highlighted there too.
+  matches?: (path: string) => boolean;
 }) {
   const loc = useLocation();
-  const active = loc.path === href;
+  const active = matches ? matches(loc.path) : loc.path === href;
   return (
     <a
       href={href}
