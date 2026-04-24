@@ -314,7 +314,15 @@ func Parse(args []string) (*Config, error) {
 	}
 	cfg.ProjectDir = earlyAbs
 
-	// Load config.toml (priority: CLI flags > config.toml > defaults).
+	// Priority: CLI flags > repo config.toml > global settings > defaults.
+	// Layer global first, then let the repo-local file overwrite anything it
+	// sets. Both loads are best-effort — a missing or broken file must never
+	// stop a run, only fall through to lower-priority layers.
+	if gc, err := LoadGlobal(); err != nil {
+		debuglog.Log("global settings: error loading: %v", err)
+	} else if gc != nil {
+		gc.applyTo(cfg)
+	}
 	tc, tcErr := loadTomlConfig(cfg.ProjectDir)
 	if tcErr != nil {
 		debuglog.Log("config.toml: error loading: %v", tcErr)
@@ -793,6 +801,11 @@ func NewForRepo(repoPath string) (*Config, error) {
 		FusionWorkers:      2,
 		IdleTimeout:        5 * time.Minute,
 		Memory:             DefaultMemoryConfig(),
+	}
+	if gc, err := LoadGlobal(); err != nil {
+		debuglog.Log("global settings: NewForRepo error loading: %v", err)
+	} else if gc != nil {
+		gc.applyTo(cfg)
 	}
 	tc, tcErr := loadTomlConfig(cfg.ProjectDir)
 	if tcErr != nil {

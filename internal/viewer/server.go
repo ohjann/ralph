@@ -71,6 +71,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/repos/{fp}/docs", s.handleDocsList)
 	mux.HandleFunc("GET /api/repos/{fp}/docs/raw", s.handleDocsRaw)
 	mux.HandleFunc("GET /api/stats/global", s.handleGlobalStats)
+	mux.HandleFunc("GET /api/settings/global", s.handleGlobalSettingsGet)
+	mux.HandleFunc("POST /api/settings/global", s.handleGlobalSettingsPost)
 	mux.HandleFunc("/", s.handleRoot)
 	return AuthMiddleware(s.Token, mux)
 }

@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { fieldOverrides } from '../../lib/overrides';
 
 // Shared form primitives for the Settings editor sections. Each component
 // renders a label + control + optional inline error. Sections compose these
@@ -32,17 +33,44 @@ export function FieldLabel({
   name: string;
   help?: string;
 }) {
+  const overrides = fieldOverrides.value[name];
+  const overrideCount = overrides?.length ?? 0;
+  const overrideTitle =
+    overrideCount > 0
+      ? overrides!.map((o) => o.name || o.fp).join(', ')
+      : '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <code
-        class="mono"
-        style={{
-          fontSize: 12,
-          color: 'var(--fg-muted)',
-        }}
-      >
-        {name}
-      </code>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <code
+          class="mono"
+          style={{
+            fontSize: 12,
+            color: 'var(--fg-muted)',
+          }}
+        >
+          {name}
+        </code>
+        {overrideCount > 0 && (
+          <span
+            title={`Overridden in: ${overrideTitle}`}
+            style={{
+              fontSize: 9.5,
+              padding: '1px 6px',
+              borderRadius: 99,
+              border: '1px solid var(--warn)',
+              background: 'var(--warn-soft)',
+              color: 'var(--warn)',
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              lineHeight: 1.3,
+            }}
+          >
+            {overrideCount} repo{overrideCount === 1 ? '' : 's'} override
+          </span>
+        )}
+      </div>
       {help && (
         <span style={{ fontSize: 10.5, color: 'var(--fg-faint)' }}>
           {help}

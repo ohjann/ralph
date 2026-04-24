@@ -5,6 +5,7 @@ import { Home } from './routes/Home';
 import { RunRoute } from './routes/RunRoute';
 import { IterRoute } from './routes/IterRoute';
 import { SettingsRoute } from './routes/SettingsRoute';
+import { GlobalSettingsRoute } from './routes/GlobalSettingsRoute';
 import { RepoMetaRoute } from './routes/RepoMetaRoute';
 import { PRDEditorRoute } from './routes/PRDEditorRoute';
 import { DocsRoute } from './routes/DocsRoute';
@@ -114,6 +115,7 @@ export function App() {
             <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
               <Router>
                 <Route path="/" component={Home} />
+                <Route path="/settings" component={GlobalSettingsRoute} />
                 <Route
                   path="/repos/:fp/runs/:runId/iter/:story/:iter"
                   component={IterRoute}

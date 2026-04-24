@@ -585,18 +585,6 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
               Meta
             </a>
             <a
-              href={`/repos/${repo.fp}/settings`}
-              style={{
-                fontSize: 10,
-                color: 'var(--sidebar-fg-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                textDecoration: 'none',
-              }}
-            >
-              Settings
-            </a>
-            <a
               href={`/repos/${repo.fp}/prd`}
               style={{
                 fontSize: 10,
@@ -743,18 +731,66 @@ function Footer() {
   return (
     <div
       style={{
-        padding: '12px 8px 14px',
         borderTop: '1px solid var(--sidebar-border)',
         marginTop: 4,
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 8,
+        flexDirection: 'column',
       }}
     >
-      <PalettePicker />
-      <ThemeIcons />
+      <SettingsLink />
+      <div
+        style={{
+          padding: '10px 8px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          borderTop: '1px solid var(--sidebar-border)',
+        }}
+      >
+        <PalettePicker />
+        <ThemeIcons />
+      </div>
     </div>
+  );
+}
+
+function SettingsLink() {
+  const loc = useLocation();
+  const active = loc.path === '/settings';
+  return (
+    <a
+      href="/settings"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '9px 14px',
+        fontSize: 12.5,
+        color: active ? 'var(--fg)' : 'var(--sidebar-fg-muted)',
+        textDecoration: 'none',
+        background: active ? 'var(--accent-soft)' : 'transparent',
+        borderLeft: active
+          ? '2px solid var(--accent)'
+          : '2px solid transparent',
+      }}
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+      Settings
+    </a>
   );
 }
 
