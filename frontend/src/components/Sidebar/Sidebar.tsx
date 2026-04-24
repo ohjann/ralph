@@ -227,7 +227,7 @@ export function Sidebar() {
         }}
       >
         <Section label="views">
-          <NavRow href="/" label="Home" />
+          <NavRow href="/" label="Home" icon="home" />
         </Section>
 
         {liveRepos.value.length > 0 && (
@@ -267,6 +267,11 @@ export function Sidebar() {
                 : `no repos match "${filterText.value}"`}
             </div>
           )}
+        </Section>
+
+        <Section label="system">
+          <NavRow href="/settings" label="Settings" icon="settings" />
+          <NavRow href="/docs" label="Docs" icon="link" />
         </Section>
       </nav>
       <Footer />
@@ -452,7 +457,17 @@ function Section({
   );
 }
 
-function NavRow({ href, label }: { href: string; label: string }) {
+type NavIcon = 'home' | 'settings' | 'link';
+
+function NavRow({
+  href,
+  label,
+  icon,
+}: {
+  href: string;
+  label: string;
+  icon?: NavIcon;
+}) {
   const loc = useLocation();
   const active = loc.path === href;
   return (
@@ -473,9 +488,49 @@ function NavRow({ href, label }: { href: string; label: string }) {
         background: active ? 'var(--sidebar-active)' : 'transparent',
       }}
     >
-      {label}
+      {icon && <NavIconGlyph name={icon} />}
+      <span style={{ flex: 1 }}>{label}</span>
     </a>
   );
+}
+
+// Minimal 16px line-icon set mirroring the design handoff
+// (design_handoff_ralph_viewer/rv/icons.jsx). currentColor lets the icon
+// pick up the row's text color without extra plumbing.
+function NavIconGlyph({ name }: { name: NavIcon }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': 1.6,
+    'stroke-linecap': 'round' as const,
+    'stroke-linejoin': 'round' as const,
+    style: { color: 'var(--sidebar-fg-muted)', flexShrink: 0 },
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'home':
+      return (
+        <svg {...common}>
+          <path d="M2.5 8 8 3l5.5 5M4 7v6h8V7" />
+        </svg>
+      );
+    case 'settings':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="2" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M3.2 12.8l1.4-1.4M11.4 4.6l1.4-1.4" />
+        </svg>
+      );
+    case 'link':
+      return (
+        <svg {...common}>
+          <path d="M7 9a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M9 7a3 3 0 0 0-4 0l-2 2a3 3 0 0 0 4 4l1-1" />
+        </svg>
+      );
+  }
 }
 
 function RepoRow({ repo }: { repo: RepoSummary }) {
@@ -731,66 +786,18 @@ function Footer() {
   return (
     <div
       style={{
+        padding: '12px 8px 14px',
         borderTop: '1px solid var(--sidebar-border)',
         marginTop: 4,
         display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <SettingsLink />
-      <div
-        style={{
-          padding: '10px 8px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          borderTop: '1px solid var(--sidebar-border)',
-        }}
-      >
-        <PalettePicker />
-        <ThemeIcons />
-      </div>
-    </div>
-  );
-}
-
-function SettingsLink() {
-  const loc = useLocation();
-  const active = loc.path === '/settings';
-  return (
-    <a
-      href="/settings"
-      style={{
-        display: 'flex',
         alignItems: 'center',
+        justifyContent: 'space-between',
         gap: 8,
-        padding: '9px 14px',
-        fontSize: 12.5,
-        color: active ? 'var(--fg)' : 'var(--sidebar-fg-muted)',
-        textDecoration: 'none',
-        background: active ? 'var(--accent-soft)' : 'transparent',
-        borderLeft: active
-          ? '2px solid var(--accent)'
-          : '2px solid transparent',
       }}
     >
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-      Settings
-    </a>
+      <PalettePicker />
+      <ThemeIcons />
+    </div>
   );
 }
 

@@ -232,6 +232,7 @@ export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <CopyButton text={m.run_id} label="copy run-id" />
+            <OpenInEditorButton path={m.repo_path} />
           </div>
         </div>
 
@@ -248,16 +249,17 @@ export function RunSummary({ fp, runId }: { fp: string; runId: string }) {
             borderRadius: 6,
           }}
         >
-          <MetaItem label="branch" value={m.git_branch || '—'} mono />
+          <MetaItem icon="branch" label="branch" value={m.git_branch || '—'} mono />
           <MetaItem
+            icon="code"
             label="HEAD"
             value={m.git_head_sha ? short(m.git_head_sha, 10) : '—'}
             mono
             title={m.git_head_sha}
           />
-          <MetaItem label="started" value={fmtTime(m.start_time)} />
-          <MetaItem label="ended" value={fmtTime(m.end_time)} />
-          <MetaItem label="run-id" value={short(m.run_id, 10)} mono title={m.run_id} />
+          <MetaItem icon="clock" label="started" value={fmtTime(m.start_time)} />
+          <MetaItem icon="clock" label="ended" value={fmtTime(m.end_time)} />
+          <MetaItem icon="link" label="run-id" value={short(m.run_id, 10)} mono title={m.run_id} />
           <MetaItem label="ralph" value={m.ralph_version} mono />
         </div>
 
@@ -410,12 +412,16 @@ function StatusPill({ status }: { status: string }) {
   return <span class="pill err">{status}</span>;
 }
 
+type MetaIcon = 'branch' | 'code' | 'clock' | 'link';
+
 function MetaItem({
+  icon,
   label,
   value,
   mono,
   title,
 }: {
+  icon?: MetaIcon;
   label: string;
   value: string;
   mono?: boolean;
@@ -426,6 +432,7 @@ function MetaItem({
       style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}
       title={title}
     >
+      {icon && <MetaItemIcon name={icon} />}
       <span
         style={{
           fontSize: 11,
@@ -446,6 +453,79 @@ function MetaItem({
         {value}
       </span>
     </div>
+  );
+}
+
+// 12px line icons mirroring the design handoff's icon set
+// (design_handoff_ralph_viewer/rv/icons.jsx). currentColor + inherited
+// font-size keep the glyph aligned with the muted label color around it.
+function MetaItemIcon({ name }: { name: MetaIcon }) {
+  const props = {
+    width: 12,
+    height: 12,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': 1.6,
+    'stroke-linecap': 'round' as const,
+    'stroke-linejoin': 'round' as const,
+    style: { color: 'var(--fg-faint)', flexShrink: 0 },
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'branch':
+      return (
+        <svg {...props}>
+          <circle cx="4" cy="3.5" r="1.3" />
+          <circle cx="4" cy="12.5" r="1.3" />
+          <circle cx="12" cy="6.5" r="1.3" />
+          <path d="M4 5v6M4 9c0-2 2-2.5 4-2.5h2.7" />
+        </svg>
+      );
+    case 'code':
+      return (
+        <svg {...props}>
+          <path d="m5 4-3 4 3 4M11 4l3 4-3 4M9 3 7 13" />
+        </svg>
+      );
+    case 'clock':
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="5.5" />
+          <path d="M8 5v3l2 1" />
+        </svg>
+      );
+    case 'link':
+      return (
+        <svg {...props}>
+          <path d="M7 9a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M9 7a3 3 0 0 0-4 0l-2 2a3 3 0 0 0 4 4l1-1" />
+        </svg>
+      );
+  }
+}
+
+function OpenInEditorButton({ path }: { path: string }) {
+  // macOS/Linux: file:// opens in the system file manager; for a git repo
+  // most users have their editor wired to the vscode:// or cursor:// scheme.
+  // Starting with vscode:// since it's the most common; users can copy the
+  // path via the other button if their editor differs.
+  const href = `vscode://file/${path}`;
+  return (
+    <a
+      href={href}
+      style={{
+        border: '1px solid var(--border)',
+        background: 'var(--bg-elev)',
+        color: 'var(--fg-muted)',
+        borderRadius: 6,
+        padding: '5px 10px',
+        fontSize: 12,
+        textDecoration: 'none',
+      }}
+      title={`Open ${path} in your editor`}
+    >
+      open in editor
+    </a>
   );
 }
 

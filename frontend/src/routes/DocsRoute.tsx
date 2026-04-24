@@ -2,7 +2,7 @@ import { useEffect } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import { useRoute, useLocation } from 'preact-iso';
 import { marked } from 'marked';
-import { apiGet, ApiError } from '../lib/api';
+import { apiGet, ApiError, type RepoSummary } from '../lib/api';
 
 interface DocFile {
   path: string;
@@ -73,12 +73,22 @@ export function DocsRoute() {
   const fp = params.fp;
 
   useEffect(() => {
-    if (fp) void loadList(fp);
+    if (fp) {
+      void loadList(fp);
+      return;
+    }
+    // Top-level /docs entry: redirect to the most-recently-seen repo's
+    // docs. Keeps the sidebar "Docs" link useful without forcing users to
+    // pick a repo first. If nothing is known yet, fall through to the
+    // empty state below.
+    void apiGet<RepoSummary[]>('/api/repos').then((list) => {
+      if (list.length > 0) {
+        loc.route(`/repos/${list[0].fp}/docs`, true);
+      }
+    });
   }, [fp]);
 
   useEffect(() => {
-    // Auto-select README.md or the first entry when the list lands and the
-    // user hasn't already picked something else.
     if (!fp) return;
     if (selectedPath.value) return;
     const list = files.value;
@@ -88,7 +98,13 @@ export function DocsRoute() {
     void loadContent(fp, pick.path);
   }, [fp, files.value.length]);
 
-  if (!fp) return null;
+  if (!fp) {
+    return (
+      <div style={{ padding: 32, fontSize: 13, color: 'var(--fg-faint)' }}>
+        Looking for a repo with docs…
+      </div>
+    );
+  }
 
   const list = files.value;
   const sel = selectedPath.value;

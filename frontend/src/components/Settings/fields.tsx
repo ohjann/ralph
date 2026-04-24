@@ -55,19 +55,13 @@ export function FieldLabel({
           <span
             title={`Overridden in: ${overrideTitle}`}
             style={{
-              fontSize: 9.5,
-              padding: '1px 6px',
-              borderRadius: 99,
-              border: '1px solid var(--warn)',
-              background: 'var(--warn-soft)',
+              fontSize: 10,
               color: 'var(--warn)',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              lineHeight: 1.3,
+              fontFamily: 'var(--font-mono)',
+              opacity: 0.85,
             }}
           >
-            {overrideCount} repo{overrideCount === 1 ? '' : 's'} override
+            · ↯ {overrideCount}
           </span>
         )}
       </div>

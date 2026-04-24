@@ -150,15 +150,17 @@ export function RepoMetaRoute() {
           overflow: 'hidden',
         }}
       >
-        <Row label="Fingerprint" value={fp} mono first />
+        <Row icon="link" label="Fingerprint" value={fp} mono first />
         <Row
+          icon="code"
           label="First git SHA"
           value={meta.git_first_sha ? meta.git_first_sha.slice(0, 16) : '—'}
           mono
         />
-        <Row label="First seen" value={fmtTime(meta.first_seen)} />
-        <Row label="Last seen" value={fmtTime(meta.last_seen)} />
+        <Row icon="clock" label="First seen" value={fmtTime(meta.first_seen)} />
+        <Row icon="clock" label="Last seen" value={fmtTime(meta.last_seen)} />
         <Row
+          icon="link"
           label="Last run"
           value={meta.last_run_id ? meta.last_run_id.slice(0, 16) : '—'}
           mono
@@ -318,12 +320,16 @@ function RetroIcon() {
   );
 }
 
+type RowIcon = 'link' | 'code' | 'clock';
+
 function Row({
+  icon,
   label,
   value,
   mono,
   first,
 }: {
+  icon?: RowIcon;
   label: string;
   value: string;
   mono?: boolean;
@@ -334,7 +340,7 @@ function Row({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        gap: 12,
         padding: '8px 14px',
         borderTop: first ? 'none' : '1px solid var(--border-soft)',
       }}
@@ -345,9 +351,13 @@ function Row({
           color: 'var(--fg-faint)',
           width: 160,
           flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}
       >
-        {label}
+        {icon && <RowIconGlyph name={icon} />}
+        <span>{label}</span>
       </dt>
       <dd
         class={mono ? 'mono' : ''}
@@ -362,6 +372,42 @@ function Row({
       </dd>
     </div>
   );
+}
+
+function RowIconGlyph({ name }: { name: RowIcon }) {
+  const props = {
+    width: 12,
+    height: 12,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': 1.6,
+    'stroke-linecap': 'round' as const,
+    'stroke-linejoin': 'round' as const,
+    style: { color: 'var(--fg-faint)', flexShrink: 0 },
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'link':
+      return (
+        <svg {...props}>
+          <path d="M7 9a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M9 7a3 3 0 0 0-4 0l-2 2a3 3 0 0 0 4 4l1-1" />
+        </svg>
+      );
+    case 'code':
+      return (
+        <svg {...props}>
+          <path d="m5 4-3 4 3 4M11 4l3 4-3 4M9 3 7 13" />
+        </svg>
+      );
+    case 'clock':
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="5.5" />
+          <path d="M8 5v3l2 1" />
+        </svg>
+      );
+  }
 }
 
 function Card({
